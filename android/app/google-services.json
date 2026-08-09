@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "76938604893",
+    "project_id": "nak-tumpang",
+    "storage_bucket": "nak-tumpang.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:76938604893:android:061131af3d41edac4378b4",
+        "android_client_info": {
+          "package_name": "com.example.nak_tumpang"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD89AZo-l51YTLLyKZZq7HRLn5gU4EUScY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
