@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import '../components/home_panel.dart';
+import 'package:nak_tumpang/core/components/app_sidebar.dart';
+import 'package:nak_tumpang/features/home/UI/components/home_panel.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -7,13 +8,18 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      endDrawer: const AppSidebar(
+        userName: 'John Cena',
+        userRole: 'Driver',
+        selectedIndex: -1,
+        // No callbacks needed here anymore!
+      ),
       body: Stack(
         children: [
-          // Map Background Placeholder
           Container(
             width: double.infinity,
             height: double.infinity,
-            color: Colors.blueGrey[50], // Slightly lighter dummy map bg
+            color: Colors.blueGrey[50],
             child: const Center(
               child: Text(
                 'Map View Placeholder',
@@ -21,23 +27,11 @@ class HomeScreen extends StatelessWidget {
               ),
             ),
           ),
-
-          // Floating Menu Button
-          Positioned(
+          const Positioned(
             top: 50,
             right: 16,
-            child: Material(
-              elevation: 4,
-              shape: const CircleBorder(),
-              color: Colors.white,
-              child: IconButton(
-                icon: const Icon(Icons.menu, color: Colors.black87),
-                onPressed: () {},
-              ),
-            ),
+            child: HamburgerButton(),
           ),
-
-          // Sliding Panel
           const HomePanel(),
         ],
       ),
