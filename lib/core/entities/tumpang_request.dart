@@ -1,8 +1,6 @@
-// lib/core/entities/tumpang_request.dart
-
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:nak_tumpang/core/entities/location_node.dart';
 
-/// A generic wrapper for fields like 'fee' and 'pickup_time' that have a 'value'.
 class NegotiatedField<T> {
   final T value;
   final String requestedBy;
@@ -14,14 +12,6 @@ class NegotiatedField<T> {
     required this.isAccepted,
   });
 
-  factory NegotiatedField.fromJson(Map<String, dynamic> json) {
-    return NegotiatedField<T>(
-      value: json['value'] as T,
-      requestedBy: json['requested_by'] ?? '',
-      isAccepted: json['is_accepted'] ?? false,
-    );
-  }
-
   Map<String, dynamic> toJson() {
     return {
       'value': value,
@@ -31,8 +21,6 @@ class NegotiatedField<T> {
   }
 }
 
-/// A specific wrapper for locations, as lat/lng/name are flattened
-/// alongside 'is_accepted' and 'requested_by' in Firestore.
 class NegotiatedLocation extends LocationNode {
   final String requestedBy;
   final bool isAccepted;
@@ -64,7 +52,6 @@ class NegotiatedLocation extends LocationNode {
   }
 }
 
-/// The main Request document.
 class TumpangRequest {
   final String id;
   final String passengerId;
@@ -91,22 +78,42 @@ class TumpangRequest {
   });
 
   factory TumpangRequest.fromJson(String documentId, Map<String, dynamic> json) {
+
+    // HELPER: Safely convert Timestamps to Strings so the UI doesn't crash
+    String parseStringOrTimestamp(dynamic val) {
+      if (val is Timestamp) {
+        // Converts to "YYYY-MM-DD HH:MM" format
+        return val.toDate().toString().substring(0, 16);
+      }
+      return val?.toString() ?? '';
+    }
+
     return TumpangRequest(
       id: documentId,
       passengerId: json['passenger_id'] ?? '',
       driverId: json['driver_id'] ?? '',
       status: json['status'] ?? 'negotiating',
 
-      // Parse nested objects
       pickupLocation: NegotiatedLocation.fromJson(json['pickup_location'] ?? {}),
       dropoffLocation: NegotiatedLocation.fromJson(json['dropoff_location'] ?? {}),
 
-      // The API JSON showed dates and times as Strings
-      pickupTime: NegotiatedField<String>.fromJson(json['pickup_time'] ?? {}),
-      subscriptionStartDate: NegotiatedField<String>.fromJson(json['subscription_start_date'] ?? {}),
-      subscriptionEndDate: NegotiatedField<String>.fromJson(json['subscription_end_date'] ?? {}),
+      // Use the safe parser for date/time fields
+      pickupTime: NegotiatedField<String>(
+        value: parseStringOrTimestamp(json['pickup_time']?['value']),
+        requestedBy: json['pickup_time']?['requested_by'] ?? '',
+        isAccepted: json['pickup_time']?['is_accepted'] ?? false,
+      ),
+      subscriptionStartDate: NegotiatedField<String>(
+        value: parseStringOrTimestamp(json['subscription_start_date']?['value']),
+        requestedBy: json['subscription_start_date']?['requested_by'] ?? '',
+        isAccepted: json['subscription_start_date']?['is_accepted'] ?? false,
+      ),
+      subscriptionEndDate: NegotiatedField<String>(
+        value: parseStringOrTimestamp(json['subscription_end_date']?['value']),
+        requestedBy: json['subscription_end_date']?['requested_by'] ?? '',
+        isAccepted: json['subscription_end_date']?['is_accepted'] ?? false,
+      ),
 
-      // Fee needs to be converted to double safely
       fee: NegotiatedField<double>(
         value: (json['fee']?['value'] ?? 0.0).toDouble(),
         requestedBy: json['fee']?['requested_by'] ?? '',

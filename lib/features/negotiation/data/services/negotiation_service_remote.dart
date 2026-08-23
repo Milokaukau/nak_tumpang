@@ -4,11 +4,22 @@ import 'package:nak_tumpang/core/entities/tumpang_request.dart';
 class NegotiationServiceRemote {
   final FirebaseFirestore _firestore;
 
-  // Dependency injection for testability, defaults to the standard instance
   NegotiationServiceRemote({FirebaseFirestore? firestore})
       : _firestore = firestore ?? FirebaseFirestore.instance;
 
   final String _collectionPath = 'tumpang_request';
+
+  /// Streams real-time updates for a single request document
+  Stream<TumpangRequest?> streamSingleRequest(String requestId) {
+    return _firestore
+        .collection(_collectionPath)
+        .doc(requestId)
+        .snapshots()
+        .map((doc) {
+      if (!doc.exists || doc.data() == null) return null;
+      return TumpangRequest.fromJson(doc.id, doc.data()!);
+    });
+  }
 
   /// Streams real-time updates for a Driver's pending requests
   Stream<List<TumpangRequest>> streamRequestsForDriver(String driverId) {

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/features/profile/UI/screens/profile_screen.dart';
 import 'package:nak_tumpang/features/auth/UI/screens/login_screen.dart';
+import 'package:nak_tumpang/features/negotiation/UI/screens/request_list_screen.dart';
 
 class HamburgerButton extends StatelessWidget {
   const HamburgerButton({super.key});
@@ -107,7 +108,7 @@ class AppSidebar extends StatelessWidget {
 
     // Handle Sign Out Logic completely separately
     if (index == 4) {
-      // 1. TODO: Call your auth provider to clear session here
+      // 1. Call your auth provider to clear session here
       // e.g., await FirebaseAuth.instance.signOut();
 
       // 2. Route to Login and DESTROY the navigation history
@@ -125,13 +126,16 @@ class AppSidebar extends StatelessWidget {
         nextScreen = const ProfileScreen();
         break;
       case 1:
-        nextScreen = const ProfileScreen(); // Replace with actual screen
+      // Updates routing to the "My Tumpangs" / Subscriptions List
+      // Replace MyTumpangsScreen() with whatever you named the file for Figma Page 11
+        nextScreen = const Scaffold(body: Center(child: Text('My Tumpangs Screen'))); // const MyTumpangsScreen();
         break;
       case 2:
-        nextScreen = const ProfileScreen(); // Replace with actual screen
+      // Updates routing to the Request List we built
+        nextScreen = const RequestListScreen();
         break;
       case 3:
-        nextScreen = const ProfileScreen(); // Replace with actual screen
+        nextScreen = const ProfileScreen(); // Keep as placeholder for now
         break;
       default:
         return;

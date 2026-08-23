@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart'; // 1. ADD THIS IMPORT
 import 'firebase_options.dart';
 import 'package:nak_tumpang/core/theme/app_theme.dart';
 import 'package:nak_tumpang/features/home/UI/screens/home_screen.dart';
@@ -11,7 +12,12 @@ void main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  runApp(const TumpangApp());
+  // 2. WRAP YOUR APP IN PROVIDERSCOPE
+  runApp(
+    const ProviderScope(
+      child: TumpangApp(),
+    ),
+  );
 }
 
 class TumpangApp extends StatelessWidget {
@@ -21,7 +27,7 @@ class TumpangApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Tumpang',
-      theme: AppTheme.lightTheme, // Implements Poppins and Primary Yellow
+      theme: AppTheme.lightTheme,
       debugShowCheckedModeBanner: false,
       home: const HomeScreen(),
     );
