@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart'; // 1. ADD THIS IMPORT
-import 'firebase_options.dart';
+import 'package:provider/provider.dart';
+import 'package:nak_tumpang/firebase_options.dart';
 import 'package:nak_tumpang/core/theme/app_theme.dart';
+import 'package:nak_tumpang/core/app_providers.dart';
 import 'package:nak_tumpang/features/home/UI/screens/home_screen.dart';
 
 void main() async {
@@ -12,10 +13,10 @@ void main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  // 2. WRAP YOUR APP IN PROVIDERSCOPE
   runApp(
-    const ProviderScope(
-      child: TumpangApp(),
+    MultiProvider(
+      providers: AppProviders.providers,
+      child: const TumpangApp(),
     ),
   );
 }
