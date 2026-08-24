@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'firebase_options.dart';
+import 'package:provider/provider.dart';
+import 'package:nak_tumpang/firebase_options.dart';
 import 'package:nak_tumpang/core/theme/app_theme.dart';
+import 'package:nak_tumpang/core/app_providers.dart';
 import 'package:nak_tumpang/features/home/UI/screens/home_screen.dart';
-
-// import 'package:nak_tumpang/seed_data.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -13,11 +13,12 @@ void main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  // Call the seed function here temporarily
-  // print('⏳ Running seed script...');
-  // await populateFirestore();
-
-  runApp(const TumpangApp());
+  runApp(
+    MultiProvider(
+      providers: AppProviders.providers,
+      child: const TumpangApp(),
+    ),
+  );
 }
 
 class TumpangApp extends StatelessWidget {

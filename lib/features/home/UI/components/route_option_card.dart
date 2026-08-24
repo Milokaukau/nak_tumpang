@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import '../../../../core/theme/app_colors.dart';
-import '../../../../core/components/base_button.dart';
+import 'package:nak_tumpang/core/theme/app_colors.dart';
+import 'package:nak_tumpang/core/components/base_button.dart';
 
 class RouteOptionCard extends StatelessWidget {
   const RouteOptionCard({super.key});
