@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:nak_tumpang/core/components/base_button.dart';
 
 class ProposeValueBottomSheet extends StatefulWidget {
   final String title;
@@ -33,7 +34,6 @@ class _ProposeValueBottomSheetState extends State<ProposeValueBottomSheet> {
 
   @override
   Widget build(BuildContext context) {
-    // Adds padding for the keyboard
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
 
     return Padding(
@@ -58,27 +58,21 @@ class _ProposeValueBottomSheetState extends State<ProposeValueBottomSheet> {
               border: const OutlineInputBorder(),
               labelText: widget.title,
             ),
-            // Use number keyboard if it's a fee
             keyboardType: widget.title.toLowerCase().contains('fee')
                 ? const TextInputType.numberWithOptions(decimal: true)
                 : TextInputType.text,
           ),
           const SizedBox(height: 20),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFFB300), // Primary Yellow
-                foregroundColor: Colors.black,
-              ),
-              onPressed: () {
-                if (_controller.text.trim().isNotEmpty) {
-                  widget.onSubmit(_controller.text.trim());
-                  Navigator.pop(context); // Close the bottom sheet
-                }
-              },
-              child: const Text('Submit Proposal'),
-            ),
+
+          // Replaced with reusable BaseButton
+          BaseButton(
+            text: 'Submit Proposal',
+            onPressed: () {
+              if (_controller.text.trim().isNotEmpty) {
+                widget.onSubmit(_controller.text.trim());
+                Navigator.pop(context);
+              }
+            },
           ),
         ],
       ),
