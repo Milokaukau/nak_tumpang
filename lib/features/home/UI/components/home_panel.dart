@@ -2,16 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/components/base_filter_options.dart';
-import 'package:nak_tumpang/features/home/UI/components/route_option_card.dart';
+import 'package:nak_tumpang/features/home/UI/components/direct_route_option_card.dart';
 import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
 
+import 'mixed_route_option_card.dart';
+
 class HomePanel extends StatelessWidget {
-  // Constructor is now completely empty
   const HomePanel({super.key});
 
   @override
   Widget build(BuildContext context) {
-    // The panel watches the ViewModel internally
     final viewModel = context.watch<HomeViewModel>();
 
     return DraggableScrollableSheet(
@@ -67,15 +67,52 @@ class HomePanel extends StatelessWidget {
               ),
               const SizedBox(height: 24),
 
-              if (viewModel.isLoading)
-                const Center(child: CircularProgressIndicator(color: AppColors.primaryYellow))
-              else ...[
-                const RouteOptionCard(),
+              // --- CONDITIONAL UI RENDERING ---
+              if (viewModel.selectedFilter == 'Direct') ...[
+                // 1. Direct
+                if (viewModel.isLoading)
+                  const Center(child: CircularProgressIndicator(color: AppColors.primaryYellow))
+                else if (viewModel.matchedDrivers.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 32),
+                    child: Center(
+                      child: Text(
+                        'No direct drivers found for this route.\nTry selecting "Mixed".',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: AppColors.greyText, height: 1.5),
+                      ),
+                    ),
+                  )
+                else
+                  ...List.generate(viewModel.matchedDrivers.length, (index) {
+                    final driver = viewModel.matchedDrivers[index];
+                    final drivProfile = driver['driver_profile'];
+
+                    return Column(
+                      children: [
+                        DirectRouteOptionCard(
+                          driverName: driver['name'],
+                          phoneNumber: driver['phone'],
+                          distanceKm: driver['pickup_distance_km'] ?? 0.0,
+                          departTime: drivProfile['depart_time'],
+                          profileImageUrl: driver['profile_image_url'],
+                        ),
+                        if (index != viewModel.matchedDrivers.length - 1)
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 24),
+                            child: Divider(height: 1, thickness: 1, color: AppColors.greyBorder),
+                          ),
+                      ],
+                    );
+                  }),
+              ] else ...[
+                // 2. Mixed Option Logic (Hardcoded LRT timeline)
+                const MixedRouteOptionCard(),
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 24),
                   child: Divider(height: 1, thickness: 1, color: AppColors.greyBorder),
                 ),
-                const RouteOptionCard(),
+                const MixedRouteOptionCard(),
               ]
             ],
           ),
