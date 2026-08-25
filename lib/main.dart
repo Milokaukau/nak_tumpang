@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart'; // 1. Added Riverpod import
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:nak_tumpang/firebase_options.dart';
 import 'package:nak_tumpang/core/theme/app_theme.dart';
@@ -23,9 +24,12 @@ void main() async {
   //=======================================
 
   runApp(
-    MultiProvider(
-      providers: AppProviders.providers,
-      child: const TumpangApp(),
+    // 2. Wrapped root in ProviderScope
+    ProviderScope(
+      child: MultiProvider(
+        providers: AppProviders.providers,
+        child: const TumpangApp(),
+      ),
     ),
   );
 }
