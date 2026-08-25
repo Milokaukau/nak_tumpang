@@ -135,10 +135,10 @@ Future<void> populateFirestore() async {
   batch.set(exceptionRef, {
     'tumpang_subscription_id': 'sub_match_77881',
     'initiated_by': 'usr_driv_4412',
-    'dates': [
-      '2026-08-15',
-      '2026-08-16'
-    ],
+    'dates': {
+      'start': '2026-08-15',
+      'end': '2026-08-16',
+    },
     'reason': 'Medical leave',
   });
 
