@@ -1,16 +1,18 @@
 import 'package:flutter/material.dart';
-import '../theme/app_colors.dart';
+import 'package:nak_tumpang/core/theme/app_colors.dart';
 
 class BaseButton extends StatelessWidget {
   final String text;
   final VoidCallback onPressed;
   final bool isFullWidth;
+  final TextStyle? textStyle;
 
   const BaseButton({
     super.key,
     required this.text,
     required this.onPressed,
     this.isFullWidth = true,
+    this.textStyle,
   });
 
   @override
@@ -22,7 +24,7 @@ class BaseButton extends StatelessWidget {
         style: ElevatedButton.styleFrom(
           backgroundColor: AppColors.primaryYellow,
           foregroundColor: AppColors.black,
-          padding: const EdgeInsets.symmetric(vertical: 14),
+          padding: const EdgeInsets.symmetric(vertical: 7),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(8),
           ),
@@ -30,7 +32,11 @@ class BaseButton extends StatelessWidget {
         ),
         child: Text(
           text,
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+          style: textStyle ??
+              const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+              ),
         ),
       ),
     );
