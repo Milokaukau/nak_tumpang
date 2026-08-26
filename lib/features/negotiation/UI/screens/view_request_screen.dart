@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
+import 'package:nak_tumpang/core/entities/tumpang_request.dart';
 import 'package:nak_tumpang/features/negotiation/view_models/negotiation_view_model.dart';
 import 'package:nak_tumpang/features/negotiation/UI/components/propose_value_bottom_sheet.dart';
 import 'package:nak_tumpang/features/negotiation/UI/components/negotiation_field_row.dart';
 import 'package:nak_tumpang/features/negotiation/UI/components/negotiation_summary_card.dart';
 import 'package:nak_tumpang/features/negotiation/UI/components/route_map_header.dart';
 
-class ViewRequestScreen extends ConsumerWidget {
+class ViewRequestScreen extends StatelessWidget {
   final String requestId;
 
   const ViewRequestScreen({
@@ -16,7 +17,7 @@ class ViewRequestScreen extends ConsumerWidget {
   });
 
   void _openProposalSheet(
-      BuildContext context, WidgetRef ref, String title, String currentValue, String fieldKey) {
+      BuildContext context, NegotiationViewModel controller, String title, String currentValue, String fieldKey) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -29,22 +30,14 @@ class ViewRequestScreen extends ConsumerWidget {
           currentValue: currentValue,
           onSubmit: (newValue) {
             final parsedFee = double.tryParse(newValue);
-
-            // Validate fee input
             if (fieldKey == 'fee' && parsedFee == null) {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('Please enter a valid fee amount.')),
               );
-              return; // Stop submission
+              return;
             }
-
             final newValueParsed = fieldKey == 'fee' ? parsedFee! : newValue;
-
-            ref.read(negotiationControllerProvider).proposeNewTerm(
-              requestId,
-              fieldKey,
-              newValueParsed,
-            );
+            controller.proposeNewTerm(requestId, fieldKey, newValueParsed);
           },
         );
       },
@@ -52,10 +45,8 @@ class ViewRequestScreen extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final requestAsync = ref.watch(singleRequestStreamProvider(requestId));
-    final controller = ref.read(negotiationControllerProvider);
-    final currentUser = ref.watch(mockAuthUserProvider);
+  Widget build(BuildContext context) {
+    final controller = Provider.of<NegotiationViewModel>(context, listen: false);
 
     return Scaffold(
       backgroundColor: AppColors.white,
@@ -66,116 +57,121 @@ class ViewRequestScreen extends ConsumerWidget {
         iconTheme: const IconThemeData(color: AppColors.black),
         centerTitle: true,
       ),
-      body: requestAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (err, stack) => Center(child: Text('Error: $err')),
-        data: (request) {
+      body: StreamBuilder<TumpangRequest?>(
+        stream: controller.singleRequestStream(requestId),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return Center(child: Text('Error: ${snapshot.error}'));
+          }
+
+          final request = snapshot.data;
           if (request == null) {
             return const Center(child: Text('Request no longer exists.'));
           }
 
-          final isDriver = currentUser.role == 'driver';
-          final targetUserId = isDriver ? request.passengerId : request.driverId;
-          final targetUserAsync = ref.watch(userProfileProvider(targetUserId));
+          final targetUserId = controller.currentUserRole == 'driver' ? request.passengerId : request.driverId;
 
-          final displayName = targetUserAsync.maybeWhen(
-            data: (userData) => userData?['name'] ?? userData?['full_name'] ?? targetUserId,
-            orElse: () => 'Loading...',
-          );
+          return FutureBuilder<Map<String, dynamic>?>(
+            future: controller.getUserProfile(targetUserId),
+            builder: (context, userSnapshot) {
+              final userData = userSnapshot.data;
+              final displayName = userData?['name'] ?? userData?['full_name'] ?? targetUserId;
 
-          return SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 20.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                // Avatar & Name
-                Container(
-                  width: 80,
-                  height: 80,
-                  decoration: BoxDecoration(
-                    color: AppColors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppColors.greyBorder, width: 1),
-                  ),
-                  child: const Icon(Icons.person, size: 50, color: Colors.grey),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  displayName,
-                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 24),
+              return SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 20.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 80,
+                      height: 80,
+                      decoration: BoxDecoration(
+                        color: AppColors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppColors.greyBorder, width: 1),
+                      ),
+                      child: const Icon(Icons.person, size: 50, color: Colors.grey),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      displayName,
+                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 24),
 
-                // Negotiation Fields
-                NegotiationFieldRow(
-                  title: 'Pickup Location',
-                  value: request.pickupLocation.name,
-                  isAccepted: request.pickupLocation.isAccepted,
-                  isRequestedByMe: request.pickupLocation.requestedBy == currentUser.id,
-                  topWidget: RouteMapHeader(label: request.pickupLocation.name),
-                  onPropose: () => _openProposalSheet(context, ref, 'Pickup Location', request.pickupLocation.name, 'pickup_location'),
-                  onAccept: () => controller.acceptTerm(requestId, 'pickup_location'),
-                ),
+                    NegotiationFieldRow(
+                      title: 'Pickup Location',
+                      value: request.pickupLocation.name,
+                      isAccepted: request.pickupLocation.isAccepted,
+                      isRequestedByMe: request.pickupLocation.requestedBy == controller.currentUserId,
+                      topWidget: RouteMapHeader(label: request.pickupLocation.name),
+                      onPropose: () => _openProposalSheet(context, controller, 'Pickup Location', request.pickupLocation.name, 'pickup_location'),
+                      onAccept: () => controller.acceptTerm(requestId, 'pickup_location'),
+                    ),
 
-                NegotiationFieldRow(
-                  title: 'Dropoff Location',
-                  value: request.dropoffLocation.name,
-                  isAccepted: request.dropoffLocation.isAccepted,
-                  isRequestedByMe: request.dropoffLocation.requestedBy == currentUser.id,
-                  topWidget: RouteMapHeader(label: request.dropoffLocation.name),
-                  onPropose: () => _openProposalSheet(context, ref, 'Dropoff Location', request.dropoffLocation.name, 'dropoff_location'),
-                  onAccept: () => controller.acceptTerm(requestId, 'dropoff_location'),
-                ),
+                    NegotiationFieldRow(
+                      title: 'Dropoff Location',
+                      value: request.dropoffLocation.name,
+                      isAccepted: request.dropoffLocation.isAccepted,
+                      isRequestedByMe: request.dropoffLocation.requestedBy == controller.currentUserId,
+                      topWidget: RouteMapHeader(label: request.dropoffLocation.name),
+                      onPropose: () => _openProposalSheet(context, controller, 'Dropoff Location', request.dropoffLocation.name, 'dropoff_location'),
+                      onAccept: () => controller.acceptTerm(requestId, 'dropoff_location'),
+                    ),
 
-                NegotiationFieldRow(
-                  title: 'Tumpang Date',
-                  value: request.subscriptionStartDate.value,
-                  isAccepted: request.subscriptionStartDate.isAccepted && request.subscriptionEndDate.isAccepted,
-                  isRequestedByMe: request.subscriptionStartDate.requestedBy == currentUser.id,
-                  onPropose: () => _openProposalSheet(context, ref, 'Start Date', request.subscriptionStartDate.value, 'subscription_start_date'),
-                  onAccept: () async {
-                    await controller.acceptTerm(requestId, 'subscription_start_date');
-                    await controller.acceptTerm(requestId, 'subscription_end_date');
-                  },
-                ),
+                    NegotiationFieldRow(
+                      title: 'Tumpang Date',
+                      value: request.subscriptionStartDate.value,
+                      isAccepted: request.subscriptionStartDate.isAccepted && request.subscriptionEndDate.isAccepted,
+                      isRequestedByMe: request.subscriptionStartDate.requestedBy == controller.currentUserId,
+                      onPropose: () => _openProposalSheet(context, controller, 'Start Date', request.subscriptionStartDate.value, 'subscription_start_date'),
+                      onAccept: () async {
+                        await controller.acceptTerm(requestId, 'subscription_start_date');
+                        await controller.acceptTerm(requestId, 'subscription_end_date');
+                      },
+                    ),
 
-                NegotiationFieldRow(
-                  title: 'Pickup Time',
-                  value: request.pickupTime.value,
-                  isAccepted: request.pickupTime.isAccepted,
-                  isRequestedByMe: request.pickupTime.requestedBy == currentUser.id,
-                  onPropose: () => _openProposalSheet(context, ref, 'Pickup Time', request.pickupTime.value, 'pickup_time'),
-                  onAccept: () => controller.acceptTerm(requestId, 'pickup_time'),
-                ),
+                    NegotiationFieldRow(
+                      title: 'Pickup Time',
+                      value: request.pickupTime.value,
+                      isAccepted: request.pickupTime.isAccepted,
+                      isRequestedByMe: request.pickupTime.requestedBy == controller.currentUserId,
+                      onPropose: () => _openProposalSheet(context, controller, 'Pickup Time', request.pickupTime.value, 'pickup_time'),
+                      onAccept: () => controller.acceptTerm(requestId, 'pickup_time'),
+                    ),
 
-                NegotiationFieldRow(
-                  title: 'Tumpang Fee',
-                  value: request.fee.value.toString(),
-                  isAccepted: request.fee.isAccepted,
-                  isRequestedByMe: request.fee.requestedBy == currentUser.id,
-                  onPropose: () => _openProposalSheet(context, ref, 'Fee (RM)', request.fee.value.toString(), 'fee'),
-                  onAccept: () => controller.acceptTerm(requestId, 'fee'),
-                ),
+                    NegotiationFieldRow(
+                      title: 'Tumpang Fee',
+                      value: request.fee.value.toString(),
+                      isAccepted: request.fee.isAccepted,
+                      isRequestedByMe: request.fee.requestedBy == controller.currentUserId,
+                      onPropose: () => _openProposalSheet(context, controller, 'Fee (RM)', request.fee.value.toString(), 'fee'),
+                      onAccept: () => controller.acceptTerm(requestId, 'fee'),
+                    ),
 
-                // Final Summary Card
-                NegotiationSummaryCard(
-                  request: request,
-                  onReject: () {
-                    controller.rejectEntireRequest(requestId);
-                    Navigator.pop(context);
-                  },
-                  onAccept: () async {
-                    bool success = await controller.finalizeAgreement(request);
-                    if (success && context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Agreement Finalized!')));
-                    } else if (!success && context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('All terms must be accepted first.')));
-                    }
-                  },
+                    NegotiationSummaryCard(
+                      request: request,
+                      onReject: () {
+                        controller.rejectEntireRequest(requestId);
+                        Navigator.pop(context);
+                      },
+                      onAccept: () async {
+                        bool success = await controller.finalizeAgreement(request);
+                        if (success && context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Agreement Finalized!')));
+                        } else if (!success && context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('All terms must be accepted first.')));
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 40),
+                  ],
                 ),
-                const SizedBox(height: 40),
-              ],
-            ),
+              );
+            },
           );
         },
       ),

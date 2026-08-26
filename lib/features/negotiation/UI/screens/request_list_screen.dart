@@ -1,15 +1,16 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:provider/provider.dart';
+import 'package:nak_tumpang/core/entities/tumpang_request.dart';
 import 'package:nak_tumpang/features/negotiation/view_models/negotiation_view_model.dart';
 import 'package:nak_tumpang/features/negotiation/UI/components/request_list_card.dart';
 
-class RequestListScreen extends ConsumerWidget { // <--- THIS is the class name it is looking for
+class RequestListScreen extends StatelessWidget {
   const RequestListScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    // Watch the dynamic stream we created in the view model
-    final requestsAsyncValue = ref.watch(pendingRequestsStreamProvider);
+  Widget build(BuildContext context) {
+    // Access the standard Provider
+    final vm = Provider.of<NegotiationViewModel>(context, listen: false);
 
     return Scaffold(
       appBar: AppBar(
@@ -18,10 +19,18 @@ class RequestListScreen extends ConsumerWidget { // <--- THIS is the class name 
         elevation: 1,
         iconTheme: const IconThemeData(color: Colors.black),
       ),
-      body: requestsAsyncValue.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, stack) => Center(child: Text('Error: $error')),
-        data: (requests) {
+      // Use standard StreamBuilder
+      body: StreamBuilder<List<TumpangRequest>>(
+        stream: vm.pendingRequestsStream,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return Center(child: Text('Error: ${snapshot.error}'));
+          }
+
+          final requests = snapshot.data ?? [];
           if (requests.isEmpty) {
             return const Center(child: Text('No pending requests found.'));
           }
@@ -30,8 +39,7 @@ class RequestListScreen extends ConsumerWidget { // <--- THIS is the class name 
             padding: const EdgeInsets.all(16.0),
             itemCount: requests.length,
             itemBuilder: (context, index) {
-              final request = requests[index];
-              return RequestListCard(request: request);
+              return RequestListCard(request: requests[index]);
             },
           );
         },
