@@ -53,7 +53,7 @@ class NegotiationFieldRow extends StatelessWidget {
             padding: const EdgeInsets.all(16.0),
             child: Column(
               children: [
-                // ALWAYS display the map or the text value
+                // ALWAYS display the map PIN box or the text value box
                 if (topWidget != null) ...[
                   topWidget!,
                   const SizedBox(height: 12),
@@ -81,6 +81,7 @@ class NegotiationFieldRow extends StatelessWidget {
                         foregroundColor: AppColors.black,
                         side: const BorderSide(color: AppColors.greyBorder),
                         padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)), // Pill shape
                       ),
                       onPressed: onPropose,
                       child: const Text('Propose a change'),
@@ -97,7 +98,7 @@ class NegotiationFieldRow extends StatelessWidget {
                             foregroundColor: AppColors.black,
                             side: const BorderSide(color: AppColors.greyBorder),
                             padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)), // Pill shape
                           ),
                           onPressed: onPropose,
                           child: const Text('Propose another'),
@@ -110,6 +111,7 @@ class NegotiationFieldRow extends StatelessWidget {
                             backgroundColor: AppColors.black,
                             foregroundColor: AppColors.white,
                             padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)), // Pill shape
                           ),
                           onPressed: onAccept,
                           child: const Text('Accept'),

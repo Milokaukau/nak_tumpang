@@ -63,7 +63,7 @@ class NegotiationServiceRemote {
     final valueKey = isLocation ? 'name' : 'value';
 
     await _firestore.collection(_collectionPath).doc(requestId).update({
-      '$fieldKey.$valueKey': newValue,
+      '$fieldKey.$valueKey': newValue, // e.g., 'pickup_location.name': 'KLCC'
       '$fieldKey.requested_by': requestedById,
       '$fieldKey.is_accepted': isAccepted,
     });

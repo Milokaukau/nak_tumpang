@@ -144,9 +144,10 @@ class ViewRequestScreen extends StatelessWidget {
                     ),
 
                     NegotiationFieldRow(
-                      title: 'Tumpang Fee',
+                      title: 'Tumpang Fee (RM)',
                       value: request.fee.value.toString(),
                       isAccepted: request.fee.isAccepted,
+                      // Changed 'vm' to 'controller' here:
                       isRequestedByMe: request.fee.requestedBy == controller.currentUserId,
                       onPropose: () => _openProposalSheet(context, controller, 'Fee (RM)', request.fee.value.toString(), 'fee'),
                       onAccept: () => controller.acceptTerm(requestId, 'fee'),
