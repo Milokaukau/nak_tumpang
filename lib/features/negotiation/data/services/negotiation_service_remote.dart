@@ -58,12 +58,14 @@ class NegotiationServiceRemote {
     required String requestedById,
     required bool isAccepted,
   }) async {
+    // If it's a location, we only update the 'name' field. Otherwise, update 'value'.
+    final isLocation = fieldKey == 'pickup_location' || fieldKey == 'dropoff_location';
+    final valueKey = isLocation ? 'name' : 'value';
+
     await _firestore.collection(_collectionPath).doc(requestId).update({
-      fieldKey: {
-        'value': newValue,
-        'requested_by': requestedById,
-        'is_accepted': isAccepted,
-      }
+      '$fieldKey.$valueKey': newValue,
+      '$fieldKey.requested_by': requestedById,
+      '$fieldKey.is_accepted': isAccepted,
     });
   }
 

@@ -57,6 +57,9 @@ class NegotiationFieldRow extends StatelessWidget {
                   topWidget!,
                   const SizedBox(height: 12),
                 ],
+                _buildValueBox(value),
+                const SizedBox(height: 12),
+
                 if (isAccepted)
                   _buildValueBox('✓ Accepted')
                 else if (isRequestedByMe)

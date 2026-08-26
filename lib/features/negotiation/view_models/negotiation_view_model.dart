@@ -109,8 +109,7 @@ class NegotiationController {
 // =====================================================================
 // 4. User Profile Fetcher (ADDED THIS HERE!)
 // =====================================================================
-
-final userProfileProvider = FutureProvider.family<Map<String, dynamic>?, String>((ref, userId) async {
+final userProfileProvider = FutureProvider.family.autoDispose<Map<String, dynamic>?, String>((ref, userId) async {
   try {
     final doc = await FirebaseFirestore.instance.collection('users').doc(userId).get();
     if (doc.exists) {

@@ -28,7 +28,18 @@ class ViewRequestScreen extends ConsumerWidget {
           title: title,
           currentValue: currentValue,
           onSubmit: (newValue) {
-            var newValueParsed = fieldKey == 'fee' ? double.tryParse(newValue) ?? 0.0 : newValue;
+            final parsedFee = double.tryParse(newValue);
+
+            // Validate fee input
+            if (fieldKey == 'fee' && parsedFee == null) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Please enter a valid fee amount.')),
+              );
+              return; // Stop submission
+            }
+
+            final newValueParsed = fieldKey == 'fee' ? parsedFee! : newValue;
+
             ref.read(negotiationControllerProvider).proposeNewTerm(
               requestId,
               fieldKey,
