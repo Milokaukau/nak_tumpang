@@ -5,6 +5,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:nak_tumpang/core/theme/app_theme.dart';
 import 'package:nak_tumpang/core/app_providers.dart';
 import 'package:nak_tumpang/features/home/UI/screens/home_screen.dart';
+import 'package:nak_tumpang/core/services/local_db_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -23,6 +24,8 @@ void main() async {
   );
 
   print('✅ Supabase connected successfully!');
+
+  await LocalDbService.instance.testConnection();
 
   runApp(
     MultiProvider(
