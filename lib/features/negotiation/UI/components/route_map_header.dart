@@ -1,27 +1,82 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 
 class RouteMapHeader extends StatelessWidget {
   final String label;
+  final double lat;
+  final double lng;
 
-  const RouteMapHeader({super.key, required this.label});
+  const RouteMapHeader({
+    super.key,
+    required this.label,
+    required this.lat,
+    required this.lng,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final location = LatLng(lat, lng);
+
     return Container(
-      height: 100,
+      height: 150, // Slightly taller so the real map is visible
       width: double.infinity,
       decoration: BoxDecoration(
         color: const Color(0xFFF0F4F8),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: AppColors.greyBorder),
       ),
-      child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Stack(
           children: [
-            const Icon(Icons.location_on, color: Colors.red, size: 32),
-            Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+            FlutterMap(
+              options: MapOptions(
+                initialCenter: location,
+                initialZoom: 16.0, // Zoomed in to see the specific condo/building
+                interactionOptions: const InteractionOptions(
+                  flags: InteractiveFlag.all,
+                ),
+              ),
+              children: [
+                TileLayer(
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  userAgentPackageName: 'com.example.nak_tumpang',
+                ),
+                MarkerLayer(
+                  markers: [
+                    Marker(
+                      point: location,
+                      width: 40,
+                      height: 40,
+                      child: const Icon(Icons.location_on, color: Colors.red, size: 40),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            // Semi-transparent label at the bottom of the map
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: Container(
+                color: Colors.white.withOpacity(0.85),
+                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+                child: Text(
+                  label,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      color: AppColors.black,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
           ],
         ),
       ),

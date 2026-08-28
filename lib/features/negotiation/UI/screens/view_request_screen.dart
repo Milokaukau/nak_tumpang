@@ -107,7 +107,11 @@ class ViewRequestScreen extends StatelessWidget {
                       value: request.pickupLocation.name,
                       isAccepted: request.pickupLocation.isAccepted,
                       isRequestedByMe: request.pickupLocation.requestedBy == controller.currentUserId,
-                      topWidget: RouteMapHeader(label: request.pickupLocation.name),
+                      topWidget: RouteMapHeader(
+                        label: request.pickupLocation.name,
+                        lat: request.pickupLocation.lat, // Pass actual latitude
+                        lng: request.pickupLocation.lng, // Pass actual longitude
+                      ),
                       onPropose: () => _openProposalSheet(context, controller, 'Pickup Location', request.pickupLocation.name, 'pickup_location'),
                       onAccept: () => controller.acceptTerm(requestId, 'pickup_location'),
                     ),
@@ -117,7 +121,11 @@ class ViewRequestScreen extends StatelessWidget {
                       value: request.dropoffLocation.name,
                       isAccepted: request.dropoffLocation.isAccepted,
                       isRequestedByMe: request.dropoffLocation.requestedBy == controller.currentUserId,
-                      topWidget: RouteMapHeader(label: request.dropoffLocation.name),
+                      topWidget: RouteMapHeader(
+                        label: request.dropoffLocation.name,
+                        lat: request.dropoffLocation.lat, // Pass actual latitude
+                        lng: request.dropoffLocation.lng, // Pass actual longitude
+                      ),
                       onPropose: () => _openProposalSheet(context, controller, 'Dropoff Location', request.dropoffLocation.name, 'dropoff_location'),
                       onAccept: () => controller.acceptTerm(requestId, 'dropoff_location'),
                     ),
