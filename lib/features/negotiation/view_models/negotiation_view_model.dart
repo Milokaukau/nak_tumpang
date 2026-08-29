@@ -1,23 +1,66 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nak_tumpang/core/entities/tumpang_request.dart';
-import 'package:nak_tumpang/features/negotiation/data/services/negotiation_service_remote.dart';
+import 'package:nak_tumpang/features/negotiation/data/services/negotiation_supabase_service.dart';
 
 class NegotiationViewModel extends ChangeNotifier {
-  final NegotiationServiceRemote _service = NegotiationServiceRemote();
+  final NegotiationSupabaseService _service = NegotiationSupabaseService();
+  final SupabaseClient _supabase = Supabase.instance.client;
 
-  // MOCK AUTH (Replace with your actual AuthProvider later)
-  final String currentUserId = 'usr_driv_4412';
-  final String currentUserRole = 'driver';
+  String? currentUserId;
+  String? currentUserRole;
+  String? currentTripId;
+
+  bool isLoading = false;
+  String? errorMessage;
 
   final Map<String, Map<String, dynamic>> _userCache = {};
+  Stream<List<TumpangRequest>>? pendingRequestsStream;
 
-  // Real-Time Data Streams
-  Stream<List<TumpangRequest>> get pendingRequestsStream {
-    if (currentUserRole == 'driver') {
-      return _service.streamRequestsForDriver(currentUserId);
-    } else {
-      return _service.streamRequestsForPassenger(currentUserId);
+  Future<void> fetchActiveTripAndInitialize(String role, {String? fallbackUserId}) async {
+    isLoading = true;
+    errorMessage = null;
+    notifyListeners();
+
+    try {
+      // 1. Get authenticated user ID from Auth session, or fallback if using custom IDs
+      currentUserId = _supabase.auth.currentUser?.id ?? fallbackUserId ?? 'usr_driv_4412';
+      currentUserRole = role;
+
+      debugPrint('Initializing for User ID: $currentUserId as $role');
+
+      // 2. Query driver_trips or passenger_trips for this user
+      final tableName = role == 'driver' ? 'driver_trips' : 'passenger_trips';
+
+      final dynamic tripData = await _supabase
+          .from(tableName)
+          .select('id')
+          .eq('user_id', currentUserId!)
+          .limit(1)
+          .maybeSingle();
+
+      debugPrint('Trip Query Result: $tripData');
+
+      if (tripData != null && tripData['id'] != null) {
+        currentTripId = tripData['id'] as String;
+        debugPrint('Active Trip ID found: $currentTripId');
+
+        // 3. Setup the real-time stream
+        if (role == 'driver') {
+          pendingRequestsStream = _service.streamRequestsForDriver(currentTripId!);
+        } else {
+          pendingRequestsStream = _service.streamRequestsForPassenger(currentTripId!);
+        }
+      } else {
+        errorMessage = 'No active $role trip found for user $currentUserId';
+        debugPrint(errorMessage);
+      }
+    } catch (e, stack) {
+      errorMessage = 'Error loading trip: $e';
+      debugPrint('Error: $e\n$stack');
+    } finally {
+      isLoading = false;
+      notifyListeners();
     }
   }
 
@@ -25,14 +68,13 @@ class NegotiationViewModel extends ChangeNotifier {
     return _service.streamSingleRequest(requestId);
   }
 
-  // Caches profile fetches so we don't spam Firestore
   Future<Map<String, dynamic>?> getUserProfile(String userId) async {
     if (_userCache.containsKey(userId)) return _userCache[userId];
     try {
-      final doc = await FirebaseFirestore.instance.collection('users').doc(userId).get();
-      if (doc.exists && doc.data() != null) {
-        _userCache[userId] = doc.data()!;
-        return _userCache[userId];
+      final data = await _supabase.from('users').select().eq('id', userId).maybeSingle();
+      if (data != null) {
+        _userCache[userId] = data;
+        return data;
       }
     } catch (e) {
       debugPrint('Error fetching user: $e');
@@ -40,17 +82,44 @@ class NegotiationViewModel extends ChangeNotifier {
     return null;
   }
 
-  // Action Controllers
-  Future<void> acceptTerm(String requestId, String fieldKey) async {
-    await _service.acceptNegotiationField(requestId: requestId, fieldKey: fieldKey);
+  Future<Map<String, dynamic>?> getUserProfileByTripId(String tripId, {required bool isDriverTrip}) async {
+    if (_userCache.containsKey(tripId)) return _userCache[tripId];
+
+    final tableName = isDriverTrip ? 'driver_trips' : 'passenger_trips';
+    try {
+      final res = await _supabase.from(tableName).select('users(*)').eq('id', tripId).maybeSingle();
+
+      if (res != null && res['users'] != null) {
+        final user = res['users'] as Map<String, dynamic>;
+        _userCache[tripId] = user;
+        return user;
+      }
+    } catch (e) {
+      debugPrint('Error fetching user by trip id: $e');
+    }
+    return null;
   }
 
-  Future<void> proposeNewTerm(String requestId, String fieldKey, dynamic newValue) async {
+  Future<void> acceptTerm(String requestId, String fieldPrefix) async {
+    await _service.acceptNegotiationField(requestId: requestId, fieldPrefix: fieldPrefix);
+  }
+
+  Future<void> proposeNewTerm({
+    required String requestId,
+    required String fieldPrefix,
+    dynamic value,
+    double? lat,
+    double? lng,
+  }) async {
+    if (currentUserId == null) return;
+
     await _service.updateNegotiationField(
       requestId: requestId,
-      fieldKey: fieldKey,
-      newValue: newValue,
-      requestedById: currentUserId,
+      fieldPrefix: fieldPrefix,
+      value: value,
+      lat: lat,
+      lng: lng,
+      requestedById: currentUserId!,
       isAccepted: false,
     );
   }
@@ -60,14 +129,11 @@ class NegotiationViewModel extends ChangeNotifier {
   }
 
   Future<bool> finalizeAgreement(TumpangRequest request) async {
-    bool allAccepted = request.fee.isAccepted &&
+    return request.fee.isAccepted &&
         request.pickupTime.isAccepted &&
         request.pickupLocation.isAccepted &&
         request.dropoffLocation.isAccepted &&
         request.subscriptionStartDate.isAccepted &&
         request.subscriptionEndDate.isAccepted;
-
-    if (!allAccepted) return false;
-    return true;
   }
 }

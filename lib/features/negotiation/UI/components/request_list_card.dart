@@ -18,99 +18,99 @@ class RequestListCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final controller = Provider.of<NegotiationViewModel>(context, listen: false);
     final isDriver = controller.currentUserRole == 'driver';
-    final targetUserId = isDriver ? request.passengerId : request.driverId;
+    final targetTripId = isDriver ? request.passengerTripId : request.driverTripId;
 
     return FutureBuilder<Map<String, dynamic>?>(
-        future: controller.getUserProfile(targetUserId),
-        builder: (context, snapshot) {
-          final userData = snapshot.data;
-          final displayName = userData?['name'] ?? userData?['full_name'] ?? targetUserId;
-          final displayPhone = userData?['phone'] ?? userData?['phone_number'] ?? 'No phone provided';
+      future: controller.getUserProfileByTripId(targetTripId, isDriverTrip: !isDriver),
+      builder: (context, snapshot) {
+        final userData = snapshot.data;
+        final displayName = userData?['name'] ?? userData?['full_name'] ?? 'User';
+        final displayPhone = userData?['phone'] ?? userData?['phone_number'] ?? 'No phone provided';
 
-          return Card(
-            margin: const EdgeInsets.only(bottom: 16.0),
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-              side: const BorderSide(color: AppColors.greyBorder, width: 1.5),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        width: 70,
-                        height: 70,
-                        decoration: BoxDecoration(
-                          color: AppColors.white,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: AppColors.greyBorder, width: 1),
-                        ),
-                        child: const Icon(Icons.person, size: 40, color: Colors.grey),
+        return Card(
+          margin: const EdgeInsets.only(bottom: 16.0),
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: const BorderSide(color: AppColors.greyBorder, width: 1.5),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 70,
+                      height: 70,
+                      decoration: BoxDecoration(
+                        color: AppColors.white,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: AppColors.greyBorder, width: 1),
                       ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              displayName,
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.black,
-                              ),
+                      child: const Icon(Icons.person, size: 40, color: Colors.grey),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            displayName,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.black,
                             ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '${request.pickupLocation.name} - ${request.dropoffLocation.name}',
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.black,
-                              ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '${request.pickupLocation.name} - ${request.dropoffLocation.name}',
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.black,
                             ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'pickup time: ${request.pickupTime.value}',
-                              style: const TextStyle(
-                                fontSize: 14,
-                                color: AppColors.black,
-                              ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'pickup time: ${request.pickupTime.value}',
+                            style: const TextStyle(
+                              fontSize: 14,
+                              color: AppColors.black,
                             ),
-                            const SizedBox(height: 4),
-                            Text(
-                              displayPhone,
-                              style: const TextStyle(
-                                fontSize: 14,
-                                color: AppColors.black,
-                              ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            displayPhone,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              color: AppColors.black,
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  BaseButton(
-                    text: 'Review Details',
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => ViewRequestScreen(requestId: request.id),
-                        ),
-                      );
-                    },
-                  ),
-                ],
-              ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                BaseButton(
+                  text: 'Review Details',
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => ViewRequestScreen(requestId: request.id),
+                      ),
+                    );
+                  },
+                ),
+              ],
             ),
-          );
-        }
+          ),
+        );
+      },
     );
   }
 }

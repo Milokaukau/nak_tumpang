@@ -17,7 +17,12 @@ class ViewRequestScreen extends StatelessWidget {
   });
 
   void _openProposalSheet(
-      BuildContext context, NegotiationViewModel controller, String title, String currentValue, String fieldKey) {
+      BuildContext context,
+      NegotiationViewModel controller,
+      String title,
+      String currentValue,
+      String fieldPrefix,
+      ) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -30,14 +35,20 @@ class ViewRequestScreen extends StatelessWidget {
           currentValue: currentValue,
           onSubmit: (newValue) {
             final parsedFee = double.tryParse(newValue);
-            if (fieldKey == 'fee' && parsedFee == null) {
+            if (fieldPrefix == 'fee' && parsedFee == null) {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('Please enter a valid fee amount.')),
               );
               return;
             }
-            final newValueParsed = fieldKey == 'fee' ? parsedFee! : newValue;
-            controller.proposeNewTerm(requestId, fieldKey, newValueParsed);
+
+            final dynamic valueToSubmit = fieldPrefix == 'fee' ? parsedFee! : newValue;
+
+            controller.proposeNewTerm(
+              requestId: requestId,
+              fieldPrefix: fieldPrefix,
+              value: valueToSubmit,
+            );
           },
         );
       },
@@ -47,6 +58,7 @@ class ViewRequestScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final controller = Provider.of<NegotiationViewModel>(context, listen: false);
+    final isDriver = controller.currentUserRole == 'driver';
 
     return Scaffold(
       backgroundColor: AppColors.white,
@@ -72,13 +84,13 @@ class ViewRequestScreen extends StatelessWidget {
             return const Center(child: Text('Request no longer exists.'));
           }
 
-          final targetUserId = controller.currentUserRole == 'driver' ? request.passengerId : request.driverId;
+          final targetTripId = isDriver ? request.passengerTripId : request.driverTripId;
 
           return FutureBuilder<Map<String, dynamic>?>(
-            future: controller.getUserProfile(targetUserId),
+            future: controller.getUserProfileByTripId(targetTripId, isDriverTrip: !isDriver),
             builder: (context, userSnapshot) {
               final userData = userSnapshot.data;
-              final displayName = userData?['name'] ?? userData?['full_name'] ?? targetUserId;
+              final displayName = userData?['name'] ?? userData?['full_name'] ?? 'User';
 
               return SingleChildScrollView(
                 padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 20.0),
@@ -102,6 +114,7 @@ class ViewRequestScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 24),
 
+                    // Pickup Location
                     NegotiationFieldRow(
                       title: 'Pickup Location',
                       value: request.pickupLocation.name,
@@ -109,13 +122,20 @@ class ViewRequestScreen extends StatelessWidget {
                       isRequestedByMe: request.pickupLocation.requestedBy == controller.currentUserId,
                       topWidget: RouteMapHeader(
                         label: request.pickupLocation.name,
-                        lat: request.pickupLocation.lat, // Pass actual latitude
-                        lng: request.pickupLocation.lng, // Pass actual longitude
+                        lat: request.pickupLocation.lat,
+                        lng: request.pickupLocation.lng,
                       ),
-                      onPropose: () => _openProposalSheet(context, controller, 'Pickup Location', request.pickupLocation.name, 'pickup_location'),
-                      onAccept: () => controller.acceptTerm(requestId, 'pickup_location'),
+                      onPropose: () => _openProposalSheet(
+                        context,
+                        controller,
+                        'Pickup Location',
+                        request.pickupLocation.name,
+                        'pickup',
+                      ),
+                      onAccept: () => controller.acceptTerm(requestId, 'pickup'),
                     ),
 
+                    // Dropoff Location
                     NegotiationFieldRow(
                       title: 'Dropoff Location',
                       value: request.dropoffLocation.name,
@@ -123,44 +143,71 @@ class ViewRequestScreen extends StatelessWidget {
                       isRequestedByMe: request.dropoffLocation.requestedBy == controller.currentUserId,
                       topWidget: RouteMapHeader(
                         label: request.dropoffLocation.name,
-                        lat: request.dropoffLocation.lat, // Pass actual latitude
-                        lng: request.dropoffLocation.lng, // Pass actual longitude
+                        lat: request.dropoffLocation.lat,
+                        lng: request.dropoffLocation.lng,
                       ),
-                      onPropose: () => _openProposalSheet(context, controller, 'Dropoff Location', request.dropoffLocation.name, 'dropoff_location'),
-                      onAccept: () => controller.acceptTerm(requestId, 'dropoff_location'),
+                      onPropose: () => _openProposalSheet(
+                        context,
+                        controller,
+                        'Dropoff Location',
+                        request.dropoffLocation.name,
+                        'dropoff',
+                      ),
+                      onAccept: () => controller.acceptTerm(requestId, 'dropoff'),
                     ),
 
+                    // Tumpang Dates (Start & End)
                     NegotiationFieldRow(
                       title: 'Tumpang Date',
-                      value: request.subscriptionStartDate.value,
+                      value: '${request.subscriptionStartDate.value} to ${request.subscriptionEndDate.value}',
                       isAccepted: request.subscriptionStartDate.isAccepted && request.subscriptionEndDate.isAccepted,
                       isRequestedByMe: request.subscriptionStartDate.requestedBy == controller.currentUserId,
-                      onPropose: () => _openProposalSheet(context, controller, 'Start Date', request.subscriptionStartDate.value, 'subscription_start_date'),
+                      onPropose: () => _openProposalSheet(
+                        context,
+                        controller,
+                        'Start Date',
+                        request.subscriptionStartDate.value,
+                        'sub_start',
+                      ),
                       onAccept: () async {
-                        await controller.acceptTerm(requestId, 'subscription_start_date');
-                        await controller.acceptTerm(requestId, 'subscription_end_date');
+                        await controller.acceptTerm(requestId, 'sub_start');
+                        await controller.acceptTerm(requestId, 'sub_end');
                       },
                     ),
 
+                    // Pickup Time
                     NegotiationFieldRow(
                       title: 'Pickup Time',
                       value: request.pickupTime.value,
                       isAccepted: request.pickupTime.isAccepted,
                       isRequestedByMe: request.pickupTime.requestedBy == controller.currentUserId,
-                      onPropose: () => _openProposalSheet(context, controller, 'Pickup Time', request.pickupTime.value, 'pickup_time'),
+                      onPropose: () => _openProposalSheet(
+                        context,
+                        controller,
+                        'Pickup Time',
+                        request.pickupTime.value,
+                        'pickup_time',
+                      ),
                       onAccept: () => controller.acceptTerm(requestId, 'pickup_time'),
                     ),
 
+                    // Fee
                     NegotiationFieldRow(
                       title: 'Tumpang Fee (RM)',
-                      value: request.fee.value.toString(),
+                      value: request.fee.value.toStringAsFixed(2),
                       isAccepted: request.fee.isAccepted,
-                      // Changed 'vm' to 'controller' here:
                       isRequestedByMe: request.fee.requestedBy == controller.currentUserId,
-                      onPropose: () => _openProposalSheet(context, controller, 'Fee (RM)', request.fee.value.toString(), 'fee'),
+                      onPropose: () => _openProposalSheet(
+                        context,
+                        controller,
+                        'Fee (RM)',
+                        request.fee.value.toString(),
+                        'fee',
+                      ),
                       onAccept: () => controller.acceptTerm(requestId, 'fee'),
                     ),
 
+                    // Final Decision Card
                     NegotiationSummaryCard(
                       request: request,
                       onReject: () {
@@ -170,9 +217,13 @@ class ViewRequestScreen extends StatelessWidget {
                       onAccept: () async {
                         bool success = await controller.finalizeAgreement(request);
                         if (success && context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Agreement Finalized!')));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Agreement Finalized!')),
+                          );
                         } else if (!success && context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('All terms must be accepted first.')));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('All terms must be accepted first.')),
+                          );
                         }
                       },
                     ),

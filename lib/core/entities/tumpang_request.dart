@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:nak_tumpang/core/entities/location_node.dart';
 
 class NegotiatedField<T> {
@@ -33,29 +32,21 @@ class NegotiatedLocation extends LocationNode {
     required this.isAccepted,
   });
 
-  factory NegotiatedLocation.fromJson(Map<String, dynamic> json) {
+  factory NegotiatedLocation.fromJson(Map<String, dynamic> json, String prefix) {
     return NegotiatedLocation(
-      lat: (json['lat'] ?? 0.0).toDouble(),
-      lng: (json['lng'] ?? 0.0).toDouble(),
-      name: json['name'] ?? '',
-      requestedBy: json['requested_by'] ?? '',
-      isAccepted: json['is_accepted'] ?? false,
+      lat: (json['${prefix}_lat'] ?? 0.0).toDouble(),
+      lng: (json['${prefix}_lng'] ?? 0.0).toDouble(),
+      name: json['${prefix}_name']?.toString() ?? '',
+      requestedBy: json['${prefix}_requested_by']?.toString() ?? '',
+      isAccepted: json['${prefix}_is_accepted'] ?? false,
     );
-  }
-
-  @override
-  Map<String, dynamic> toJson() {
-    final map = super.toJson();
-    map['requested_by'] = requestedBy;
-    map['is_accepted'] = isAccepted;
-    return map;
   }
 }
 
 class TumpangRequest {
   final String id;
-  final String passengerId;
-  final String driverId;
+  final String passengerTripId;
+  final String driverTripId;
   final String status;
   final NegotiatedLocation pickupLocation;
   final NegotiatedLocation dropoffLocation;
@@ -66,8 +57,8 @@ class TumpangRequest {
 
   TumpangRequest({
     required this.id,
-    required this.passengerId,
-    required this.driverId,
+    required this.passengerTripId,
+    required this.driverTripId,
     required this.status,
     required this.pickupLocation,
     required this.dropoffLocation,
@@ -77,62 +68,78 @@ class TumpangRequest {
     required this.subscriptionEndDate,
   });
 
-  factory TumpangRequest.fromJson(String documentId, Map<String, dynamic> json) {
-
-    // HELPER: Safely convert Timestamps to Strings so the UI doesn't crash
-    String parseStringOrTimestamp(dynamic val) {
-      if (val is Timestamp) {
-        // Converts to "YYYY-MM-DD HH:MM" format
-        return val.toDate().toString().substring(0, 16);
-      }
-      return val?.toString() ?? '';
-    }
-
+  // Accepts a single flat map from PostgreSQL row
+  factory TumpangRequest.fromJson(Map<String, dynamic> json) {
     return TumpangRequest(
-      id: documentId,
-      passengerId: json['passenger_id'] ?? '',
-      driverId: json['driver_id'] ?? '',
-      status: json['status'] ?? 'negotiating',
+      id: json['id']?.toString() ?? '',
+      passengerTripId: json['passenger_trip_id']?.toString() ?? '',
+      driverTripId: json['driver_trip_id']?.toString() ?? '',
+      status: json['status']?.toString() ?? 'negotiating',
 
-      pickupLocation: NegotiatedLocation.fromJson(json['pickup_location'] ?? {}),
-      dropoffLocation: NegotiatedLocation.fromJson(json['dropoff_location'] ?? {}),
+      pickupLocation: NegotiatedLocation.fromJson(json, 'pickup'),
+      dropoffLocation: NegotiatedLocation.fromJson(json, 'dropoff'),
 
-      // Use the safe parser for date/time fields
       pickupTime: NegotiatedField<String>(
-        value: parseStringOrTimestamp(json['pickup_time']?['value']),
-        requestedBy: json['pickup_time']?['requested_by'] ?? '',
-        isAccepted: json['pickup_time']?['is_accepted'] ?? false,
-      ),
-      subscriptionStartDate: NegotiatedField<String>(
-        value: parseStringOrTimestamp(json['subscription_start_date']?['value']),
-        requestedBy: json['subscription_start_date']?['requested_by'] ?? '',
-        isAccepted: json['subscription_start_date']?['is_accepted'] ?? false,
-      ),
-      subscriptionEndDate: NegotiatedField<String>(
-        value: parseStringOrTimestamp(json['subscription_end_date']?['value']),
-        requestedBy: json['subscription_end_date']?['requested_by'] ?? '',
-        isAccepted: json['subscription_end_date']?['is_accepted'] ?? false,
+        value: json['pickup_time']?.toString() ?? '',
+        requestedBy: json['pickup_time_requested_by']?.toString() ?? '',
+        isAccepted: json['pickup_time_is_accepted'] ?? false,
       ),
 
       fee: NegotiatedField<double>(
-        value: (json['fee']?['value'] ?? 0.0).toDouble(),
-        requestedBy: json['fee']?['requested_by'] ?? '',
-        isAccepted: json['fee']?['is_accepted'] ?? false,
+        value: (json['fee'] != null) ? double.parse(json['fee'].toString()) : 0.0,
+        requestedBy: json['fee_requested_by']?.toString() ?? '',
+        isAccepted: json['fee_is_accepted'] ?? false,
+      ),
+
+      subscriptionStartDate: NegotiatedField<String>(
+        value: json['sub_start_date']?.toString() ?? '',
+        requestedBy: json['sub_start_requested_by']?.toString() ?? '',
+        isAccepted: json['sub_start_is_accepted'] ?? false,
+      ),
+
+      subscriptionEndDate: NegotiatedField<String>(
+        value: json['sub_end_date']?.toString() ?? '',
+        requestedBy: json['sub_end_requested_by']?.toString() ?? '',
+        isAccepted: json['sub_end_is_accepted'] ?? false,
       ),
     );
   }
 
+  // Exports to flat PostgreSQL table columns
   Map<String, dynamic> toJson() {
     return {
-      'passenger_id': passengerId,
-      'driver_id': driverId,
+      'id': id,
+      'passenger_trip_id': passengerTripId,
+      'driver_trip_id': driverTripId,
       'status': status,
-      'pickup_location': pickupLocation.toJson(),
-      'dropoff_location': dropoffLocation.toJson(),
-      'pickup_time': pickupTime.toJson(),
-      'fee': fee.toJson(),
-      'subscription_start_date': subscriptionStartDate.toJson(),
-      'subscription_end_date': subscriptionEndDate.toJson(),
+
+      'pickup_lat': pickupLocation.lat,
+      'pickup_lng': pickupLocation.lng,
+      'pickup_name': pickupLocation.name,
+      'pickup_requested_by': pickupLocation.requestedBy,
+      'pickup_is_accepted': pickupLocation.isAccepted,
+
+      'dropoff_lat': dropoffLocation.lat,
+      'dropoff_lng': dropoffLocation.lng,
+      'dropoff_name': dropoffLocation.name,
+      'dropoff_requested_by': dropoffLocation.requestedBy,
+      'dropoff_is_accepted': dropoffLocation.isAccepted,
+
+      'pickup_time': pickupTime.value,
+      'pickup_time_requested_by': pickupTime.requestedBy,
+      'pickup_time_is_accepted': pickupTime.isAccepted,
+
+      'fee': fee.value,
+      'fee_requested_by': fee.requestedBy,
+      'fee_is_accepted': fee.isAccepted,
+
+      'sub_start_date': subscriptionStartDate.value,
+      'sub_start_requested_by': subscriptionStartDate.requestedBy,
+      'sub_start_is_accepted': subscriptionStartDate.isAccepted,
+
+      'sub_end_date': subscriptionEndDate.value,
+      'sub_end_requested_by': subscriptionEndDate.requestedBy,
+      'sub_end_is_accepted': subscriptionEndDate.isAccepted,
     };
   }
 }
