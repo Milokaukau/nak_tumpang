@@ -8,7 +8,13 @@ class HomeViewModel extends ChangeNotifier {
   String selectedFilter = 'Direct';
   Map<String, dynamic>? currentPassenger;
   Map<String, dynamic>? currentPassengerTrip;
-  bool isLoading = true;
+
+  List<Map<String, dynamic>> availableTrips = [];
+
+  bool isScreenLoading = true;    // For the initial boot
+  bool isMatchingLoading = false; // For ORS calculations
+
+  int _fetchId = 0;
 
   final ORSService _orsService = ORSService();
   final HomeSupabaseService _homeService = HomeSupabaseService();
@@ -20,29 +26,44 @@ class HomeViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  void changeTrip(String tripId) {
+    // Prevent changing trips if we are still booting up
+    if (isScreenLoading) return;
+
+    final selected = availableTrips.firstWhere((t) => t['id'] == tripId);
+    currentPassengerTrip = selected;
+    _findAvailableDrivers();
+  }
+
   Future<void> fetchMockPassenger() async {
-    isLoading = true;
+    isScreenLoading = true;
     notifyListeners();
 
-    final trip = await _homeService.fetchPassengerTrip('usr_pass_9921');
+    final trips = await _homeService.fetchPassengerTrips('usr_pass_9921');
 
-    if (trip != null) {
-      currentPassengerTrip = trip;
-      currentPassenger = trip['users'];
+    if (trips.isNotEmpty) {
+      availableTrips = trips;
+      currentPassengerTrip = trips.first;
+      currentPassenger = trips.first['users'];
+
+      // Wait for the initial matching to finish
       await _findAvailableDrivers();
     } else {
-      print('❌ Failed to fetch passenger trip.');
+      print('❌ Failed to fetch passenger trips.');
     }
 
-    isLoading = false;
+    isScreenLoading = false;
     notifyListeners();
   }
 
   Future<void> _findAvailableDrivers() async {
-    if (currentPassengerTrip == null) {
-      print('❌ Passenger trip is null. Aborting.');
-      return;
-    }
+    if (currentPassengerTrip == null) return;
+
+    final currentFetchId = ++_fetchId;
+
+    isMatchingLoading = true;
+    matchedDrivers.clear();
+    notifyListeners();
 
     final passDays = _extractActiveDays(currentPassengerTrip!);
 
@@ -57,46 +78,34 @@ class HomeViewModel extends ChangeNotifier {
 
     final passTime = _sqlTimeToMinutes(currentPassengerTrip!['desired_pickup_time']);
 
-    matchedDrivers.clear();
-    notifyListeners();
-
     final driverTrips = await _homeService.fetchDriverTrips();
-    print('🔍 Found ${driverTrips.length} drivers in Supabase.');
+
+    if (_fetchId != currentFetchId) return;
+
+    List<Map<String, dynamic>> tempMatchedDrivers = [];
 
     for (var driverTrip in driverTrips) {
-      final driverName = driverTrip['users']?['name'] ?? 'Unknown Driver';
-      print('\n🚗 Evaluating Driver: $driverName');
+      if (_fetchId != currentFetchId) return;
 
+      final driverName = driverTrip['users']?['name'] ?? 'Unknown Driver';
       final driverDays = _extractActiveDays(driverTrip);
 
-      // 1. Day Filter
-      if (!MatchingUtils.hasOverlappingDays(passDays, driverDays)) {
-        print('   -> ❌ Failed Day Filter');
-        continue;
-      }
+      if (!MatchingUtils.hasOverlappingDays(passDays, driverDays)) continue;
 
-      // 2. Time Filter (30 mins)
       final drivTime = _sqlTimeToMinutes(driverTrip['depart_time']);
-      if ((drivTime - passTime).abs() > 30) {
-        print('   -> ❌ Failed Time Filter (Pass: $passTime mins, Driv: $drivTime mins)');
-        continue;
-      }
+      if ((drivTime - passTime).abs() > 30) continue;
 
-      // 3. Rough Radius Filter
       final drivStart = LatLng(
           _parseDouble(driverTrip['depart_lat']),
           _parseDouble(driverTrip['depart_lng'])
       );
 
       final drivEnd = LatLng(
-          _parseDouble(driverTrip['arrival_lat']),
-          _parseDouble(driverTrip['arrival_lng'])
+          _parseDouble(driverTrip['arrival_lat'] ?? driverTrip['ariival_lat']),
+          _parseDouble(driverTrip['arrival_lng'] ?? driverTrip['ariival_lng'])
       );
 
-      if (drivStart.latitude == 0 || drivEnd.latitude == 0) {
-        print('   -> ❌ Failed: Missing or Null coordinates for this driver.');
-        continue;
-      }
+      if (drivStart.latitude == 0 || drivEnd.latitude == 0) continue;
 
       final pickDist = MatchingUtils.calculateDistance(
           passPick.latitude, passPick.longitude,
@@ -107,39 +116,39 @@ class HomeViewModel extends ChangeNotifier {
           drivEnd.latitude, drivEnd.longitude
       );
 
-      if (pickDist > 15000 || dropDist > 15000) {
-        print('   -> ❌ Failed Radius Filter (Pick: ${pickDist.toStringAsFixed(0)}m, Drop: ${dropDist.toStringAsFixed(0)}m)');
-        continue;
-      }
+      if (pickDist > 15000 || dropDist > 15000) continue;
 
-      // 4. Strict Polyline Filter (Call ORS)
       try {
         final driverRoute = await _orsService.getRoute(drivStart, drivEnd);
+
+        if (_fetchId != currentFetchId) return;
+
         bool isMatch = MatchingUtils.isRouteMatch(passPick, passDrop, driverRoute, 800);
 
         if (isMatch) {
-          print('   -> ✅ PERFECT MATCH!');
-          matchedDrivers.add({
+          tempMatchedDrivers.add({
             'id': driverTrip['user_id'],
             'name': driverName,
+            'phone': driverTrip['users']?['phone'] ?? 'N/A',
+            'profile_image_url': driverTrip['users']?['profile_image_url'],
             'pickup_distance_km': pickDist / 1000,
             'driver_profile': {
               'depart_time': _formatSqlTimeToUI(driverTrip['depart_time']),
             }
           });
-        } else {
-          print('   -> ❌ Failed ORS Route Match (Detour too far)');
         }
       } catch (e) {
-        print('   -> ⚠️ ORS Route Error: $e');
+        print('⚠️ ORS Route Error: $e');
         continue;
       }
     }
 
-    print('\n🏁 Matching Complete. Found ${matchedDrivers.length} suitable drivers.');
+    if (_fetchId != currentFetchId) return;
+
+    matchedDrivers = tempMatchedDrivers;
+    isMatchingLoading = false;
     notifyListeners();
   }
-
   double _parseDouble(dynamic value) {
     if (value == null) return 0.0;
     if (value is double) return value;

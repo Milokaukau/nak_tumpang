@@ -3,9 +3,9 @@ import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/components/base_filter_options.dart';
 import 'package:nak_tumpang/features/home/UI/components/direct_route_option_card.dart';
+import 'package:nak_tumpang/features/home/UI/components/mixed_route_option_card.dart';
+import 'package:nak_tumpang/features/home/UI/components/trip_selection_dropdown.dart';
 import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
-
-import 'mixed_route_option_card.dart';
 
 class HomePanel extends StatelessWidget {
   const HomePanel({super.key});
@@ -23,19 +23,18 @@ class HomePanel extends StatelessWidget {
           decoration: const BoxDecoration(
             color: AppColors.white,
             borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-            boxShadow: [
-              BoxShadow(color: Colors.black12, blurRadius: 10, spreadRadius: 2)
-            ],
+            boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 10, spreadRadius: 2)],
           ),
-          child: ListView(
+          child: viewModel.isScreenLoading
+              ? const Center(child: CircularProgressIndicator(color: AppColors.primaryYellow))
+              : ListView(
             controller: scrollController,
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
             children: [
               Center(
                 child: Container(
                   margin: const EdgeInsets.only(bottom: 24),
-                  height: 4,
-                  width: 40,
+                  height: 4, width: 40,
                   decoration: BoxDecoration(
                     color: AppColors.greyBorder,
                     borderRadius: BorderRadius.circular(2),
@@ -45,12 +44,15 @@ class HomePanel extends StatelessWidget {
 
               if (viewModel.currentPassenger != null)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 16),
+                  padding: const EdgeInsets.only(bottom: 20),
                   child: Text(
                     'Hello, ${viewModel.currentPassenger!['name']} 👋',
                     style: const TextStyle(fontSize: 16, color: AppColors.greyText),
                   ),
                 ),
+
+              const TripSelectionDropdown(),
+              const SizedBox(height: 24),
 
               const Text(
                 'Available options',
@@ -61,16 +63,12 @@ class HomePanel extends StatelessWidget {
               BaseFilterOptions(
                 options: const ['Direct', 'Mixed'],
                 selectedOption: viewModel.selectedFilter,
-                onSelectionChanged: (option) {
-                  viewModel.setFilter(option);
-                },
+                onSelectionChanged: (option) => viewModel.setFilter(option),
               ),
               const SizedBox(height: 24),
 
-              // --- CONDITIONAL UI RENDERING ---
               if (viewModel.selectedFilter == 'Direct') ...[
-                // 1. Direct
-                if (viewModel.isLoading)
+                if (viewModel.isMatchingLoading)
                   const Center(child: CircularProgressIndicator(color: AppColors.primaryYellow))
                 else if (viewModel.matchedDrivers.isEmpty)
                   const Padding(
@@ -87,7 +85,6 @@ class HomePanel extends StatelessWidget {
                   ...List.generate(viewModel.matchedDrivers.length, (index) {
                     final driver = viewModel.matchedDrivers[index];
                     final drivProfile = driver['driver_profile'];
-
                     return Column(
                       children: [
                         DirectRouteOptionCard(
@@ -106,7 +103,6 @@ class HomePanel extends StatelessWidget {
                     );
                   }),
               ] else ...[
-                // 2. Mixed Option Logic (Hardcoded LRT timeline)
                 const MixedRouteOptionCard(),
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 24),

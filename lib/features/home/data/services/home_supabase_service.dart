@@ -3,18 +3,17 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 class HomeSupabaseService {
   final _supabase = Supabase.instance.client;
 
-  Future<Map<String, dynamic>?> fetchPassengerTrip(String userId) async {
+  Future<List<Map<String, dynamic>>> fetchPassengerTrips(String userId) async {
     try {
-      final trip = await _supabase
+      final response = await _supabase
           .from('passenger_trips')
           .select('*, users(*)')
-          .eq('user_id', userId)
-          .maybeSingle();
+          .eq('user_id', userId);
 
-      return trip;
+      return List<Map<String, dynamic>>.from(response);
     } catch (e) {
-      print("Error in fetchPassengerTrip: $e");
-      return null;
+      print("Error in fetchPassengerTrips: $e");
+      return [];
     }
   }
 
