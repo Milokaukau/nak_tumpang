@@ -42,15 +42,6 @@ class HomePanel extends StatelessWidget {
                 ),
               ),
 
-              if (viewModel.currentPassenger != null)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 20),
-                  child: Text(
-                    'Hello, ${viewModel.currentPassenger!['name']} 👋',
-                    style: const TextStyle(fontSize: 16, color: AppColors.greyText),
-                  ),
-                ),
-
               const TripSelectionDropdown(),
               const SizedBox(height: 24),
 
@@ -68,7 +59,7 @@ class HomePanel extends StatelessWidget {
               const SizedBox(height: 24),
 
               if (viewModel.selectedFilter == 'Direct') ...[
-                if (viewModel.isMatchingLoading)
+                if (viewModel.isDirectLoading)
                   const Center(child: CircularProgressIndicator(color: AppColors.primaryYellow))
                 else if (viewModel.matchedDrivers.isEmpty)
                   const Padding(
@@ -103,12 +94,58 @@ class HomePanel extends StatelessWidget {
                     );
                   }),
               ] else ...[
-                const MixedRouteOptionCard(),
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 24),
-                  child: Divider(height: 1, thickness: 1, color: AppColors.greyBorder),
-                ),
-                const MixedRouteOptionCard(),
+                if (viewModel.isMixedLoading)
+                  const Center(child: CircularProgressIndicator(color: AppColors.primaryYellow))
+                else if (viewModel.mixedMatchedRoutes.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 32),
+                    child: Center(
+                      child: Text(
+                        'No mixed routes available. Try selecting "Direct".',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: AppColors.greyText, height: 1.5),
+                      ),
+                    ),
+                  )
+                else
+                  ...List.generate(viewModel.mixedMatchedRoutes.length, (index) {
+                    final route = viewModel.mixedMatchedRoutes[index];
+
+                    return Column(
+                      children: [
+                        MixedRouteOptionCard(
+                          pickupLocation: route['pickup_name'],
+                          destinationLocation: route['destination_name'],
+
+                          firstMileType: route['first_mile_type'],
+                          driverAName: route['driver_a_name'],
+                          driverADepartTime: route['driver_a_depart'],
+                          pickupDistanceKm: route['pickup_distance_km'],
+                          walkToStationMeters: route['walk_to_station_meters'],
+                          walkToStationMins: route['walk_to_station_mins'],
+
+                          boardStation: route['board_station'],
+                          alightStation: route['alight_station'],
+                          trainLine: route['train_line'],
+                          trainColor: route['train_color'] as Color,
+                          trainStops: route['train_stops'],
+                          trainDuration: route['train_duration_mins'],
+
+                          lastMileType: route['last_mile_type'],
+                          driverBName: route['driver_b_name'],
+                          driverBDepartTime: route['driver_b_depart'],
+                          dropoffDistanceKm: route['dropoff_distance_km'],
+                          walkToDestMeters: route['walk_to_dest_meters'],
+                          walkToDestMins: route['walk_to_dest_mins'],
+                        ),
+                        if (index != viewModel.mixedMatchedRoutes.length - 1)
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 24),
+                            child: Divider(height: 1, thickness: 1, color: AppColors.greyBorder),
+                          ),
+                      ],
+                    );
+                  }),
               ]
             ],
           ),
