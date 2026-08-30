@@ -1,5 +1,3 @@
-// lib/features/negotiation/view_models/negotiation_view_model.dart
-
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nak_tumpang/core/entities/tumpang_request.dart';
@@ -19,13 +17,20 @@ class NegotiationViewModel extends ChangeNotifier {
 
   final Map<String, Map<String, dynamic>> _userCache = {};
 
-  Future<void> fetchActiveTripAndInitialize(String role, {String? fallbackUserId}) async {
+  Future<void> fetchActiveTripAndInitialize(String role) async {
     isLoading = true;
     errorMessage = null;
     notifyListeners();
 
     try {
-      currentUserId = _supabase.auth.currentUser?.id ?? fallbackUserId ?? 'usr_driv_4412';
+      // Fetch strictly from the active Supabase session
+      currentUserId = _supabase.auth.currentUser?.id;
+
+      if (currentUserId == null) {
+        errorMessage = 'User not authenticated. Please log in.';
+        return;
+      }
+
       currentUserRole = role;
 
       final tableName = role == 'driver' ? 'driver_trips' : 'passenger_trips';
@@ -40,7 +45,7 @@ class NegotiationViewModel extends ChangeNotifier {
         currentTripId = tripData['id'] as String;
         await refreshRequests();
       } else {
-        errorMessage = 'No active $role trip found for user $currentUserId';
+        errorMessage = 'No active $role trip found for this account.';
       }
     } catch (e) {
       errorMessage = 'Error loading trip: $e';

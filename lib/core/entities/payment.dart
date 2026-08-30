@@ -1,5 +1,3 @@
-// The shared data blueprint (id, amount, dates). Placed in core so both the Payment feature and a future Payment History feature can access the same data model.
-
 class Payment {
   final String id;
   final String direction;
@@ -14,4 +12,28 @@ class Payment {
     required this.dueDate,
     required this.dateRange,
   });
+
+  // Dynamically parses the raw database row from Supabase
+  factory Payment.fromJson(Map<String, dynamic> json) {
+    return Payment(
+      id: json['id']?.toString() ?? '',
+      direction: json['direction']?.toString() ?? 'Tumpang Route',
+      amount: json['amount'] != null ? double.parse(json['amount'].toString()) : 0.0,
+      dueDate: json['due_date'] != null
+          ? DateTime.parse(json['due_date'].toString())
+          : DateTime.now(),
+      dateRange: json['date_range']?.toString() ??
+          'Month: ${json['month'] ?? ''} / ${json['year'] ?? ''}',
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'direction': direction,
+      'amount': amount,
+      'due_date': dueDate.toIso8601String(),
+      'date_range': dateRange,
+    };
+  }
 }

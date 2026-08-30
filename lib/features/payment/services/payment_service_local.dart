@@ -1,1 +1,0 @@
-// Houses the db.transaction logic for your mock gateway. This executes the SQLite batch updates to deduct wallet balances and update driver earnings.

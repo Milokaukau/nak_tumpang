@@ -1,5 +1,3 @@
-// lib/features/negotiation/UI/screens/request_list_screen.dart
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:nak_tumpang/features/negotiation/view_models/negotiation_view_model.dart';
@@ -7,12 +5,10 @@ import 'package:nak_tumpang/features/negotiation/UI/components/request_list_card
 
 class RequestListScreen extends StatefulWidget {
   final String role;
-  final String? fallbackUserId;
 
   const RequestListScreen({
     super.key,
     this.role = 'driver',
-    this.fallbackUserId,
   });
 
   @override
@@ -24,10 +20,7 @@ class _RequestListScreenState extends State<RequestListScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<NegotiationViewModel>().fetchActiveTripAndInitialize(
-        widget.role,
-        fallbackUserId: widget.fallbackUserId,
-      );
+      context.read<NegotiationViewModel>().fetchActiveTripAndInitialize(widget.role);
     });
   }
 

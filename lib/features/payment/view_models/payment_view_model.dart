@@ -1,33 +1,45 @@
-// Holds the selectedPayments Set, handles the "Select All" logic, and triggers the local data service. It extends ChangeNotifier.
-
 import 'package:flutter/material.dart';
-import '../../../core/entities/payment.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:nak_tumpang/core/entities/payment.dart';
+import 'package:nak_tumpang/features/payment/data/services/payment_supabase_service.dart';
 
 class PaymentViewModel extends ChangeNotifier {
-  // Hardcoded dummy data for UI testing
-  List<Payment> pendingPayments = [
-    Payment(
-      id: 'pay_01',
-      direction: 'Home ➔ TAR UMT',
-      amount: 150.00,
-      dueDate: DateTime(2026, 8, 7),
-      dateRange: '01 Aug - 31 Aug 2026',
-    ),
-    Payment(
-      id: 'pay_02',
-      direction: 'TAR UMT ➔ KLCC',
-      amount: 45.00,
-      dueDate: DateTime(2026, 8, 10),
-      dateRange: '05 Aug - 15 Aug 2026',
-    ),
-  ];
+  final PaymentSupabaseService _service = PaymentSupabaseService();
+  final SupabaseClient _supabase = Supabase.instance.client;
 
+  List<Payment> pendingPayments = [];
   Set<String> selectedPaymentIds = {};
+
+  bool isLoading = false;
+  String? errorMessage;
 
   double get totalSelectedAmount {
     return pendingPayments
         .where((p) => selectedPaymentIds.contains(p.id))
         .fold(0, (sum, item) => sum + item.amount);
+  }
+
+  Future<void> fetchPayments() async {
+    isLoading = true;
+    errorMessage = null;
+    notifyListeners();
+
+    try {
+      // Obtains the authenticated session ID dynamically
+      final userId = _supabase.auth.currentUser?.id;
+
+      if (userId == null) {
+        errorMessage = 'User not authenticated. Please log in.';
+        return;
+      }
+
+      pendingPayments = await _service.fetchPendingPayments(userId);
+    } catch (e) {
+      errorMessage = 'Failed to load payments: $e';
+    } finally {
+      isLoading = false;
+      notifyListeners();
+    }
   }
 
   void toggleSelection(String id) {
@@ -37,5 +49,30 @@ class PaymentViewModel extends ChangeNotifier {
       selectedPaymentIds.add(id);
     }
     notifyListeners();
+  }
+
+  Future<bool> processMockPayment(String paymentMethod) async {
+    isLoading = true;
+    notifyListeners();
+
+    try {
+      // Dynamic batch updates against Supabase table records
+      for (final id in selectedPaymentIds) {
+        await _service.completePayment(
+          paymentId: id,
+          paymentMethod: paymentMethod,
+        );
+      }
+
+      selectedPaymentIds.clear();
+      await fetchPayments();
+      return true;
+    } catch (e) {
+      errorMessage = 'Payment failed: $e';
+      return false;
+    } finally {
+      isLoading = false;
+      notifyListeners();
+    }
   }
 }

@@ -3,6 +3,7 @@ import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/features/profile/UI/screens/profile_screen.dart';
 import 'package:nak_tumpang/features/auth/UI/screens/login_screen.dart';
 import 'package:nak_tumpang/features/negotiation/UI/screens/request_list_screen.dart';
+import 'package:nak_tumpang/features/payment/UI/screens/payment_screen.dart';
 
 class HamburgerButton extends StatelessWidget {
   const HamburgerButton({super.key});
@@ -135,7 +136,7 @@ class AppSidebar extends StatelessWidget {
         nextScreen = const RequestListScreen();
         break;
       case 3:
-        nextScreen = const ProfileScreen(); // Keep as placeholder for now
+        nextScreen = const PaymentScreen(); // Keep as placeholder for now
         break;
       default:
         return;
