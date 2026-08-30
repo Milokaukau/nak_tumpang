@@ -1,3 +1,5 @@
+// lib/features/negotiation/view_models/negotiation_view_model.dart
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nak_tumpang/core/entities/tumpang_request.dart';
@@ -13,9 +15,9 @@ class NegotiationViewModel extends ChangeNotifier {
 
   bool isLoading = false;
   String? errorMessage;
+  List<TumpangRequest> pendingRequests = [];
 
   final Map<String, Map<String, dynamic>> _userCache = {};
-  Stream<List<TumpangRequest>>? pendingRequestsStream;
 
   Future<void> fetchActiveTripAndInitialize(String role, {String? fallbackUserId}) async {
     isLoading = true;
@@ -23,15 +25,10 @@ class NegotiationViewModel extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // 1. Get authenticated user ID from Auth session, or fallback if using custom IDs
       currentUserId = _supabase.auth.currentUser?.id ?? fallbackUserId ?? 'usr_driv_4412';
       currentUserRole = role;
 
-      debugPrint('Initializing for User ID: $currentUserId as $role');
-
-      // 2. Query driver_trips or passenger_trips for this user
       final tableName = role == 'driver' ? 'driver_trips' : 'passenger_trips';
-
       final dynamic tripData = await _supabase
           .from(tableName)
           .select('id')
@@ -39,47 +36,37 @@ class NegotiationViewModel extends ChangeNotifier {
           .limit(1)
           .maybeSingle();
 
-      debugPrint('Trip Query Result: $tripData');
-
       if (tripData != null && tripData['id'] != null) {
         currentTripId = tripData['id'] as String;
-        debugPrint('Active Trip ID found: $currentTripId');
-
-        // 3. Setup the real-time stream
-        if (role == 'driver') {
-          pendingRequestsStream = _service.streamRequestsForDriver(currentTripId!);
-        } else {
-          pendingRequestsStream = _service.streamRequestsForPassenger(currentTripId!);
-        }
+        await refreshRequests();
       } else {
         errorMessage = 'No active $role trip found for user $currentUserId';
-        debugPrint(errorMessage);
       }
-    } catch (e, stack) {
+    } catch (e) {
       errorMessage = 'Error loading trip: $e';
-      debugPrint('Error: $e\n$stack');
     } finally {
       isLoading = false;
       notifyListeners();
     }
   }
 
-  Stream<TumpangRequest?> singleRequestStream(String requestId) {
-    return _service.streamSingleRequest(requestId);
+  // Pull-to-refresh action
+  Future<void> refreshRequests() async {
+    if (currentTripId == null || currentUserRole == null) return;
+    try {
+      if (currentUserRole == 'driver') {
+        pendingRequests = await _service.fetchRequestsForDriver(currentTripId!);
+      } else {
+        pendingRequests = await _service.fetchRequestsForPassenger(currentTripId!);
+      }
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error refreshing requests: $e');
+    }
   }
 
-  Future<Map<String, dynamic>?> getUserProfile(String userId) async {
-    if (_userCache.containsKey(userId)) return _userCache[userId];
-    try {
-      final data = await _supabase.from('users').select().eq('id', userId).maybeSingle();
-      if (data != null) {
-        _userCache[userId] = data;
-        return data;
-      }
-    } catch (e) {
-      debugPrint('Error fetching user: $e');
-    }
-    return null;
+  Future<TumpangRequest?> getSingleRequest(String requestId) async {
+    return _service.fetchSingleRequest(requestId);
   }
 
   Future<Map<String, dynamic>?> getUserProfileByTripId(String tripId, {required bool isDriverTrip}) async {
@@ -88,20 +75,20 @@ class NegotiationViewModel extends ChangeNotifier {
     final tableName = isDriverTrip ? 'driver_trips' : 'passenger_trips';
     try {
       final res = await _supabase.from(tableName).select('users(*)').eq('id', tripId).maybeSingle();
-
       if (res != null && res['users'] != null) {
         final user = res['users'] as Map<String, dynamic>;
         _userCache[tripId] = user;
         return user;
       }
     } catch (e) {
-      debugPrint('Error fetching user by trip id: $e');
+      debugPrint('Error fetching user profile: $e');
     }
     return null;
   }
 
   Future<void> acceptTerm(String requestId, String fieldPrefix) async {
     await _service.acceptNegotiationField(requestId: requestId, fieldPrefix: fieldPrefix);
+    await refreshRequests();
   }
 
   Future<void> proposeNewTerm({
@@ -122,10 +109,12 @@ class NegotiationViewModel extends ChangeNotifier {
       requestedById: currentUserId!,
       isAccepted: false,
     );
+    await refreshRequests();
   }
 
   Future<void> rejectEntireRequest(String requestId) async {
     await _service.rejectRequest(requestId);
+    await refreshRequests();
   }
 
   Future<bool> finalizeAgreement(TumpangRequest request) async {

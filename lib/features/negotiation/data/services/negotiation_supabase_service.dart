@@ -1,7 +1,8 @@
+// lib/features/negotiation/data/services/negotiation_supabase_service.dart
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nak_tumpang/core/entities/tumpang_request.dart';
 
-// Ensure the class name is NegotiationSupabaseService
 class NegotiationSupabaseService {
   final SupabaseClient _supabase;
 
@@ -10,33 +11,38 @@ class NegotiationSupabaseService {
 
   final String _table = 'tumpang_request';
 
-  Stream<TumpangRequest?> streamSingleRequest(String requestId) {
-    return _supabase
+  // Standard one-time HTTP GET for a single request
+  Future<TumpangRequest?> fetchSingleRequest(String requestId) async {
+    final response = await _supabase
         .from(_table)
-        .stream(primaryKey: ['id'])
+        .select()
         .eq('id', requestId)
-        .map((rows) {
-      if (rows.isEmpty) return null;
-      return TumpangRequest.fromJson(rows.first);
-    });
+        .maybeSingle();
+
+    if (response == null) return null;
+    return TumpangRequest.fromJson(response);
   }
 
-  Stream<List<TumpangRequest>> streamRequestsForDriver(String driverTripId) {
-    return _supabase
+  // Standard one-time HTTP GET for Driver's pending requests
+  Future<List<TumpangRequest>> fetchRequestsForDriver(String driverTripId) async {
+    final List<dynamic> rows = await _supabase
         .from(_table)
-        .stream(primaryKey: ['id'])
+        .select()
         .eq('driver_trip_id', driverTripId)
-        .eq('status', 'negotiating')
-        .map((rows) => rows.map((row) => TumpangRequest.fromJson(row)).toList());
+        .eq('status', 'negotiating');
+
+    return rows.map((row) => TumpangRequest.fromJson(row)).toList();
   }
 
-  Stream<List<TumpangRequest>> streamRequestsForPassenger(String passengerTripId) {
-    return _supabase
+  // Standard one-time HTTP GET for Passenger's pending requests
+  Future<List<TumpangRequest>> fetchRequestsForPassenger(String passengerTripId) async {
+    final List<dynamic> rows = await _supabase
         .from(_table)
-        .stream(primaryKey: ['id'])
+        .select()
         .eq('passenger_trip_id', passengerTripId)
-        .eq('status', 'negotiating')
-        .map((rows) => rows.map((row) => TumpangRequest.fromJson(row)).toList());
+        .eq('status', 'negotiating');
+
+    return rows.map((row) => TumpangRequest.fromJson(row)).toList();
   }
 
   Future<void> updateNegotiationField({
