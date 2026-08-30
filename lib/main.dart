@@ -6,10 +6,7 @@ import 'package:nak_tumpang/firebase_options.dart';
 import 'package:nak_tumpang/core/theme/app_theme.dart';
 import 'package:nak_tumpang/core/app_providers.dart';
 import 'package:nak_tumpang/features/home/UI/screens/home_screen.dart';
-import 'package:nak_tumpang/features/exceptions/UI/screens/no_need_fetch_screen.dart';
-import 'package:nak_tumpang/features/exceptions/UI/screens/cant_fetch_screen.dart';
-//import 'package:latlong2/latlong.dart'; //exceptions testing purpose
-//import 'package:nak_tumpang/seed_data.dart'; // NEVER REMOVE THIS IMPORT (if error occurred, just comment out)
+// import 'package:nak_tumpang/seed_data.dart'; // NEVER REMOVE THIS IMPORT (if error occurred, just comment out)
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
