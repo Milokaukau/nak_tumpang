@@ -40,7 +40,6 @@ class HomeViewModel extends ChangeNotifier {
     final selected = availableTrips.firstWhere((t) => t['id'] == tripId);
     currentPassengerTrip = selected;
 
-    // Wipe the cache and clear old results when the trip changes
     _hasFoundDirect = false;
     _hasFoundMixed = false;
     matchedDrivers.clear();
@@ -60,7 +59,6 @@ class HomeViewModel extends ChangeNotifier {
       currentPassengerTrip = trips.first;
       currentPassenger = trips.first['users'];
 
-      // FIXED: Removed 'bool' keyword to update class variables, not create local ones
       _hasFoundDirect = false;
       _hasFoundMixed = false;
       matchedDrivers.clear();
@@ -163,6 +161,10 @@ class HomeViewModel extends ChangeNotifier {
 
     if (_fetchId != currentFetchId) return;
 
+    if (tempMatchedDrivers.isEmpty) {
+      tempMatchedDrivers = _getHardcodedDirectData();
+    }
+
     matchedDrivers = tempMatchedDrivers;
     _hasFoundDirect = true;
     isDirectLoading = false;
@@ -200,13 +202,26 @@ class HomeViewModel extends ChangeNotifier {
       final dropStation = TransitUtils.findNearestStation(passDrop);
 
       if (pickStation == null || dropStation == null) {
+        // --- NEW: Inject fallback on early exit ---
+        mixedMatchedRoutes = _getHardcodedMixedData();
         _hasFoundMixed = true;
         isMixedLoading = false;
         notifyListeners();
         return;
       }
 
-      final trainDuration = TransitUtils.calculateTrainDuration(pickStation, dropStation);
+      final isInterchange = pickStation.lineId != dropStation.lineId;
+      int trainDuration;
+
+      if (isInterchange) {
+        final transitDist = MatchingUtils.calculateDistance(
+            pickStation.location.latitude, pickStation.location.longitude,
+            dropStation.location.latitude, dropStation.location.longitude
+        );
+        trainDuration = (transitDist / 660).ceil() + 10;
+      } else {
+        trainDuration = TransitUtils.calculateTrainDuration(pickStation, dropStation);
+      }
 
       final pickWalkMetrics = await _orsService.getWalkingMetrics(passPick, pickStation.location);
       if (_fetchId != currentFetchId) return;
@@ -249,7 +264,6 @@ class HomeViewModel extends ChangeNotifier {
 
         if (drivStart.latitude == 0 || drivEnd.latitude == 0) continue;
 
-        // First-Mile Driver check
         if ((drivTime - passTime).abs() <= 30) {
           final pickDist = MatchingUtils.calculateDistance(passPick.latitude, passPick.longitude, drivStart.latitude, drivStart.longitude);
           final dropDistToStation = MatchingUtils.calculateDistance(pickStation.location.latitude, pickStation.location.longitude, drivEnd.latitude, drivEnd.longitude);
@@ -273,7 +287,6 @@ class HomeViewModel extends ChangeNotifier {
           }
         }
 
-        // Last-Mile Driver check
         if (drivTime > passTime) {
           final pickDistFromStation = MatchingUtils.calculateDistance(dropStation.location.latitude, dropStation.location.longitude, drivStart.latitude, drivStart.longitude);
           final dropDistToDest = MatchingUtils.calculateDistance(passDrop.latitude, passDrop.longitude, drivEnd.latitude, drivEnd.longitude);
@@ -316,9 +329,14 @@ class HomeViewModel extends ChangeNotifier {
 
             'board_station': pickStation.name,
             'alight_station': dropStation.name,
-            'train_line': pickStation.lineName,
-            'train_color': pickStation.lineColor,
-            'train_stops': (pickStation.sequence - dropStation.sequence).abs(),
+
+            'is_interchange': isInterchange,
+            'board_line_name': pickStation.lineName,
+            'board_line_short_name': pickStation.lineShortName,
+            'board_line_color': pickStation.lineColor,
+            'alight_line_name': dropStation.lineName,
+            'alight_line_short_name': dropStation.lineShortName,
+            'alight_line_color': dropStation.lineColor,
             'train_duration_mins': trainDuration,
 
             'last_mile_type': lm['type'],
@@ -333,15 +351,18 @@ class HomeViewModel extends ChangeNotifier {
           });
         }
       }
-
-      if (_fetchId != currentFetchId) return;
-      mixedMatchedRoutes = tempMixedRoutes;
-      _hasFoundMixed = true;
-
     } catch (e) {
       print('Error generating mixed routes: $e');
     }
 
+    if (_fetchId != currentFetchId) return;
+
+    if (tempMixedRoutes.isEmpty) {
+      tempMixedRoutes = _getHardcodedMixedData();
+    }
+
+    mixedMatchedRoutes = tempMixedRoutes;
+    _hasFoundMixed = true;
     isMixedLoading = false;
     notifyListeners();
   }
@@ -383,5 +404,91 @@ class HomeViewModel extends ChangeNotifier {
       'saturday': row['active_saturday'] ?? false,
       'sunday': row['active_sunday'] ?? false,
     };
+  }
+
+  List<Map<String, dynamic>> _getHardcodedDirectData() {
+    return [
+      {
+        'id': 'hardcoded_id_1',
+        'name': 'Hardcoded Driver A',
+        'phone': 'Hardcoded Phone 123',
+        'profile_image_url': null,
+        'pickup_distance_km': 1.5,
+        'driver_profile': {
+          'depart_time': '08:00 AM',
+        }
+      },
+      {
+        'id': 'hardcoded_id_2',
+        'name': 'Hardcoded Driver B',
+        'phone': 'Hardcoded Phone 456',
+        'profile_image_url': null,
+        'pickup_distance_km': 3.2,
+        'driver_profile': {
+          'depart_time': '08:30 AM',
+        }
+      }
+    ];
+  }
+
+  List<Map<String, dynamic>> _getHardcodedMixedData() {
+    return [
+      {
+        'first_mile_type': 'Driver',
+        'driver_a_name': 'Hardcoded Driver A',
+        'driver_a_depart': '07:30 AM',
+        'pickup_distance_km': 2.1,
+        'walk_to_station_meters': 0.0,
+        'walk_to_station_mins': 0,
+
+        'board_station': 'Hardcoded Boarding Station A',
+        'alight_station': 'Hardcoded Alight Station B',
+        'is_interchange': false,
+        'board_line_name': 'Hardcoded LRT Line',
+        'board_line_short_name': 'HC', // --- ADDED ---
+        'board_line_color': Colors.red,
+        'alight_line_name': 'Hardcoded LRT Line',
+        'alight_line_short_name': 'HC', // --- ADDED ---
+        'alight_line_color': Colors.red,
+        'train_duration_mins': 25,
+
+        'last_mile_type': 'Walk',
+        'driver_b_name': null,
+        'driver_b_depart': null,
+        'dropoff_distance_km': null,
+        'walk_to_dest_meters': 800.0,
+        'walk_to_dest_mins': 10,
+        'pickup_name': 'Hardcoded Pickup Location',
+        'destination_name': 'Hardcoded Dropoff Destination',
+      },
+      {
+        'first_mile_type': 'Walk',
+        'driver_a_name': null,
+        'driver_a_depart': null,
+        'pickup_distance_km': null,
+        'walk_to_station_meters': 500.0,
+        'walk_to_station_mins': 6,
+
+        'board_station': 'Hardcoded Boarding Station C',
+        'alight_station': 'Hardcoded Alight Station D',
+        'is_interchange': true,
+        'board_line_name': 'Hardcoded Start Line',
+        'board_line_short_name': 'HC', // --- ADDED ---
+        'board_line_color': Colors.green,
+        'alight_line_name': 'Hardcoded End Line',
+        'alight_line_short_name': 'HC', // --- ADDED ---
+        'alight_line_color': Colors.orange,
+        'train_duration_mins': 45,
+
+        'last_mile_type': 'Driver',
+        'driver_b_name': 'Hardcoded Driver B',
+        'driver_b_depart': '08:45 AM',
+        'dropoff_distance_km': 3.2,
+        'walk_to_dest_meters': 0.0,
+        'walk_to_dest_mins': 0,
+        'pickup_name': 'Hardcoded Pickup Location',
+        'destination_name': 'Hardcoded Dropoff Destination',
+      }
+    ];
   }
 }

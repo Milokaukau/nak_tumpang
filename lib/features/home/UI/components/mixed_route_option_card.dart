@@ -10,10 +10,15 @@ class MixedRouteOptionCard extends StatelessWidget {
 
   final String boardStation;
   final String alightStation;
-  final String trainLine;
-  final Color trainColor;
-  final int trainStops;
   final int trainDuration;
+
+  final bool isInterchange;
+  final String boardLineName;
+  final String boardLineShortName;
+  final Color boardLineColor;
+  final String alightLineName;
+  final String alightLineShortName;
+  final Color alightLineColor;
 
   final String lastMileType;
   final String? driverBName;
@@ -33,19 +38,20 @@ class MixedRouteOptionCard extends StatelessWidget {
     this.driverAName,
     this.driverADepartTime,
     this.pickupDistanceKm,
-
     required this.boardStation,
     required this.alightStation,
-    required this.trainLine,
-    required this.trainColor,
-    required this.trainStops,
     required this.trainDuration,
-
+    required this.isInterchange,
+    required this.boardLineName,
+    required this.boardLineShortName,
+    required this.boardLineColor,
+    required this.alightLineName,
+    required this.alightLineShortName,
+    required this.alightLineColor,
     required this.lastMileType,
     this.driverBName,
     this.driverBDepartTime,
     this.dropoffDistanceKm,
-
     required this.pickupLocation,
     required this.destinationLocation,
     required this.walkToStationMeters,
@@ -54,26 +60,23 @@ class MixedRouteOptionCard extends StatelessWidget {
     required this.walkToDestMins,
   });
 
-  // Capitalize name and append type (LRT/Monorail/MRT)
   String _formatStationName(String name, String lineName) {
-    // Title case formatting
     final formattedName = name.toLowerCase().split(' ').map((word) {
       if (word.isEmpty) return '';
       return word[0].toUpperCase() + word.substring(1);
     }).join(' ');
 
-    // Determine transit suffix
     String suffix = 'LRT';
-    if (lineName.toLowerCase().contains('mrl') || lineName.toLowerCase().contains('monorail')) {
-      suffix = 'Monorail';
-    } else if (lineName.toLowerCase().contains('mrt')) {
+    final lowerLine = lineName.toLowerCase();
+    if (lowerLine.contains('mrl') || lowerLine.contains('monorail')) {
+      suffix = 'MRL';
+    } else if (lowerLine.contains('mrt')) {
       suffix = 'MRT';
     }
 
     return '$formattedName $suffix';
   }
 
-  @override
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -88,17 +91,17 @@ class MixedRouteOptionCard extends StatelessWidget {
               : _buildWalkInfo('Walk to station', distanceMeters: walkToStationMeters, durationMins: walkToStationMins),
         ),
 
-        // Node 2: Train
+        // Node 2: Train Step
         _buildTimelineStep(
-          location: _formatStationName(boardStation, trainLine),
+          location: _formatStationName(boardStation, boardLineName),
           isLast: false,
           isDashed: true,
-          child: _buildLrtInfo(trainLine, Icons.train, trainColor, '$trainStops stops • $trainDuration mins'),
+          child: _buildTrainInfo(),
         ),
 
         // Node 3: Last Mile
         _buildTimelineStep(
-          location: _formatStationName(alightStation, trainLine),
+          location: _formatStationName(alightStation, alightLineName),
           isLast: false,
           child: lastMileType == 'Driver' && driverBName != null
               ? _buildDriverInfo(driverBName!, Icons.directions_car, driverBDepartTime!, dropoffDistanceKm)
@@ -121,6 +124,55 @@ class MixedRouteOptionCard extends StatelessWidget {
     );
   }
 
+  Widget _buildTrainInfo() {
+    if (isInterchange) {
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.grey.shade50,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: AppColors.greyBorder),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.train, color: boardLineColor, size: 20),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    boardLineShortName, // Use short name when interchange is needed
+                    style: TextStyle(color: boardLineColor, fontWeight: FontWeight.w600, fontSize: 13),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 6),
+                  child: Icon(Icons.arrow_forward, color: Colors.grey, size: 16),
+                ),
+                Icon(Icons.train, color: alightLineColor, size: 20),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    alightLineShortName, // Use short name when interchange is needed
+                    style: TextStyle(color: alightLineColor, fontWeight: FontWeight.w600, fontSize: 13),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text('~ $trainDuration mins (Line Transfer)', style: const TextStyle(fontSize: 12, color: AppColors.greyText)),
+          ],
+        ),
+      );
+    }
+
+    // Uses full line name when no interchange is needed
+    return _buildLrtInfo(boardLineName, Icons.train, boardLineColor, '~ $trainDuration mins');
+  }
+
   Widget _buildTimelineStep({
     required String location,
     required bool isLast,
@@ -134,18 +186,22 @@ class MixedRouteOptionCard extends StatelessWidget {
           Column(
             children: [
               Container(
-                width: 16, height: 16, margin: const EdgeInsets.only(top: 2),
+                width: 16,
+                height: 16,
+                margin: const EdgeInsets.only(top: 2),
                 decoration: const BoxDecoration(color: AppColors.primaryYellow, shape: BoxShape.circle),
               ),
               if (!isLast)
                 Expanded(
                   child: isDashed
                       ? Container(
-                    width: 2, margin: const EdgeInsets.symmetric(vertical: 4),
+                    width: 2,
+                    margin: const EdgeInsets.symmetric(vertical: 4),
                     child: CustomPaint(painter: _DashedLinePainter()),
                   )
                       : Container(
-                    width: 2, margin: const EdgeInsets.symmetric(vertical: 4),
+                    width: 2,
+                    margin: const EdgeInsets.symmetric(vertical: 4),
                     color: AppColors.primaryYellow,
                   ),
                 ),
@@ -157,10 +213,10 @@ class MixedRouteOptionCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                    location,
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis
+                  location,
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 12),
                 child,
@@ -177,7 +233,8 @@ class MixedRouteOptionCard extends StatelessWidget {
     return Row(
       children: [
         Container(
-          width: 40, height: 40,
+          width: 40,
+          height: 40,
           decoration: BoxDecoration(color: AppColors.driverBlueBg, borderRadius: BorderRadius.circular(8)),
           child: Icon(icon, color: AppColors.greyText),
         ),
@@ -203,7 +260,8 @@ class MixedRouteOptionCard extends StatelessWidget {
     return Row(
       children: [
         Container(
-          width: 40, height: 40,
+          width: 40,
+          height: 40,
           decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(8)),
           child: const Icon(Icons.directions_walk, color: Colors.green),
         ),
@@ -223,7 +281,8 @@ class MixedRouteOptionCard extends StatelessWidget {
     return Row(
       children: [
         Container(
-          width: 40, height: 40,
+          width: 40,
+          height: 40,
           decoration: BoxDecoration(
             color: iconColor.withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(8),

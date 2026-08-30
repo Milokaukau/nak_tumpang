@@ -126,9 +126,14 @@ class HomePanel extends StatelessWidget {
 
                           boardStation: route['board_station'],
                           alightStation: route['alight_station'],
-                          trainLine: route['train_line'],
-                          trainColor: route['train_color'] as Color,
-                          trainStops: route['train_stops'],
+
+                          isInterchange: route['is_interchange'],
+                          boardLineName: route['board_line_name'],
+                          boardLineShortName: route['board_line_short_name'],
+                          boardLineColor: route['board_line_color'] as Color,
+                          alightLineName: route['alight_line_name'],
+                          alightLineShortName: route['alight_line_short_name'],
+                          alightLineColor: route['alight_line_color'] as Color,
                           trainDuration: route['train_duration_mins'],
 
                           lastMileType: route['last_mile_type'],

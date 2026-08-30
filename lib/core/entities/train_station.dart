@@ -7,6 +7,7 @@ class TrainStation {
   final LatLng location;
   final String lineId;
   final String lineName;
+  final String lineShortName;
   final Color lineColor;
   final int sequence;
 
@@ -16,6 +17,7 @@ class TrainStation {
     required this.location,
     required this.lineId,
     required this.lineName,
+    required this.lineShortName,
     required this.lineColor,
     required this.sequence,
   });
@@ -27,6 +29,7 @@ class TrainStation {
       location: LatLng(json['lat'], json['lng']),
       lineId: json['lineId'],
       lineName: json['lineName'],
+      lineShortName: json['lineShortName'] ?? json['lineName'],
       lineColor: Color(json['lineColor']),
       sequence: json['sequence'],
     );
@@ -40,6 +43,7 @@ class TrainStation {
       'lng': location.longitude,
       'lineId': lineId,
       'lineName': lineName,
+      'lineShortName': lineShortName,
       'lineColor': lineColor.toARGB32(),
       'sequence': sequence,
     };

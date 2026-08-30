@@ -13,7 +13,6 @@ class GtfsService {
   final String _dateKey = 'gtfs_last_updated';
 
   Future<void> initStations() async {
-    // 1. Skip if already loaded into RAM this session
     if (TrainStationData.stations.isNotEmpty) return;
 
     final prefs = await SharedPreferences.getInstance();
@@ -22,20 +21,16 @@ class GtfsService {
 
     bool needsUpdate = true;
 
-    // 2. Check if local cache exists and is fresh (< 7 days old)
     if (lastUpdateStr != null && cachedData != null) {
       final lastUpdate = DateTime.parse(lastUpdateStr);
       if (DateTime.now().difference(lastUpdate).inDays < 7) {
         needsUpdate = false;
-
-        // Load instantly from phone storage
         final List<dynamic> decoded = json.decode(cachedData);
         TrainStationData.stations = decoded.map((e) => TrainStation.fromJson(e)).toList();
         print('✅ Loaded ${TrainStationData.stations.length} transit stations from local cache.');
       }
     }
 
-    // 3. Only download from API if cache is missing or expired
     if (needsUpdate) {
       await _fetchAndExtractGtfs(prefs);
     }
@@ -48,7 +43,6 @@ class GtfsService {
 
       if (response.statusCode == 200) {
         final archive = ZipDecoder().decodeBytes(response.bodyBytes);
-
         String stopsCsv = '';
         String routesCsv = '';
         String stopTimesCsv = '';
@@ -67,13 +61,31 @@ class GtfsService {
     }
   }
 
-  Future<void> _populateAndCacheStations(String stopsCsv, String routesCsv, String stopTimesCsv, SharedPreferences prefs) async {
-    final routeDetails = <String, ({String name, Color color})>{};
+
+  Future<void> _populateAndCacheStations(
+      String stopsCsv,
+      String routesCsv,
+      String stopTimesCsv,
+      SharedPreferences prefs) async {
+    final routeDetails =
+    <String, ({String name, Color color, String shortName})>{};
+
     for (var line in routesCsv.split('\n').skip(1)) {
       final parts = line.split(',');
       if (parts.length > 6) {
-        final color = Color(int.parse('FF${parts[6].trim()}', radix: 16));
-        routeDetails[parts[0].trim()] = (name: parts[3].trim(), color: color);
+        final routeId = parts[0].trim();
+        final shortName = parts[2].trim();
+        final longName = parts[3].trim();
+        final colorHex = parts[6].trim();
+
+        if (shortName.isNotEmpty && colorHex.isNotEmpty) {
+          final color = Color(int.parse('FF$colorHex', radix: 16));
+          routeDetails[routeId] = (
+          name: longName,
+          color: color,
+          shortName: shortName,
+          );
+        }
       }
     }
 
@@ -100,23 +112,21 @@ class GtfsService {
         final details = routeDetails[routeId];
 
         parsedStations.add(
-            TrainStation(
-              id: parts[0].trim(),
-              name: parts[1].trim(),
-              location: LatLng(lat, lon),
-              lineId: routeId,
-              lineName: details?.name ?? routeId,
-              lineColor: details?.color ?? Colors.pink,
-              sequence: stopSequences[parts[0].trim()] ?? 0,
-            )
+          TrainStation(
+            id: parts[0].trim(),
+            name: parts[1].trim(),
+            location: LatLng(lat, lon),
+            lineId: routeId,
+            lineName: details?.name ?? routeId,
+            lineShortName: details?.shortName ?? routeId, // Uses parsed short name (e.g., KJL, SPL, AGL)
+            lineColor: details?.color ?? Colors.pink,
+            sequence: stopSequences[parts[0].trim()] ?? 0,
+          ),
         );
       }
     }
 
-    // Update RAM
     TrainStationData.stations = parsedStations;
-
-    // Save to Local Storage and update timestamp
     final jsonList = parsedStations.map((s) => s.toJson()).toList();
     await prefs.setString(_cacheKey, json.encode(jsonList));
     await prefs.setString(_dateKey, DateTime.now().toIso8601String());
