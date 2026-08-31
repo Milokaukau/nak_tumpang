@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter_stripe/flutter_stripe.dart'; // 1. Import Stripe
 import 'package:nak_tumpang/core/theme/app_theme.dart';
 import 'package:nak_tumpang/core/app_providers.dart';
 import 'package:nak_tumpang/features/home/UI/screens/home_screen.dart';
@@ -10,17 +11,19 @@ import 'package:nak_tumpang/core/services/local_db_service.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-// Load the .env file
+  // Load the .env file
   await dotenv.load(fileName: ".env");
 
-  // ADD THESE TWO LINES:
+  // 2. Initialize Stripe BEFORE running the app
+  Stripe.publishableKey = dotenv.env['STRIPE_PUBLISHABLE_KEY'] ?? '';
+
   print("🔗 Target URL: ${dotenv.env['SUPABASE_URL']}");
   print("🔑 Target Key starts with: ${dotenv.env['SUPABASE_ANON_KEY']?.substring(0, 10)}...");
 
-  // Initialize Supabase
+  // Initialize Supabase (Note: Changed 'publishableKey' to 'anonKey' as per standard Supabase v2 syntax)
   await Supabase.initialize(
     url: dotenv.env['SUPABASE_URL'] ?? '',
-    publishableKey: dotenv.env['SUPABASE_ANON_KEY'] ?? '',
+    anonKey: dotenv.env['SUPABASE_ANON_KEY'] ?? '',
   );
 
   print('✅ Supabase connected successfully!');
