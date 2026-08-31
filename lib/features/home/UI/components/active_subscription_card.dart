@@ -4,12 +4,13 @@ import 'package:nak_tumpang/core/components/base_profile_card.dart';
 import 'package:nak_tumpang/core/components/base_button.dart';
 
 class ActiveSubscriptionCard extends StatelessWidget {
-  final String driverName;
-  final String driverPhone;
-  final String? driverImageUrl;
+  final String name;
+  final String phone;
+  final String? imageUrl;
   final String pickupLocation;
   final String dropoffLocation;
-  final String pickupTime;
+  final String time;
+  final String exceptionButtonText; // Allows custom text per role
 
   final VoidCallback onCallPressed;
   final VoidCallback onDetailsPressed;
@@ -17,12 +18,13 @@ class ActiveSubscriptionCard extends StatelessWidget {
 
   const ActiveSubscriptionCard({
     super.key,
-    required this.driverName,
-    required this.driverPhone,
-    this.driverImageUrl,
+    required this.name,
+    required this.phone,
+    this.imageUrl,
     required this.pickupLocation,
     required this.dropoffLocation,
-    required this.pickupTime,
+    required this.time,
+    required this.exceptionButtonText,
     required this.onCallPressed,
     required this.onDetailsPressed,
     required this.onExceptionPressed,
@@ -33,13 +35,11 @@ class ActiveSubscriptionCard extends StatelessWidget {
     return BaseProfileCard(
       hasBorder: false,
       padding: const EdgeInsets.symmetric(vertical: 16),
-      profileImageUrl: driverImageUrl,
-
+      profileImageUrl: imageUrl,
       title: Text(
-        driverName,
+        name,
         style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
       ),
-
       description: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -51,7 +51,7 @@ class ActiveSubscriptionCard extends StatelessWidget {
                 child: Text(
                   pickupLocation,
                   style: const TextStyle(fontSize: 13),
-                  overflow: TextOverflow.ellipsis, // Prevents overflow
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
               const Padding(
@@ -64,7 +64,7 @@ class ActiveSubscriptionCard extends StatelessWidget {
                 child: Text(
                   dropoffLocation,
                   style: const TextStyle(fontSize: 13),
-                  overflow: TextOverflow.ellipsis, // Prevents overflow
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
@@ -74,7 +74,7 @@ class ActiveSubscriptionCard extends StatelessWidget {
             children: [
               const Icon(Icons.schedule, size: 16, color: AppColors.primaryYellow),
               const SizedBox(width: 4),
-              Text(pickupTime, style: const TextStyle(fontSize: 13)),
+              Text(time, style: const TextStyle(fontSize: 13)),
             ],
           ),
           const SizedBox(height: 4),
@@ -82,12 +82,11 @@ class ActiveSubscriptionCard extends StatelessWidget {
             children: [
               const Icon(Icons.phone, size: 16, color: AppColors.primaryYellow),
               const SizedBox(width: 4),
-              Text(driverPhone, style: const TextStyle(fontSize: 13)),
+              Text(phone, style: const TextStyle(fontSize: 13)),
             ],
           ),
         ],
       ),
-
       actionButtons: Column(
         children: [
           BaseButton(
@@ -101,7 +100,7 @@ class ActiveSubscriptionCard extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                flex: 2, // Takes up 40% of the available row space
+                flex: 2,
                 child: BaseButton(
                   text: 'Details',
                   onPressed: onDetailsPressed,
@@ -112,13 +111,13 @@ class ActiveSubscriptionCard extends StatelessWidget {
               ),
               const SizedBox(width: 12),
               Expanded(
-                flex: 3, // Takes up 60% of the available row space
+                flex: 3,
                 child: BaseButton(
-                  text: 'No need tumpang at...',
+                  text: exceptionButtonText,
                   onPressed: onExceptionPressed,
                   isOutlined: true,
                   height: 44,
-                  textStyle: const TextStyle(fontWeight: FontWeight.normal, fontSize: 13), // slightly smaller text to ensure safety on small screens
+                  textStyle: const TextStyle(fontWeight: FontWeight.normal, fontSize: 13),
                 ),
               ),
             ],

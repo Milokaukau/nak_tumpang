@@ -20,7 +20,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     // Trigger the database fetch as soon as the screen renders
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<HomeViewModel>().fetchMockPassenger();
+      context.read<HomeViewModel>().fetchMockDriver();
     });
   }
 

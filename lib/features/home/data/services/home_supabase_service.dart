@@ -30,9 +30,12 @@ class HomeSupabaseService {
     }
   }
 
+  // ==========================================
+  // PASSENGER SUBSCRIPTIONS
+  // ==========================================
   Future<List<Map<String, dynamic>>> fetchActiveSubscriptions(String passengerTripId) async {
     try {
-      print('🔍 Fetching subscriptions for Trip ID: $passengerTripId');
+      print('🔍 Fetching passenger subscriptions for Trip ID: $passengerTripId');
 
       final response = await _supabase
           .from('tumpang_subscription')
@@ -47,10 +50,37 @@ class HomeSupabaseService {
           .eq('passenger_trip_id', passengerTripId)
           .eq('status', 'active');
 
-      print('✅ Raw Subscriptions Data: $response');
       return (response as List).map((e) => e as Map<String, dynamic>).toList();
     } catch (e) {
-      print('⚠️ Error fetching subscriptions: $e');
+      print('⚠️ Error fetching passenger subscriptions: $e');
+      return [];
+    }
+  }
+
+  // ==========================================
+  // DRIVER SUBSCRIPTIONS
+  // ==========================================
+  Future<List<Map<String, dynamic>>> fetchDriverActiveSubscriptions(String driverId) async {
+    try {
+      print('🔍 Fetching driver subscriptions for Driver ID: $driverId');
+      final response = await _supabase
+          .from('tumpang_subscription')
+          .select('''
+            *,
+            passenger_trips (
+              users (
+                name, phone, avatar_url
+              )
+            ),
+            driver_trips!inner(user_id)
+          ''')
+      // Using !inner join allows us to filter subscriptions by the driver's user ID directly
+          .eq('driver_trips.user_id', driverId)
+          .eq('status', 'active');
+
+      return (response as List).map((e) => e as Map<String, dynamic>).toList();
+    } catch (e) {
+      print('⚠️ Error fetching driver subscriptions: $e');
       return [];
     }
   }

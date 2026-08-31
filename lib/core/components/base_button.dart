@@ -30,6 +30,15 @@ class BaseButton extends StatelessWidget {
     final style = textStyle ?? const TextStyle(fontWeight: FontWeight.bold, fontSize: 14);
     final shape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(8));
 
+    // Extracted shared Text widget to prevent repeating code
+    final buttonText = Text(
+      text,
+      style: style,
+      textAlign: TextAlign.center,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    );
+
     Widget button;
 
     if (isOutlined) {
@@ -41,13 +50,7 @@ class BaseButton extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: 7),
           shape: shape,
         ),
-        child: Text(
-          text,
-          style: style,
-          textAlign: TextAlign.center,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
+        child: buttonText,
       );
     } else {
       button = ElevatedButton(
@@ -59,13 +62,7 @@ class BaseButton extends StatelessWidget {
           shape: shape,
           elevation: 0,
         ),
-        child: Text(
-          text,
-          style: style,
-          textAlign: TextAlign.center,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
+        child: buttonText,
       );
     }
 

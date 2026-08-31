@@ -8,6 +8,7 @@ import 'package:nak_tumpang/core/utils/transit_utils.dart';
 
 class HomeViewModel extends ChangeNotifier {
   String selectedFilter = 'Direct';
+  String currentUserRole = 'passenger';
   Map<String, dynamic>? currentPassenger;
   Map<String, dynamic>? currentPassengerTrip;
 
@@ -42,36 +43,27 @@ class HomeViewModel extends ChangeNotifier {
     selectedFilter = option;
     notifyListeners();
 
-    // Only calculate if the UI is actually visible
     if (showMatchingUI) {
       _matchCurrentRouteType();
     }
   }
 
-  Future<void> changeTrip(String tripId) async {
-    if (isScreenLoading) return;
+  // ==========================================
+  // FETCH METHODS
+  // ==========================================
+
+  Future<void> fetchMockDriver() async {
     isScreenLoading = true;
+    currentUserRole = 'driver';
+    showMatchingUI = false;
     notifyListeners();
 
     try {
-      final selected = availableTrips.firstWhere((t) => t['id'] == tripId);
-      currentPassengerTrip = selected;
-
-      final rawSubs = await _homeService.fetchActiveSubscriptions(tripId);
-      activeSubscriptions = _mapSubscriptions(rawSubs);
-
-      _hasFoundDirect = false;
-      _hasFoundMixed = false;
-      matchedDrivers.clear();
-      mixedMatchedRoutes.clear();
-
-      if (showMatchingUI) {
-        await _matchCurrentRouteType();
-      }
+      final rawSubs = await _homeService.fetchDriverActiveSubscriptions('f2256b13-901f-4cce-bf15-6afb178e0998');
+      activeSubscriptions = _mapSubscriptions(rawSubs, isForPassenger: false);
     } catch (e) {
-      print('⚠️ Error changing trip: $e');
+      print('⚠️ Error fetching driver data: $e');
     } finally {
-      // This will ALWAYS execute, preventing the infinite loading spinner
       isScreenLoading = false;
       notifyListeners();
     }
@@ -79,6 +71,7 @@ class HomeViewModel extends ChangeNotifier {
 
   Future<void> fetchMockPassenger() async {
     isScreenLoading = true;
+    currentUserRole = 'passenger';
     notifyListeners();
 
     try {
@@ -90,7 +83,7 @@ class HomeViewModel extends ChangeNotifier {
         currentPassenger = trips.first['users'];
 
         final rawSubs = await _homeService.fetchActiveSubscriptions(currentPassengerTrip!['id']);
-        activeSubscriptions = _mapSubscriptions(rawSubs);
+        activeSubscriptions = _mapSubscriptions(rawSubs, isForPassenger: true);
 
         _hasFoundDirect = false;
         _hasFoundMixed = false;
@@ -108,11 +101,42 @@ class HomeViewModel extends ChangeNotifier {
     } catch (e) {
       print('⚠️ Error fetching initial data: $e');
     } finally {
-      // This will ALWAYS execute, preventing the infinite loading spinner
       isScreenLoading = false;
       notifyListeners();
     }
   }
+
+  Future<void> changeTrip(String tripId) async {
+    if (isScreenLoading) return;
+    isScreenLoading = true;
+    notifyListeners();
+
+    try {
+      final selected = availableTrips.firstWhere((t) => t['id'] == tripId);
+      currentPassengerTrip = selected;
+
+      final rawSubs = await _homeService.fetchActiveSubscriptions(tripId);
+      activeSubscriptions = _mapSubscriptions(rawSubs, isForPassenger: true);
+
+      _hasFoundDirect = false;
+      _hasFoundMixed = false;
+      matchedDrivers.clear();
+      mixedMatchedRoutes.clear();
+
+      if (showMatchingUI) {
+        await _matchCurrentRouteType();
+      }
+    } catch (e) {
+      print('⚠️ Error changing trip: $e');
+    } finally {
+      isScreenLoading = false;
+      notifyListeners();
+    }
+  }
+
+  // ==========================================
+  // MATCHING LOGIC
+  // ==========================================
 
   Future<void> _matchCurrentRouteType() async {
     if (selectedFilter == 'Direct' && !_hasFoundDirect) {
@@ -187,7 +211,7 @@ class HomeViewModel extends ChangeNotifier {
             'id': driverTrip['user_id'],
             'name': driverName,
             'phone': driverTrip['users']?['phone'] ?? 'N/A',
-            'profile_image_url': driverTrip['users']?['profile_image_url'],
+            'profile_image_url': driverTrip['users']?['avatar_url'],
             'pickup_distance_km': pickDist / 1000,
             'driver_profile': {
               'depart_time': _formatSqlTimeToUI(driverTrip['depart_time']),
@@ -196,7 +220,6 @@ class HomeViewModel extends ChangeNotifier {
         }
       } catch (e) {
         print('⚠️ ORS Route Error: $e');
-        // Stop spamming the API if the quota is dead or internet drops
         if (e.toString().contains('Quota') || e.toString().contains('SocketException')) {
           break;
         }
@@ -313,47 +336,58 @@ class HomeViewModel extends ChangeNotifier {
 
         if (drivStart.latitude == 0 || drivEnd.latitude == 0) continue;
 
-        if ((drivTime - passTime).abs() <= 30) {
-          final pickDist = MatchingUtils.calculateDistance(passPick.latitude, passPick.longitude, drivStart.latitude, drivStart.longitude);
-          final dropDistToStation = MatchingUtils.calculateDistance(pickStation.location.latitude, pickStation.location.longitude, drivEnd.latitude, drivEnd.longitude);
+        // --- NEW: Inner try-catch to safely handle ORS calls per driver ---
+        try {
+          if ((drivTime - passTime).abs() <= 30) {
+            final pickDist = MatchingUtils.calculateDistance(passPick.latitude, passPick.longitude, drivStart.latitude, drivStart.longitude);
+            final dropDistToStation = MatchingUtils.calculateDistance(pickStation.location.latitude, pickStation.location.longitude, drivEnd.latitude, drivEnd.longitude);
 
-          if (pickDist <= 15000 && dropDistToStation <= 15000) {
-            final driverRoute = await _orsService.getRoute(drivStart, drivEnd);
-            if (_fetchId != currentFetchId) return;
+            if (pickDist <= 15000 && dropDistToStation <= 15000) {
+              final driverRoute = await _orsService.getRoute(drivStart, drivEnd);
+              if (_fetchId != currentFetchId) return;
 
-            if (MatchingUtils.isRouteMatch(passPick, pickStation.location, driverRoute, 800)) {
-              final routeDistToStation = MatchingUtils.calculateDistance(passPick.latitude, passPick.longitude, pickStation.location.latitude, pickStation.location.longitude);
-              final driveMinsToStation = (routeDistToStation / 400).ceil();
+              if (MatchingUtils.isRouteMatch(passPick, pickStation.location, driverRoute, 800)) {
+                final routeDistToStation = MatchingUtils.calculateDistance(passPick.latitude, passPick.longitude, pickStation.location.latitude, pickStation.location.longitude);
+                final driveMinsToStation = (routeDistToStation / 400).ceil();
 
-              firstMileOptions.add({
-                'type': 'Driver',
-                'driver_name': driverName,
-                'depart_time': _formatSqlTimeToUI(driverTrip['depart_time']),
-                'distance_km': pickDist / 1000,
-                'arrival_at_board_station': drivTime + driveMinsToStation,
-              });
+                firstMileOptions.add({
+                  'type': 'Driver',
+                  'driver_name': driverName,
+                  'depart_time': _formatSqlTimeToUI(driverTrip['depart_time']),
+                  'distance_km': pickDist / 1000,
+                  'arrival_at_board_station': drivTime + driveMinsToStation,
+                });
+              }
             }
           }
-        }
 
-        if (drivTime > passTime) {
-          final pickDistFromStation = MatchingUtils.calculateDistance(dropStation.location.latitude, dropStation.location.longitude, drivStart.latitude, drivStart.longitude);
-          final dropDistToDest = MatchingUtils.calculateDistance(passDrop.latitude, passDrop.longitude, drivEnd.latitude, drivEnd.longitude);
+          if (drivTime > passTime) {
+            final pickDistFromStation = MatchingUtils.calculateDistance(dropStation.location.latitude, dropStation.location.longitude, drivStart.latitude, drivStart.longitude);
+            final dropDistToDest = MatchingUtils.calculateDistance(passDrop.latitude, passDrop.longitude, drivEnd.latitude, drivEnd.longitude);
 
-          if (pickDistFromStation <= 15000 && dropDistToDest <= 15000) {
-            final driverRoute = await _orsService.getRoute(drivStart, drivEnd);
-            if (_fetchId != currentFetchId) return;
+            if (pickDistFromStation <= 15000 && dropDistToDest <= 15000) {
+              final driverRoute = await _orsService.getRoute(drivStart, drivEnd);
+              if (_fetchId != currentFetchId) return;
 
-            if (MatchingUtils.isRouteMatch(dropStation.location, passDrop, driverRoute, 800)) {
-              lastMileOptions.add({
-                'type': 'Driver',
-                'driver_name': driverName,
-                'depart_time': _formatSqlTimeToUI(driverTrip['depart_time']),
-                'depart_time_mins': drivTime,
-                'distance_km': pickDistFromStation / 1000,
-              });
+              if (MatchingUtils.isRouteMatch(dropStation.location, passDrop, driverRoute, 800)) {
+                lastMileOptions.add({
+                  'type': 'Driver',
+                  'driver_name': driverName,
+                  'depart_time': _formatSqlTimeToUI(driverTrip['depart_time']),
+                  'depart_time_mins': drivTime,
+                  'distance_km': pickDistFromStation / 1000,
+                });
+              }
             }
           }
+        } catch (e) {
+          print('⚠️ ORS Route Error inside mixed loop: $e');
+          // If the quota is dead or internet drops, stop the loop entirely
+          if (e.toString().contains('Quota') || e.toString().contains('SocketException')) {
+            break;
+          }
+          // Otherwise, it was just a bad route for this specific driver, so continue checking the others
+          continue;
         }
       }
 
@@ -416,6 +450,29 @@ class HomeViewModel extends ChangeNotifier {
     _hasFoundMixed = true;
     isMixedLoading = false;
     notifyListeners();
+  }
+
+  // ==========================================
+  // HELPERS
+  // ==========================================
+
+  List<Map<String, dynamic>> _mapSubscriptions(List<Map<String, dynamic>> rawSubs, {required bool isForPassenger}) {
+    return rawSubs.map((sub) {
+      final tripKey = isForPassenger ? 'driver_trips' : 'passenger_trips';
+      final defaultName = isForPassenger ? 'Unknown Driver' : 'Unknown Passenger';
+
+      final trip = sub[tripKey] ?? {};
+      final user = trip['users'] ?? {};
+
+      return {
+        'name': user['name'] ?? defaultName,
+        'phone': user['phone'] ?? 'N/A',
+        'imageUrl': user['avatar_url'],
+        'pickup_location': sub['pickup_location'] ?? 'Unknown',
+        'dropoff_location': sub['dropoff_location'] ?? 'Unknown',
+        'pickup_time': sub['pickup_time'] != null ? _formatSqlTimeToUI(sub['pickup_time']) : 'TBD',
+      };
+    }).toList();
   }
 
   double _parseDouble(dynamic value) {
@@ -498,10 +555,10 @@ class HomeViewModel extends ChangeNotifier {
         'alight_station': 'Hardcoded Alight Station B',
         'is_interchange': false,
         'board_line_name': 'Hardcoded LRT Line',
-        'board_line_short_name': 'HC', // --- ADDED ---
+        'board_line_short_name': 'HC',
         'board_line_color': Colors.red,
         'alight_line_name': 'Hardcoded LRT Line',
-        'alight_line_short_name': 'HC', // --- ADDED ---
+        'alight_line_short_name': 'HC',
         'alight_line_color': Colors.red,
         'train_duration_mins': 25,
 
@@ -526,10 +583,10 @@ class HomeViewModel extends ChangeNotifier {
         'alight_station': 'Hardcoded Alight Station D',
         'is_interchange': true,
         'board_line_name': 'Hardcoded Start Line',
-        'board_line_short_name': 'HC', // --- ADDED ---
+        'board_line_short_name': 'HC',
         'board_line_color': Colors.green,
         'alight_line_name': 'Hardcoded End Line',
-        'alight_line_short_name': 'HC', // --- ADDED ---
+        'alight_line_short_name': 'HC',
         'alight_line_color': Colors.orange,
         'train_duration_mins': 45,
 
@@ -543,20 +600,5 @@ class HomeViewModel extends ChangeNotifier {
         'destination_name': 'Hardcoded Dropoff Destination',
       }
     ];
-  }
-
-  List<Map<String, dynamic>> _mapSubscriptions(List<Map<String, dynamic>> rawSubs) {
-    return rawSubs.map((sub) {
-      final driverTrip = sub['driver_trips'] ?? {};
-      final driverUser = driverTrip['users'] ?? {};
-      return {
-        'driver_name': driverUser['name'] ?? 'Unknown Driver',
-        'driver_phone': driverUser['phone'] ?? 'N/A',
-        'driver_image_url': driverUser['avatar_url'],
-        'pickup_location': sub['pickup_location'] ?? 'Unknown',
-        'dropoff_location': sub['dropoff_location'] ?? 'Unknown',
-        'pickup_time': sub['pickup_time'] != null ? _formatSqlTimeToUI(sub['pickup_time']) : 'TBD',
-      };
-    }).toList();
   }
 }
