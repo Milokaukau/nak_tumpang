@@ -5,14 +5,16 @@ import 'package:nak_tumpang/core/components/base_button.dart';
 
 class NegotiationSummaryCard extends StatelessWidget {
   final TumpangRequest request;
+  final bool isFullyAgreed;
   final VoidCallback onReject;
-  final VoidCallback onAccept;
+  final VoidCallback onProceedToSummary;
 
   const NegotiationSummaryCard({
     super.key,
     required this.request,
+    required this.isFullyAgreed,
     required this.onReject,
-    required this.onAccept,
+    required this.onProceedToSummary,
   });
 
   @override
@@ -44,36 +46,50 @@ class NegotiationSummaryCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _SummaryRow('Pickup Location', request.pickupLocation.name),
-                _SummaryRow('Dropoff Location', request.dropoffLocation.name),
-                _SummaryRow('Tumpang Start', request.subscriptionStartDate.value),
-                _SummaryRow('Tumpang End', request.subscriptionEndDate.value),
-                _SummaryRow('Pickup Time', request.pickupTime.value),
+                _SummaryRow('Pickup', request.pickupLocation.name),
+                _SummaryRow('Dropoff', request.dropoffLocation.name),
+                _SummaryRow('Tumpang Dates', '${request.subscriptionStartDate.value} to ${request.subscriptionEndDate.value}'),
+                _SummaryRow('Time', request.pickupTime.value),
                 const SizedBox(height: 12),
-                _SummaryRow('Tumpang Fee', 'RM ${request.fee.value.toStringAsFixed(2)} (30 days)'),
+                _SummaryRow('Fee', 'RM ${request.fee.value.toStringAsFixed(2)}'),
                 const SizedBox(height: 20),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.red,
-                          side: const BorderSide(color: AppColors.greyBorder),
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                        ),
-                        onPressed: onReject,
-                        child: const Text('Reject', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                      ),
+
+                // Button Logic Based on State
+                if (isFullyAgreed) ...[
+                  BaseButton(
+                    text: 'View Tumpang Summary',
+                    onPressed: onProceedToSummary,
+                  ),
+                ] else ...[
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: BaseButton(
-                        text: 'Accept',
-                        onPressed: onAccept,
-                      ),
+                    child: const Text(
+                      'Please accept all terms above to proceed with the agreement.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.grey, fontSize: 13),
                     ),
-                  ],
+                  ),
+                  const SizedBox(height: 12),
+                ],
+
+                // Allow rejection at any point
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.red,
+                      side: const BorderSide(color: Colors.redAccent),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
+                    ),
+                    onPressed: onReject,
+                    child: const Text('Reject Request', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  ),
                 ),
               ],
             ),
@@ -96,7 +112,7 @@ class _SummaryRow extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(width: 130, child: Text(label, style: const TextStyle(color: AppColors.black, fontSize: 14))),
+          SizedBox(width: 110, child: Text(label, style: const TextStyle(color: AppColors.black, fontSize: 14))),
           const Text(' : ', style: TextStyle(color: AppColors.black)),
           Expanded(child: Text(value, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 14, color: AppColors.black))),
         ],

@@ -44,15 +44,35 @@ class _RequestListScreenState extends State<RequestListScreen> {
           }
 
           if (vm.errorMessage != null) {
+            final isAuthError = vm.errorMessage == 'User not authenticated. Please log in.';
+
             return Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(vm.errorMessage!, textAlign: TextAlign.center),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 16),
                   ElevatedButton(
-                    onPressed: () => vm.fetchActiveTripAndInitialize(widget.role),
-                    child: const Text('Retry'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFDF0E3), // Peach/orange tint from your image
+                      foregroundColor: Colors.brown,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    ),
+                    onPressed: () {
+                      if (isAuthError) {
+                        // Redirect to your login screen
+                        Navigator.pushNamed(context, '/login');
+                        // OR: Navigator.push(context, MaterialPageRoute(builder: (_) => const LoginScreen()));
+                      } else {
+                        // Standard retry for network/database errors
+                        vm.fetchActiveTripAndInitialize(widget.role);
+                      }
+                    },
+                    child: Text(isAuthError ? 'Log In' : 'Retry'),
                   ),
                 ],
               ),

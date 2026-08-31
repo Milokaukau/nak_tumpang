@@ -53,7 +53,6 @@ class NegotiationFieldRow extends StatelessWidget {
             padding: const EdgeInsets.all(16.0),
             child: Column(
               children: [
-                // ALWAYS display the map PIN box or the text value box
                 if (topWidget != null) ...[
                   topWidget!,
                   const SizedBox(height: 12),
@@ -62,7 +61,7 @@ class NegotiationFieldRow extends StatelessWidget {
                   const SizedBox(height: 12),
                 ],
 
-                // Layout logic based on status
+                // Conditional UI based on Negotiation State
                 if (isAccepted) ...[
                   const Row(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -73,7 +72,6 @@ class NegotiationFieldRow extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  // Allow user to propose a change EVEN IF it is already accepted
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton(
@@ -81,15 +79,33 @@ class NegotiationFieldRow extends StatelessWidget {
                         foregroundColor: AppColors.black,
                         side: const BorderSide(color: AppColors.greyBorder),
                         padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)), // Pill shape
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
                       ),
                       onPressed: onPropose,
-                      child: const Text('Propose a change'),
+                      child: const Text('Edit / Propose New'),
                     ),
                   ),
                 ] else if (isRequestedByMe) ...[
-                  const Text('(Waiting for Counterpart)', style: TextStyle(color: Colors.orange, fontStyle: FontStyle.italic)),
+                  const Text('(Waiting for Acceptance)', style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.black,
+                        side: const BorderSide(color: AppColors.greyBorder),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
+                      ),
+                      onPressed: onPropose,
+                      child: const Text('Edit Proposal'),
+                    ),
+                  ),
                 ] else ...[
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 12.0),
+                    child: Text('(Pending Your Review)', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                  ),
                   Row(
                     children: [
                       Expanded(
@@ -98,10 +114,10 @@ class NegotiationFieldRow extends StatelessWidget {
                             foregroundColor: AppColors.black,
                             side: const BorderSide(color: AppColors.greyBorder),
                             padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)), // Pill shape
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
                           ),
                           onPressed: onPropose,
-                          child: const Text('Propose another'),
+                          child: const Text('Propose Another'),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -111,7 +127,7 @@ class NegotiationFieldRow extends StatelessWidget {
                             backgroundColor: AppColors.black,
                             foregroundColor: AppColors.white,
                             padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)), // Pill shape
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
                           ),
                           onPressed: onAccept,
                           child: const Text('Accept'),
