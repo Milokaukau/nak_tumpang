@@ -3,20 +3,20 @@ import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:nak_tumpang/core/utils/matching_utils.dart';
+import 'package:nak_tumpang/core/constants/api_constants.dart';
 
 class ORSService {
-  static const String _baseUrl = 'https://api.openrouteservice.org/v2/directions/driving-car';
   final _apiKey = dotenv.env['ORS_API_KEY'] ?? '';
 
   Future<List<LatLng>> getRoute(LatLng start, LatLng end) async {
-
     if (_apiKey.isEmpty) {
       print('❌ Error: ORS_API_KEY is missing from .env');
       return [];
     }
 
+    // --- UPDATED to use ApiConstants ---
     final url = Uri.parse(
-        '$_baseUrl?api_key=$_apiKey&start=${start.longitude},${start.latitude}&end=${end.longitude},${end.latitude}');
+        '${ApiConstants.orsDrivingEndpoint}?api_key=$_apiKey&start=${start.longitude},${start.latitude}&end=${end.longitude},${end.latitude}');
 
     try {
       final response = await http.get(url);
@@ -41,9 +41,15 @@ class ORSService {
   }
 
   Future<Map<String, dynamic>> getWalkingMetrics(LatLng start, LatLng end) async {
-    // Uses the foot-walking profile instead of driving-car
+    // --- FIXED: Removed unnecessary null check since _apiKey defaults to '' ---
+    if (_apiKey.isEmpty) {
+      print('⚠️ ORS API Key missing. Falling back to default metrics.');
+      return {'distance': 0.0, 'duration': 0.0};
+    }
+
+    // --- UPDATED to use ApiConstants ---
     final String url =
-        'https://api.openrouteservice.org/v2/directions/foot-walking?api_key=$_apiKey&start=${start.longitude},${start.latitude}&end=${end.longitude},${end.latitude}';
+        '${ApiConstants.orsWalkingEndpoint}?api_key=$_apiKey&start=${start.longitude},${start.latitude}&end=${end.longitude},${end.latitude}';
 
     try {
       final response = await http.get(Uri.parse(url));
@@ -53,8 +59,8 @@ class ORSService {
         final summary = data['features'][0]['properties']['summary'];
 
         return {
-          'distance': summary['distance'], // returned in meters
-          'duration': summary['duration'], // returned in seconds
+          'distance': summary['distance'],
+          'duration': summary['duration'],
         };
       }
     } catch (e) {
@@ -66,7 +72,7 @@ class ORSService {
         start.latitude, start.longitude, end.latitude, end.longitude);
     return {
       'distance': fallbackDist,
-      'duration': (fallbackDist / 80) * 60, // roughly 80 meters per minute
+      'duration': (fallbackDist / 80) * 60,
     };
   }
 }

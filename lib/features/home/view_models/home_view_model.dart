@@ -75,14 +75,16 @@ class HomeViewModel extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final trips = await _homeService.fetchPassengerTrips('94d34b82-eba4-4267-9524-df1841996de0');
+      final userId = '94d34b82-eba4-4267-9524-df1841996de0';
+      final trips = await _homeService.fetchPassengerTrips(userId);
 
       if (trips.isNotEmpty) {
         availableTrips = trips;
         currentPassengerTrip = trips.first;
         currentPassenger = trips.first['users'];
 
-        final rawSubs = await _homeService.fetchActiveSubscriptions(currentPassengerTrip!['id']);
+        // --- Fetch ALL subscriptions globally for the user ---
+        final rawSubs = await _homeService.fetchAllPassengerSubscriptions(userId);
         activeSubscriptions = _mapSubscriptions(rawSubs, isForPassenger: true);
 
         _hasFoundDirect = false;
@@ -95,8 +97,6 @@ class HomeViewModel extends ChangeNotifier {
         if (showMatchingUI) {
           await _matchCurrentRouteType();
         }
-      } else {
-        print('❌ Failed to fetch passenger trips.');
       }
     } catch (e) {
       print('⚠️ Error fetching initial data: $e');
@@ -115,9 +115,8 @@ class HomeViewModel extends ChangeNotifier {
       final selected = availableTrips.firstWhere((t) => t['id'] == tripId);
       currentPassengerTrip = selected;
 
-      final rawSubs = await _homeService.fetchActiveSubscriptions(tripId);
-      activeSubscriptions = _mapSubscriptions(rawSubs, isForPassenger: true);
-
+      // --- REMOVED SUBSCRIPTION FETCHING HERE ---
+      // We only clear the matching options for the new trip
       _hasFoundDirect = false;
       _hasFoundMixed = false;
       matchedDrivers.clear();

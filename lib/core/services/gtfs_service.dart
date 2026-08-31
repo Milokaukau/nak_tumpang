@@ -6,9 +6,12 @@ import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:nak_tumpang/core/entities/train_station.dart';
 import 'package:nak_tumpang/core/data/train_station_data.dart';
+import 'package:nak_tumpang/core/constants/api_constants.dart';
+import 'package:csv/csv.dart';
 
 class GtfsService {
-  final String _apiUrl = 'https://api.data.gov.my/gtfs-static/prasarana?category=rapid-rail-kl';
+  // --- UPDATED to use ApiConstants ---
+  final String _apiUrl = ApiConstants.gtfsPrasaranaEndpoint;
   final String _cacheKey = 'cached_train_stations';
   final String _dateKey = 'gtfs_last_updated';
 
@@ -61,68 +64,122 @@ class GtfsService {
     }
   }
 
-
   Future<void> _populateAndCacheStations(
       String stopsCsv,
       String routesCsv,
       String stopTimesCsv,
       SharedPreferences prefs) async {
-    final routeDetails =
-    <String, ({String name, Color color, String shortName})>{};
 
-    for (var line in routesCsv.split('\n').skip(1)) {
-      final parts = line.split(',');
-      if (parts.length > 6) {
-        final routeId = parts[0].trim();
-        final shortName = parts[2].trim();
-        final longName = parts[3].trim();
-        final colorHex = parts[6].trim();
+    final converter = CsvToListConverter(eol: '\n', shouldParseNumbers: false);
 
-        if (shortName.isNotEmpty && colorHex.isNotEmpty) {
-          final color = Color(int.parse('FF$colorHex', radix: 16));
-          routeDetails[routeId] = (
-          name: longName,
-          color: color,
-          shortName: shortName,
-          );
+    // ==========================================
+    // 1. PARSE ROUTES
+    // ==========================================
+    final routeDetails = <String, ({String name, Color color, String shortName})>{};
+    final routeRows = converter.convert(routesCsv.replaceAll('\r', ''));
+
+    if (routeRows.isNotEmpty) {
+      final headers = routeRows.first.map((e) => e.toString().trim()).toList();
+      final idIdx = headers.indexOf('route_id');
+      final shortIdx = headers.indexOf('route_short_name');
+      final longIdx = headers.indexOf('route_long_name');
+      final colorIdx = headers.indexOf('route_color');
+
+      if (idIdx != -1) {
+        for (var i = 1; i < routeRows.length; i++) {
+          final row = routeRows[i];
+          if (row.length > idIdx) {
+            final routeId = row[idIdx].toString().trim();
+            final shortName = shortIdx != -1 && row.length > shortIdx ? row[shortIdx].toString().trim() : '';
+            final longName = longIdx != -1 && row.length > longIdx ? row[longIdx].toString().trim() : '';
+            final colorHex = colorIdx != -1 && row.length > colorIdx ? row[colorIdx].toString().trim() : '';
+
+            if (routeId.isNotEmpty) {
+              Color color = Colors.pink; // Default fallback
+              if (colorHex.isNotEmpty) {
+                try {
+                  color = Color(int.parse('FF$colorHex', radix: 16));
+                } catch (_) {}
+              }
+              routeDetails[routeId] = (
+              name: longName,
+              color: color,
+              shortName: shortName,
+              );
+            }
+          }
         }
       }
     }
 
+    // ==========================================
+    // 2. PARSE STOP TIMES (For Sequence)
+    // ==========================================
     final stopSequences = <String, int>{};
-    for (var line in stopTimesCsv.split('\n').skip(1)) {
-      final parts = line.split(',');
-      if (parts.length > 6) {
-        final stopId = parts[5].trim();
-        if (!stopSequences.containsKey(stopId)) {
-          stopSequences[stopId] = int.tryParse(parts[6].trim()) ?? 0;
+    final stRows = converter.convert(stopTimesCsv.replaceAll('\r', ''));
+
+    if (stRows.isNotEmpty) {
+      final headers = stRows.first.map((e) => e.toString().trim()).toList();
+      final stopIdIdx = headers.indexOf('stop_id');
+      final seqIdx = headers.indexOf('stop_sequence');
+
+      if (stopIdIdx != -1 && seqIdx != -1) {
+        for (var i = 1; i < stRows.length; i++) {
+          final row = stRows[i];
+          if (row.length > stopIdIdx && row.length > seqIdx) {
+            final stopId = row[stopIdIdx].toString().trim();
+            if (!stopSequences.containsKey(stopId)) {
+              stopSequences[stopId] = int.tryParse(row[seqIdx].toString().trim()) ?? 0;
+            }
+          }
         }
       }
     }
 
+    // ==========================================
+    // 3. PARSE STOPS
+    // ==========================================
     final parsedStations = <TrainStation>[];
-    for (var line in stopsCsv.split('\n').skip(1)) {
-      final parts = line.split(',');
-      if (parts.length > 5) {
-        final lat = double.tryParse(parts[2].trim()) ?? 0.0;
-        final lon = double.tryParse(parts[3].trim()) ?? 0.0;
-        final routeId = parts[5].trim();
+    final stopRows = converter.convert(stopsCsv.replaceAll('\r', ''));
 
-        if (lat == 0.0 || lon == 0.0) continue;
-        final details = routeDetails[routeId];
+    if (stopRows.isNotEmpty) {
+      final headers = stopRows.first.map((e) => e.toString().trim()).toList();
+      final idIdx = headers.indexOf('stop_id');
+      final nameIdx = headers.indexOf('stop_name');
+      final latIdx = headers.indexOf('stop_lat');
+      final lonIdx = headers.indexOf('stop_lon');
 
-        parsedStations.add(
-          TrainStation(
-            id: parts[0].trim(),
-            name: parts[1].trim(),
-            location: LatLng(lat, lon),
-            lineId: routeId,
-            lineName: details?.name ?? routeId,
-            lineShortName: details?.shortName ?? routeId, // Uses parsed short name (e.g., KJL, SPL, AGL)
-            lineColor: details?.color ?? Colors.pink,
-            sequence: stopSequences[parts[0].trim()] ?? 0,
-          ),
-        );
+      int routeIdx = headers.indexOf('route_id');
+      if (routeIdx == -1) routeIdx = headers.indexOf('zone_id');
+      if (routeIdx == -1) routeIdx = 5;
+
+      if (idIdx != -1 && latIdx != -1 && lonIdx != -1) {
+        for (var i = 1; i < stopRows.length; i++) {
+          final row = stopRows[i];
+          if (row.length > idIdx && row.length > latIdx && row.length > lonIdx) {
+            final lat = double.tryParse(row[latIdx].toString().trim()) ?? 0.0;
+            final lon = double.tryParse(row[lonIdx].toString().trim()) ?? 0.0;
+            final stopId = row[idIdx].toString().trim();
+            final stopName = nameIdx != -1 && row.length > nameIdx ? row[nameIdx].toString().trim() : stopId;
+            final routeId = routeIdx != -1 && row.length > routeIdx ? row[routeIdx].toString().trim() : '';
+
+            if (lat == 0.0 || lon == 0.0) continue;
+            final details = routeDetails[routeId];
+
+            parsedStations.add(
+              TrainStation(
+                id: stopId,
+                name: stopName,
+                location: LatLng(lat, lon),
+                lineId: routeId,
+                lineName: details?.name ?? routeId,
+                lineShortName: details?.shortName ?? routeId,
+                lineColor: details?.color ?? Colors.pink,
+                sequence: stopSequences[stopId] ?? 0,
+              ),
+            );
+          }
+        }
       }
     }
 

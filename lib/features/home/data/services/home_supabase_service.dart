@@ -33,9 +33,9 @@ class HomeSupabaseService {
   // ==========================================
   // PASSENGER SUBSCRIPTIONS
   // ==========================================
-  Future<List<Map<String, dynamic>>> fetchActiveSubscriptions(String passengerTripId) async {
+  Future<List<Map<String, dynamic>>> fetchAllPassengerSubscriptions(String userId) async {
     try {
-      print('🔍 Fetching passenger subscriptions for Trip ID: $passengerTripId');
+      print('🔍 Fetching all passenger subscriptions for User ID: $userId');
 
       final response = await _supabase
           .from('tumpang_subscription')
@@ -45,9 +45,11 @@ class HomeSupabaseService {
               users (
                 name, phone, avatar_url 
               )
-            )
+            ),
+            passenger_trips!inner(user_id) 
           ''')
-          .eq('passenger_trip_id', passengerTripId)
+      // Filters for ALL trips belonging to this user
+          .eq('passenger_trips.user_id', userId)
           .eq('status', 'active');
 
       return (response as List).map((e) => e as Map<String, dynamic>).toList();
