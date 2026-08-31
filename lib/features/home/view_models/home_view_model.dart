@@ -4,6 +4,8 @@ import 'package:nak_tumpang/core/utils/matching_utils.dart';
 import 'package:nak_tumpang/core/services/ors_service.dart';
 import 'package:nak_tumpang/features/home/data/services/home_supabase_service.dart';
 
+enum HomePanelMode { schedule, cantFetch, noNeedFetch }
+
 class HomeViewModel extends ChangeNotifier {
   String selectedFilter = 'Direct';
   Map<String, dynamic>? currentPassenger;
@@ -15,6 +17,22 @@ class HomeViewModel extends ChangeNotifier {
 
   List<Map<String, dynamic>> matchedDrivers = [];
 
+  // --- Exception panel state ---
+  HomePanelMode panelMode = HomePanelMode.schedule;
+  DateTime? exceptionStartDate;
+  DateTime? exceptionEndDate;
+  String? exceptionReason;
+  final TextEditingController exceptionCustomReasonController = TextEditingController();
+  bool isSubmittingException = false;
+  String? exceptionError;
+
+  static const List<String> passengerReasons = [
+    'Medical leave', 'Public holiday', 'Emergency', 'Personal reasons', 'Others',
+  ];
+  static const List<String> driverReasons = [
+    'Medical leave', 'Public holiday', 'Emergency', 'Vehicle issue', 'Personal reasons', 'Others',
+  ];
+
   void setFilter(String option) {
     selectedFilter = option;
     notifyListeners();
@@ -24,7 +42,7 @@ class HomeViewModel extends ChangeNotifier {
     isLoading = true;
     notifyListeners();
 
-    final trip = await _homeService.fetchPassengerTrip('usr_pass_9921');
+    final trip = await _homeService.fetchPassengerTrip('31db9203-05d0-42af-8641-50e48e9c163a');
 
     if (trip != null) {
       currentPassengerTrip = trip;
@@ -69,20 +87,17 @@ class HomeViewModel extends ChangeNotifier {
 
       final driverDays = _extractActiveDays(driverTrip);
 
-      // 1. Day Filter
       if (!MatchingUtils.hasOverlappingDays(passDays, driverDays)) {
         print('   -> ❌ Failed Day Filter');
         continue;
       }
 
-      // 2. Time Filter (30 mins)
       final drivTime = _sqlTimeToMinutes(driverTrip['depart_time']);
       if ((drivTime - passTime).abs() > 30) {
         print('   -> ❌ Failed Time Filter (Pass: $passTime mins, Driv: $drivTime mins)');
         continue;
       }
 
-      // 3. Rough Radius Filter
       final drivStart = LatLng(
           _parseDouble(driverTrip['depart_lat']),
           _parseDouble(driverTrip['depart_lng'])
@@ -112,7 +127,6 @@ class HomeViewModel extends ChangeNotifier {
         continue;
       }
 
-      // 4. Strict Polyline Filter (Call ORS)
       try {
         final driverRoute = await _orsService.getRoute(drivStart, drivEnd);
         bool isMatch = MatchingUtils.isRouteMatch(passPick, passDrop, driverRoute, 800);
@@ -139,6 +153,76 @@ class HomeViewModel extends ChangeNotifier {
     print('\n🏁 Matching Complete. Found ${matchedDrivers.length} suitable drivers.');
     notifyListeners();
   }
+
+  // --- Exception panel logic ---
+
+  void openCantFetchPanel() {
+    panelMode = HomePanelMode.cantFetch;
+    notifyListeners();
+  }
+
+  void openNoNeedFetchPanel() {
+    panelMode = HomePanelMode.noNeedFetch;
+    notifyListeners();
+  }
+
+  void closeExceptionPanel() {
+    panelMode = HomePanelMode.schedule;
+    exceptionStartDate = null;
+    exceptionEndDate = null;
+    exceptionReason = null;
+    exceptionCustomReasonController.clear();
+    notifyListeners();
+  }
+
+  void setExceptionStartDate(DateTime date) {
+    exceptionStartDate = date;
+    if (exceptionEndDate != null && exceptionEndDate!.isBefore(date)) exceptionEndDate = null;
+    notifyListeners();
+  }
+
+  void setExceptionEndDate(DateTime date) {
+    if (exceptionStartDate != null && date.isBefore(exceptionStartDate!)) return;
+    exceptionEndDate = date;
+    notifyListeners();
+  }
+
+  void setExceptionReason(String? reason) {
+    exceptionReason = reason;
+    notifyListeners();
+  }
+
+  Future<bool> submitException({
+    required String tumpangSubscriptionId,
+    required String initiatedBy,
+    required String initiatedByRole,
+  }) async {
+    if (exceptionStartDate == null || exceptionEndDate == null || exceptionReason == null) return false;
+    if (exceptionReason == 'Others' && exceptionCustomReasonController.text.trim().isEmpty) return false;
+
+    isSubmittingException = true;
+    notifyListeners();
+
+    final reasonText = exceptionReason == 'Others'
+        ? exceptionCustomReasonController.text.trim()
+        : exceptionReason!;
+
+    final success = await _homeService.submitException(
+      tumpangSubscriptionId: tumpangSubscriptionId,
+      initiatedBy: initiatedBy,
+      initiatedByRole: initiatedByRole,
+      startDate: exceptionStartDate!,
+      endDate: exceptionEndDate!,
+      reason: reasonText,
+    );
+
+    isSubmittingException = false;
+    if (!success) exceptionError = 'Failed to submit exception.';
+    notifyListeners();
+    return success;
+  }
+
+  // --- Helpers ---
 
   double _parseDouble(dynamic value) {
     if (value == null) return 0.0;
@@ -177,5 +261,11 @@ class HomeViewModel extends ChangeNotifier {
       'saturday': row['active_saturday'] ?? false,
       'sunday': row['active_sunday'] ?? false,
     };
+  }
+
+  @override
+  void dispose() {
+    exceptionCustomReasonController.dispose();
+    super.dispose();
   }
 }

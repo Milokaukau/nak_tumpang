@@ -42,7 +42,6 @@ class HomePanel extends StatelessWidget {
                   ),
                 ),
               ),
-
               if (viewModel.currentPassenger != null)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 16),
@@ -51,13 +50,11 @@ class HomePanel extends StatelessWidget {
                     style: const TextStyle(fontSize: 16, color: AppColors.greyText),
                   ),
                 ),
-
               const Text(
                 'Available options',
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 16),
-
               BaseFilterOptions(
                 options: const ['Direct', 'Mixed'],
                 selectedOption: viewModel.selectedFilter,
@@ -66,10 +63,7 @@ class HomePanel extends StatelessWidget {
                 },
               ),
               const SizedBox(height: 24),
-
-              // --- CONDITIONAL UI RENDERING ---
               if (viewModel.selectedFilter == 'Direct') ...[
-                // 1. Direct
                 if (viewModel.isLoading)
                   const Center(child: CircularProgressIndicator(color: AppColors.primaryYellow))
                 else if (viewModel.matchedDrivers.isEmpty)
@@ -87,7 +81,6 @@ class HomePanel extends StatelessWidget {
                   ...List.generate(viewModel.matchedDrivers.length, (index) {
                     final driver = viewModel.matchedDrivers[index];
                     final drivProfile = driver['driver_profile'];
-
                     return Column(
                       children: [
                         DirectRouteOptionCard(
@@ -106,7 +99,6 @@ class HomePanel extends StatelessWidget {
                     );
                   }),
               ] else ...[
-                // 2. Mixed Option Logic (Hardcoded LRT timeline)
                 const MixedRouteOptionCard(),
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 24),

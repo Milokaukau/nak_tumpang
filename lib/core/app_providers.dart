@@ -1,6 +1,7 @@
 import 'package:provider/provider.dart';
 import 'package:provider/single_child_widget.dart';
 import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
+import 'package:nak_tumpang/features/subscriptions/view_models/subscription_view_model.dart';
 
 class AppProviders {
   static List<SingleChildWidget> get providers {
@@ -8,6 +9,10 @@ class AppProviders {
       // Registers the ViewModel globally so any screen can access the Passenger data
       ChangeNotifierProvider(
         create: (_) => HomeViewModel()..fetchMockPassenger(),
+      ),
+      // Registers the ViewModel globally so subscription list/detail screens share state
+      ChangeNotifierProvider(
+        create: (_) => SubscriptionViewModel(),
       ),
       // Future providers (e.g., AuthViewModel, MatchingViewModel) will go here
     ];

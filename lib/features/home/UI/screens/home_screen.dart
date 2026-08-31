@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/components/app_sidebar.dart';
 import 'package:nak_tumpang/features/home/UI/components/home_panel.dart';
 import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
+import 'package:nak_tumpang/features/home/UI/components/exception_test_panel.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -43,7 +44,7 @@ class HomeScreen extends StatelessWidget {
           ),
 
           // No parameters passed! HomePanel handles its own state.
-          const HomePanel(),
+          const ExceptionTestPanel(),
         ],
       ),
     );

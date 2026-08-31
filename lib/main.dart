@@ -1,26 +1,31 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_core/firebase_core.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:nak_tumpang/firebase_options.dart';
 import 'package:nak_tumpang/core/theme/app_theme.dart';
 import 'package:nak_tumpang/core/app_providers.dart';
 import 'package:nak_tumpang/features/home/UI/screens/home_screen.dart';
-// import 'package:nak_tumpang/seed_data.dart'; // NEVER REMOVE THIS IMPORT (if error occurred, just comment out)
+import 'package:nak_tumpang/core/services/local_db_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Load the .env file
+// Load the .env file
   await dotenv.load(fileName: ".env");
 
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
+  // ADD THESE TWO LINES:
+  print("🔗 Target URL: ${dotenv.env['SUPABASE_URL']}");
+  print("🔑 Target Key starts with: ${dotenv.env['SUPABASE_ANON_KEY']?.substring(0, 10)}...");
+
+  // Initialize Supabase
+  await Supabase.initialize(
+    url: dotenv.env['SUPABASE_URL'] ?? '',
+    publishableKey: dotenv.env['SUPABASE_ANON_KEY'] ?? '',
   );
 
-  // NEVER REMOVE THIS PART ===============
-  // await populateFirestore();
-  //=======================================
+  print('✅ Supabase connected successfully!');
+
+  await LocalDbService.instance.testConnection();
 
   runApp(
     MultiProvider(

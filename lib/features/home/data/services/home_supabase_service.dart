@@ -30,4 +30,32 @@ class HomeSupabaseService {
       return [];
     }
   }
+
+  Future<bool> submitException({
+    required String tumpangSubscriptionId,
+    required String initiatedBy,
+    required String initiatedByRole,
+    required DateTime startDate,
+    required DateTime endDate,
+    required String reason,
+  }) async {
+    try {
+      await _supabase.from('tumpang_exception').insert({
+        'tumpang_subscription_id': tumpangSubscriptionId,
+        'initiated_by': initiatedBy,
+        'initiated_by_role': initiatedByRole,
+        'start_date': _formatDate(startDate),
+        'end_date': _formatDate(endDate),
+        'reason': reason,
+        'status': 'active',
+      });
+      return true;
+    } catch (e) {
+      print("Error in submitException: $e");
+      return false;
+    }
+  }
+
+  String _formatDate(DateTime d) =>
+      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 }
