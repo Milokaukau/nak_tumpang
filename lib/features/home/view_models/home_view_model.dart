@@ -12,10 +12,12 @@ class HomeViewModel extends ChangeNotifier {
   Map<String, dynamic>? currentPassengerTrip;
 
   List<Map<String, dynamic>> availableTrips = [];
+  List<Map<String, dynamic>> activeSubscriptions = [];
 
   bool isScreenLoading = true;
   bool isDirectLoading = false;
   bool isMixedLoading = false;
+  bool showMatchingUI = false;
   bool _hasFoundDirect = false;
   bool _hasFoundMixed = false;
 
@@ -27,50 +29,89 @@ class HomeViewModel extends ChangeNotifier {
   List<Map<String, dynamic>> matchedDrivers = [];
   List<Map<String, dynamic>> mixedMatchedRoutes = [];
 
+  void toggleMatchingUI(bool show) {
+    showMatchingUI = show;
+    notifyListeners();
+    if (show) {
+      _matchCurrentRouteType();
+    }
+  }
+
   void setFilter(String option) {
     if (selectedFilter == option) return;
     selectedFilter = option;
     notifyListeners();
-    _matchCurrentRouteType();
+
+    // Only calculate if the UI is actually visible
+    if (showMatchingUI) {
+      _matchCurrentRouteType();
+    }
   }
 
-  void changeTrip(String tripId) {
+  Future<void> changeTrip(String tripId) async {
     if (isScreenLoading) return;
-
-    final selected = availableTrips.firstWhere((t) => t['id'] == tripId);
-    currentPassengerTrip = selected;
-
-    _hasFoundDirect = false;
-    _hasFoundMixed = false;
-    matchedDrivers.clear();
-    mixedMatchedRoutes.clear();
-
-    _matchCurrentRouteType();
-  }
-
-  Future<void> fetchMockPassenger() async {
     isScreenLoading = true;
     notifyListeners();
 
-    final trips = await _homeService.fetchPassengerTrips('usr_pass_9921');
+    try {
+      final selected = availableTrips.firstWhere((t) => t['id'] == tripId);
+      currentPassengerTrip = selected;
 
-    if (trips.isNotEmpty) {
-      availableTrips = trips;
-      currentPassengerTrip = trips.first;
-      currentPassenger = trips.first['users'];
+      final rawSubs = await _homeService.fetchActiveSubscriptions(tripId);
+      activeSubscriptions = _mapSubscriptions(rawSubs);
 
       _hasFoundDirect = false;
       _hasFoundMixed = false;
       matchedDrivers.clear();
       mixedMatchedRoutes.clear();
 
-      await _matchCurrentRouteType();
-    } else {
-      print('❌ Failed to fetch passenger trips.');
+      if (showMatchingUI) {
+        await _matchCurrentRouteType();
+      }
+    } catch (e) {
+      print('⚠️ Error changing trip: $e');
+    } finally {
+      // This will ALWAYS execute, preventing the infinite loading spinner
+      isScreenLoading = false;
+      notifyListeners();
     }
+  }
 
-    isScreenLoading = false;
+  Future<void> fetchMockPassenger() async {
+    isScreenLoading = true;
     notifyListeners();
+
+    try {
+      final trips = await _homeService.fetchPassengerTrips('94d34b82-eba4-4267-9524-df1841996de0');
+
+      if (trips.isNotEmpty) {
+        availableTrips = trips;
+        currentPassengerTrip = trips.first;
+        currentPassenger = trips.first['users'];
+
+        final rawSubs = await _homeService.fetchActiveSubscriptions(currentPassengerTrip!['id']);
+        activeSubscriptions = _mapSubscriptions(rawSubs);
+
+        _hasFoundDirect = false;
+        _hasFoundMixed = false;
+        matchedDrivers.clear();
+        mixedMatchedRoutes.clear();
+
+        showMatchingUI = activeSubscriptions.isEmpty;
+
+        if (showMatchingUI) {
+          await _matchCurrentRouteType();
+        }
+      } else {
+        print('❌ Failed to fetch passenger trips.');
+      }
+    } catch (e) {
+      print('⚠️ Error fetching initial data: $e');
+    } finally {
+      // This will ALWAYS execute, preventing the infinite loading spinner
+      isScreenLoading = false;
+      notifyListeners();
+    }
   }
 
   Future<void> _matchCurrentRouteType() async {
@@ -161,9 +202,11 @@ class HomeViewModel extends ChangeNotifier {
 
     if (_fetchId != currentFetchId) return;
 
-    if (tempMatchedDrivers.isEmpty) {
-      tempMatchedDrivers = _getHardcodedDirectData();
-    }
+    // NEVER REMOVE - MIGHT NEED IN FUTURE FOR DEBUG PURPOSE ============
+    // if (tempMatchedDrivers.isEmpty) {
+    //   tempMatchedDrivers = _getHardcodedDirectData();
+    // }
+    // ==================================================================
 
     matchedDrivers = tempMatchedDrivers;
     _hasFoundDirect = true;
@@ -202,8 +245,10 @@ class HomeViewModel extends ChangeNotifier {
       final dropStation = TransitUtils.findNearestStation(passDrop);
 
       if (pickStation == null || dropStation == null) {
-        // --- NEW: Inject fallback on early exit ---
-        mixedMatchedRoutes = _getHardcodedMixedData();
+        // NEVER REMOVE - MIGHT NEED IN FUTURE FOR DEBUG PURPOSE ============
+        // mixedMatchedRoutes = _getHardcodedMixedData();
+        // ==================================================================
+
         _hasFoundMixed = true;
         isMixedLoading = false;
         notifyListeners();
@@ -357,9 +402,11 @@ class HomeViewModel extends ChangeNotifier {
 
     if (_fetchId != currentFetchId) return;
 
-    if (tempMixedRoutes.isEmpty) {
-      tempMixedRoutes = _getHardcodedMixedData();
-    }
+    // NEVER REMOVE - MIGHT NEED IN FUTURE FOR DEBUG PURPOSE ============
+    // if (tempMixedRoutes.isEmpty) {
+    //   tempMixedRoutes = _getHardcodedMixedData();
+    // }
+    // ==================================================================
 
     mixedMatchedRoutes = tempMixedRoutes;
     _hasFoundMixed = true;
@@ -406,6 +453,7 @@ class HomeViewModel extends ChangeNotifier {
     };
   }
 
+  // NEVER REMOVE - MIGHT NEED IN FUTURE FOR DEBUG PURPOSE ============
   List<Map<String, dynamic>> _getHardcodedDirectData() {
     return [
       {
@@ -431,6 +479,7 @@ class HomeViewModel extends ChangeNotifier {
     ];
   }
 
+  // NEVER REMOVE - MIGHT NEED IN FUTURE FOR DEBUG PURPOSE ============
   List<Map<String, dynamic>> _getHardcodedMixedData() {
     return [
       {
@@ -490,5 +539,20 @@ class HomeViewModel extends ChangeNotifier {
         'destination_name': 'Hardcoded Dropoff Destination',
       }
     ];
+  }
+
+  List<Map<String, dynamic>> _mapSubscriptions(List<Map<String, dynamic>> rawSubs) {
+    return rawSubs.map((sub) {
+      final driverTrip = sub['driver_trips'] ?? {};
+      final driverUser = driverTrip['users'] ?? {};
+      return {
+        'driver_name': driverUser['name'] ?? 'Unknown Driver',
+        'driver_phone': driverUser['phone'] ?? 'N/A',
+        'driver_image_url': driverUser['avatar_url'],
+        'pickup_location': sub['pickup_location'] ?? 'Unknown',
+        'dropoff_location': sub['dropoff_location'] ?? 'Unknown',
+        'pickup_time': sub['pickup_time'] != null ? _formatSqlTimeToUI(sub['pickup_time']) : 'TBD',
+      };
+    }).toList();
   }
 }

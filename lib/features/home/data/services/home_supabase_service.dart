@@ -29,4 +29,29 @@ class HomeSupabaseService {
       return [];
     }
   }
+
+  Future<List<Map<String, dynamic>>> fetchActiveSubscriptions(String passengerTripId) async {
+    try {
+      print('🔍 Fetching subscriptions for Trip ID: $passengerTripId');
+
+      final response = await _supabase
+          .from('tumpang_subscription')
+          .select('''
+            *,
+            driver_trips (
+              users (
+                name, phone, avatar_url 
+              )
+            )
+          ''')
+          .eq('passenger_trip_id', passengerTripId)
+          .eq('status', 'active');
+
+      print('✅ Raw Subscriptions Data: $response');
+      return (response as List).map((e) => e as Map<String, dynamic>).toList();
+    } catch (e) {
+      print('⚠️ Error fetching subscriptions: $e');
+      return [];
+    }
+  }
 }
