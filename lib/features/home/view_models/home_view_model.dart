@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nak_tumpang/core/utils/matching_utils.dart';
 import 'package:nak_tumpang/core/services/ors_service.dart';
 import 'package:nak_tumpang/features/home/data/services/home_supabase_service.dart';
@@ -24,7 +25,8 @@ class HomeViewModel extends ChangeNotifier {
     isLoading = true;
     notifyListeners();
 
-    final trip = await _homeService.fetchPassengerTrip('usr_pass_9921');
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    final trip = await _homeService.fetchPassengerTrip(userId ?? 'YOUR_SUPABASE_UUID_HERE');
 
     if (trip != null) {
       currentPassengerTrip = trip;
