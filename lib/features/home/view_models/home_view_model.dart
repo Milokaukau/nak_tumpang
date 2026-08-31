@@ -196,6 +196,10 @@ class HomeViewModel extends ChangeNotifier {
         }
       } catch (e) {
         print('⚠️ ORS Route Error: $e');
+        // Stop spamming the API if the quota is dead or internet drops
+        if (e.toString().contains('Quota') || e.toString().contains('SocketException')) {
+          break;
+        }
         continue;
       }
     }
@@ -460,7 +464,7 @@ class HomeViewModel extends ChangeNotifier {
         'id': 'hardcoded_id_1',
         'name': 'Hardcoded Driver A',
         'phone': 'Hardcoded Phone 123',
-        'profile_image_url': null,
+        'avatar_url': null,
         'pickup_distance_km': 1.5,
         'driver_profile': {
           'depart_time': '08:00 AM',
@@ -470,7 +474,7 @@ class HomeViewModel extends ChangeNotifier {
         'id': 'hardcoded_id_2',
         'name': 'Hardcoded Driver B',
         'phone': 'Hardcoded Phone 456',
-        'profile_image_url': null,
+        'avatar_url': null,
         'pickup_distance_km': 3.2,
         'driver_profile': {
           'depart_time': '08:30 AM',

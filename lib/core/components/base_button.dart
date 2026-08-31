@@ -41,7 +41,13 @@ class BaseButton extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: 7),
           shape: shape,
         ),
-        child: Text(text, style: style, textAlign: TextAlign.center),
+        child: Text(
+          text,
+          style: style,
+          textAlign: TextAlign.center,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
       );
     } else {
       button = ElevatedButton(
@@ -53,7 +59,13 @@ class BaseButton extends StatelessWidget {
           shape: shape,
           elevation: 0,
         ),
-        child: Text(text, style: style, textAlign: TextAlign.center),
+        child: Text(
+          text,
+          style: style,
+          textAlign: TextAlign.center,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
       );
     }
 

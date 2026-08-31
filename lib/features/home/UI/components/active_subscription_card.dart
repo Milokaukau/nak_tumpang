@@ -47,14 +47,26 @@ class ActiveSubscriptionCard extends StatelessWidget {
             children: [
               const Icon(Icons.location_on_outlined, size: 16, color: AppColors.primaryYellow),
               const SizedBox(width: 4),
-              Text(pickupLocation, style: const TextStyle(fontSize: 13)),
+              Flexible(
+                child: Text(
+                  pickupLocation,
+                  style: const TextStyle(fontSize: 13),
+                  overflow: TextOverflow.ellipsis, // Prevents overflow
+                ),
+              ),
               const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 4),
                 child: Icon(Icons.keyboard_double_arrow_right, size: 16, color: AppColors.primaryYellow),
               ),
               const Icon(Icons.location_on_outlined, size: 16, color: AppColors.primaryYellow),
               const SizedBox(width: 4),
-              Text(dropoffLocation, style: const TextStyle(fontSize: 13)),
+              Flexible(
+                child: Text(
+                  dropoffLocation,
+                  style: const TextStyle(fontSize: 13),
+                  overflow: TextOverflow.ellipsis, // Prevents overflow
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 4),
