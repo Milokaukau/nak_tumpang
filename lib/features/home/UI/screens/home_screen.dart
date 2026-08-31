@@ -6,8 +6,23 @@ import 'package:nak_tumpang/core/components/app_sidebar.dart';
 import 'package:nak_tumpang/features/home/UI/components/home_panel.dart';
 import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  @override
+  void initState() {
+    super.initState();
+
+    // Trigger the database fetch as soon as the screen renders
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<HomeViewModel>().fetchMockDriver();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -42,7 +57,7 @@ class HomeScreen extends StatelessWidget {
             child: HamburgerButton(),
           ),
 
-          // No parameters passed! HomePanel handles its own state.
+          // HomePanel handles its own state and UI
           const HomePanel(),
         ],
       ),
