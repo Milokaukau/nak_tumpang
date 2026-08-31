@@ -13,6 +13,21 @@ class PaymentViewModel extends ChangeNotifier {
   bool isLoading = false;
   String? errorMessage;
 
+  PaymentViewModel() {
+    _supabase.auth.onAuthStateChange.listen((data) {
+      if (data.session != null) {
+        errorMessage = null;
+        fetchPayments();
+      } else {
+        pendingPayments.clear();
+        selectedPaymentIds.clear();
+        errorMessage = 'User not authenticated. Please log in.';
+        notifyListeners();
+      }
+    });
+  }
+
+  // This was missing!
   double get totalSelectedAmount {
     return pendingPayments
         .where((p) => selectedPaymentIds.contains(p.id))
@@ -25,13 +40,8 @@ class PaymentViewModel extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // Obtains the authenticated session ID dynamically
       final userId = _supabase.auth.currentUser?.id;
-
-      if (userId == null) {
-        errorMessage = 'User not authenticated. Please log in.';
-        return;
-      }
+      if (userId == null) return;
 
       pendingPayments = await _service.fetchPendingPayments(userId);
     } catch (e) {
@@ -42,6 +52,7 @@ class PaymentViewModel extends ChangeNotifier {
     }
   }
 
+  // This was missing!
   void toggleSelection(String id) {
     if (selectedPaymentIds.contains(id)) {
       selectedPaymentIds.remove(id);
@@ -51,12 +62,12 @@ class PaymentViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  // This was missing!
   Future<bool> processMockPayment(String paymentMethod) async {
     isLoading = true;
     notifyListeners();
 
     try {
-      // Dynamic batch updates against Supabase table records
       for (final id in selectedPaymentIds) {
         await _service.completePayment(
           paymentId: id,

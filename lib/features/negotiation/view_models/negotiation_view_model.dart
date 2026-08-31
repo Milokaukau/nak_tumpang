@@ -17,35 +17,46 @@ class NegotiationViewModel extends ChangeNotifier {
 
   final Map<String, Map<String, dynamic>> _userCache = {};
 
+  NegotiationViewModel() {
+    _supabase.auth.onAuthStateChange.listen((data) {
+      if (data.session != null) {
+        errorMessage = null;
+        currentUserId = data.session!.user.id;
+        fetchActiveTripAndInitialize(currentUserRole ?? 'passenger');
+      } else {
+        pendingRequests.clear();
+        currentUserId = null;
+        currentTripId = null;
+        errorMessage = 'User not authenticated. Please log in.';
+        notifyListeners();
+      }
+    });
+  }
+
   Future<void> fetchActiveTripAndInitialize(String role) async {
     isLoading = true;
     errorMessage = null;
     notifyListeners();
 
     try {
-      // Fetch strictly from the active Supabase session
       currentUserId = _supabase.auth.currentUser?.id;
-
-      if (currentUserId == null) {
-        errorMessage = 'User not authenticated. Please log in.';
-        return;
-      }
+      if (currentUserId == null) return;
 
       currentUserRole = role;
-
       final tableName = role == 'driver' ? 'driver_trips' : 'passenger_trips';
+
       final dynamic tripData = await _supabase
           .from(tableName)
           .select('id')
           .eq('user_id', currentUserId!)
-          .limit(1)
           .maybeSingle();
 
       if (tripData != null && tripData['id'] != null) {
         currentTripId = tripData['id'] as String;
         await refreshRequests();
       } else {
-        errorMessage = 'No active $role trip found for this account.';
+        pendingRequests = [];
+        currentTripId = null;
       }
     } catch (e) {
       errorMessage = 'Error loading trip: $e';
@@ -55,7 +66,6 @@ class NegotiationViewModel extends ChangeNotifier {
     }
   }
 
-  // Pull-to-refresh action
   Future<void> refreshRequests() async {
     if (currentTripId == null || currentUserRole == null) return;
     try {
