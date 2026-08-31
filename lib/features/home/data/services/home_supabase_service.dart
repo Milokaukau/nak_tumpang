@@ -21,7 +21,7 @@ class HomeSupabaseService {
     try {
       final response = await _supabase
           .from('driver_trips')
-          .select('*, users(name)');
+          .select('*, users(name, phone, avatar_url)');
 
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {

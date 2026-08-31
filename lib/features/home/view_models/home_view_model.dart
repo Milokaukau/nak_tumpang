@@ -185,8 +185,8 @@ class HomeViewModel extends ChangeNotifier {
           _parseDouble(driverTrip['depart_lng'])
       );
       final drivEnd = LatLng(
-          _parseDouble(driverTrip['arrival_lat'] ?? driverTrip['ariival_lat']),
-          _parseDouble(driverTrip['arrival_lng'] ?? driverTrip['ariival_lng'])
+          _parseDouble(driverTrip['arrival_lat']),
+          _parseDouble(driverTrip['arrival_lng'])
       );
 
       if (drivStart.latitude == 0 || drivEnd.latitude == 0) continue;
