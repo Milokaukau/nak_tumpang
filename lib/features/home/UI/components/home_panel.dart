@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:nak_tumpang/core/components/base_button.dart';
 import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/components/base_filter_options.dart';
@@ -84,37 +85,13 @@ class HomePanel extends StatelessWidget {
     }
 
     return [
-      // --- ADDED TITLE ---
       const Text(
         'My Active Subscriptions',
         style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
       ),
       const SizedBox(height: 16),
 
-      ...List.generate(viewModel.activeSubscriptions.length, (index) {
-        final sub = viewModel.activeSubscriptions[index];
-        return Column(
-          children: [
-            ActiveSubscriptionCard(
-              name: sub['name'],
-              phone: sub['phone'],
-              imageUrl: sub['imageUrl'],
-              pickupLocation: sub['pickup_location'],
-              dropoffLocation: sub['dropoff_location'],
-              time: sub['pickup_time'],
-              exceptionButtonText: "Can't fetch at...", // Driver-specific text
-              onCallPressed: () => print('Calling passenger...'),
-              onDetailsPressed: () => print('Opening details...'),
-              onExceptionPressed: () => print('Filing driver exception...'),
-            ),
-            if (index != viewModel.activeSubscriptions.length - 1)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 16),
-                child: Divider(height: 1, thickness: 1, color: AppColors.greyBorder),
-              ),
-          ],
-        );
-      }),
+      ..._buildSubscriptionList(viewModel, isDriver: true)
     ];
   }
 
@@ -125,47 +102,17 @@ class HomePanel extends StatelessWidget {
     return [
       const Text('My Active Subscriptions', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
       const SizedBox(height: 16),
-
-      ...List.generate(viewModel.activeSubscriptions.length, (index) {
-        final sub = viewModel.activeSubscriptions[index];
-        return Column(
-          children: [
-            ActiveSubscriptionCard(
-              name: sub['name'],
-              phone: sub['phone'],
-              imageUrl: sub['imageUrl'],
-              pickupLocation: sub['pickup_location'],
-              dropoffLocation: sub['dropoff_location'],
-              time: sub['pickup_time'],
-              exceptionButtonText: 'No need tumpang at...', // Passenger-specific text
-              onCallPressed: () => print('Calling driver...'),
-              onDetailsPressed: () => print('Opening subscription details...'),
-              onExceptionPressed: () => print('Filing tumpang exception...'),
-            ),
-            if (index != viewModel.activeSubscriptions.length - 1)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 16),
-                child: Divider(height: 1, thickness: 1, color: AppColors.greyBorder),
-              ),
-          ],
-        );
-      }),
+      ..._buildSubscriptionList(viewModel, isDriver: false),
+      const SizedBox(height: 24),
       const Divider(height: 1, thickness: 1, color: AppColors.greyBorder),
-      const SizedBox(height: 16, width: double.infinity),
-      SizedBox(
-        width: double.infinity,
+      const SizedBox(height: 16),
+      BaseButton(
+        text: 'Find Tumpang for Another Trip',
+        onPressed: () => viewModel.toggleMatchingUI(true),
+        isOutlined: true,
         height: 48,
-        child: OutlinedButton(
-          onPressed: () => viewModel.toggleMatchingUI(true),
-          style: OutlinedButton.styleFrom(
-            side: const BorderSide(color: AppColors.primaryYellow, width: 1.5),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          ),
-          child: const Text(
-            'Find Tumpang for Another Trip',
-            style: TextStyle(color: AppColors.black, fontWeight: FontWeight.bold),
-          ),
-        ),
+        borderColor: AppColors.greyBorder,
+        textStyle: const TextStyle(color: AppColors.black, fontWeight: FontWeight.bold),
       ),
     ];
   }
@@ -290,5 +237,32 @@ class HomePanel extends StatelessWidget {
           }),
       ]
     ];
+  }
+
+  // --- NEW HELPER METHOD ---
+  List<Widget> _buildSubscriptionList(HomeViewModel viewModel, {required bool isDriver}) {
+    return List.generate(viewModel.activeSubscriptions.length, (index) {
+      final sub = viewModel.activeSubscriptions[index];
+      return Column(
+        children: [
+          ActiveSubscriptionCard(
+            name: sub['name'],
+            phone: sub['phone'],
+            imageUrl: sub['imageUrl'],
+            pickupLocation: sub['pickup_location'],
+            dropoffLocation: sub['dropoff_location'],
+            time: sub['pickup_time'],
+            exceptionButtonText: isDriver ? "Can't fetch at..." : 'No need tumpang at...',
+            isSelected: viewModel.selectedSubscriptionId == sub['id'],
+            onTap: () => viewModel.selectSubscription(sub['id']),
+            onCallPressed: () => print('Calling...'),
+            onDetailsPressed: () => print('Opening details...'),
+            onExceptionPressed: () => print('Filing exception...'),
+          ),
+          if (index != viewModel.activeSubscriptions.length - 1)
+            const SizedBox(height: 16),
+        ],
+      );
+    });
   }
 }

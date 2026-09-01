@@ -9,6 +9,7 @@ import 'package:nak_tumpang/core/utils/transit_utils.dart';
 class HomeViewModel extends ChangeNotifier {
   String selectedFilter = 'Direct';
   String currentUserRole = 'passenger';
+  String? selectedSubscriptionId;
   Map<String, dynamic>? currentPassenger;
   Map<String, dynamic>? currentPassengerTrip;
 
@@ -18,11 +19,18 @@ class HomeViewModel extends ChangeNotifier {
   bool isScreenLoading = true;
   bool isDirectLoading = false;
   bool isMixedLoading = false;
+  bool isRouteLoading = false;
   bool showMatchingUI = false;
   bool _hasFoundDirect = false;
   bool _hasFoundMixed = false;
 
   int _fetchId = 0;
+  int _routeFetchId = 0;
+
+  List<LatLng> mapRoute = [];
+  List<LatLng> displayRoute = [];
+  LatLng? routeStart;
+  LatLng? routeEnd;
 
   final ORSService _orsService = ORSService();
   final HomeSupabaseService _homeService = HomeSupabaseService();
@@ -33,6 +41,7 @@ class HomeViewModel extends ChangeNotifier {
   void toggleMatchingUI(bool show) {
     showMatchingUI = show;
     notifyListeners();
+    updateMapRoute();
     if (show) {
       _matchCurrentRouteType();
     }
@@ -83,9 +92,12 @@ class HomeViewModel extends ChangeNotifier {
         currentPassengerTrip = trips.first;
         currentPassenger = trips.first['users'];
 
-        // --- Fetch ALL subscriptions globally for the user ---
         final rawSubs = await _homeService.fetchAllPassengerSubscriptions(userId);
         activeSubscriptions = _mapSubscriptions(rawSubs, isForPassenger: true);
+
+        if (activeSubscriptions.isNotEmpty) {
+          selectedSubscriptionId = activeSubscriptions.first['id'];
+        }
 
         _hasFoundDirect = false;
         _hasFoundMixed = false;
@@ -93,6 +105,8 @@ class HomeViewModel extends ChangeNotifier {
         mixedMatchedRoutes.clear();
 
         showMatchingUI = activeSubscriptions.isEmpty;
+
+        await updateMapRoute();
 
         if (showMatchingUI) {
           await _matchCurrentRouteType();
@@ -114,9 +128,6 @@ class HomeViewModel extends ChangeNotifier {
     try {
       final selected = availableTrips.firstWhere((t) => t['id'] == tripId);
       currentPassengerTrip = selected;
-
-      // --- REMOVED SUBSCRIPTION FETCHING HERE ---
-      // We only clear the matching options for the new trip
       _hasFoundDirect = false;
       _hasFoundMixed = false;
       matchedDrivers.clear();
@@ -125,6 +136,8 @@ class HomeViewModel extends ChangeNotifier {
       if (showMatchingUI) {
         await _matchCurrentRouteType();
       }
+
+      await updateMapRoute();
     } catch (e) {
       print('⚠️ Error changing trip: $e');
     } finally {
@@ -153,14 +166,8 @@ class HomeViewModel extends ChangeNotifier {
     notifyListeners();
 
     final passDays = _extractActiveDays(currentPassengerTrip!);
-    final passPick = LatLng(
-        _parseDouble(currentPassengerTrip!['pickup_lat']),
-        _parseDouble(currentPassengerTrip!['pickup_lng'])
-    );
-    final passDrop = LatLng(
-        _parseDouble(currentPassengerTrip!['dropoff_lat']),
-        _parseDouble(currentPassengerTrip!['dropoff_lng'])
-    );
+    final passPick = _latLngFromMap(currentPassengerTrip!, 'pickup_lat', 'pickup_lng');
+    final passDrop = _latLngFromMap(currentPassengerTrip!, 'dropoff_lat', 'dropoff_lng');
     final passTime = _sqlTimeToMinutes(currentPassengerTrip!['desired_pickup_time']);
 
     final driverTrips = await _homeService.fetchDriverTrips();
@@ -179,14 +186,8 @@ class HomeViewModel extends ChangeNotifier {
       final drivTime = _sqlTimeToMinutes(driverTrip['depart_time']);
       if ((drivTime - passTime).abs() > 30) continue;
 
-      final drivStart = LatLng(
-          _parseDouble(driverTrip['depart_lat']),
-          _parseDouble(driverTrip['depart_lng'])
-      );
-      final drivEnd = LatLng(
-          _parseDouble(driverTrip['arrival_lat']),
-          _parseDouble(driverTrip['arrival_lng'])
-      );
+      final drivStart = _latLngFromMap(driverTrip, 'depart_lat', 'depart_lng');
+      final drivEnd = _latLngFromMap(driverTrip, 'arrival_lat', 'arrival_lng');
 
       if (drivStart.latitude == 0 || drivEnd.latitude == 0) continue;
 
@@ -248,14 +249,8 @@ class HomeViewModel extends ChangeNotifier {
     notifyListeners();
 
     final passDays = _extractActiveDays(currentPassengerTrip!);
-    final passPick = LatLng(
-        _parseDouble(currentPassengerTrip!['pickup_lat']),
-        _parseDouble(currentPassengerTrip!['pickup_lng'])
-    );
-    final passDrop = LatLng(
-        _parseDouble(currentPassengerTrip!['dropoff_lat']),
-        _parseDouble(currentPassengerTrip!['dropoff_lng'])
-    );
+    final passPick = _latLngFromMap(currentPassengerTrip!, 'pickup_lat', 'pickup_lng');
+    final passDrop = _latLngFromMap(currentPassengerTrip!, 'dropoff_lat', 'dropoff_lng');
     final passTime = _sqlTimeToMinutes(currentPassengerTrip!['desired_pickup_time']);
 
     final driverTrips = await _homeService.fetchDriverTrips();
@@ -464,6 +459,13 @@ class HomeViewModel extends ChangeNotifier {
       final user = trip['users'] ?? {};
 
       return {
+        'id': sub['id'],
+        'passenger_trip_id': sub['passenger_trip_id'],
+        'driver_trip_id': sub['driver_trip_id'],
+        'pickup_lat': sub['pickup_lat'],
+        'pickup_lng': sub['pickup_lng'],
+        'dropoff_lat': sub['dropoff_lat'],
+        'dropoff_lng': sub['dropoff_lng'],
         'name': user['name'] ?? defaultName,
         'phone': user['phone'] ?? 'N/A',
         'imageUrl': user['avatar_url'],
@@ -479,6 +481,12 @@ class HomeViewModel extends ChangeNotifier {
     if (value is double) return value;
     if (value is int) return value.toDouble();
     return double.tryParse(value.toString()) ?? 0.0;
+  }
+
+  /// Builds a [LatLng] from a lat/lng pair stored in a raw data map,
+  /// tolerating the mixed num/String types Supabase can hand back.
+  LatLng _latLngFromMap(Map<String, dynamic> map, String latKey, String lngKey) {
+    return LatLng(_parseDouble(map[latKey]), _parseDouble(map[lngKey]));
   }
 
   int _sqlTimeToMinutes(String sqlTime) {
@@ -599,5 +607,83 @@ class HomeViewModel extends ChangeNotifier {
         'destination_name': 'Hardcoded Dropoff Destination',
       }
     ];
+  }
+
+  // ==========================================
+  // MAP ROUTE LOGIC
+  // ==========================================
+
+  void selectSubscription(String subId) {
+    if (selectedSubscriptionId == subId) return;
+    selectedSubscriptionId = subId;
+    notifyListeners();
+    updateMapRoute();
+  }
+
+  void _clearMap() {
+    // Invalidate any in-flight route fetch so a late response can't
+    // resurrect a route after the selection was cleared.
+    _routeFetchId++;
+    mapRoute = [];
+    displayRoute = [];
+    routeStart = null;
+    routeEnd = null;
+    isRouteLoading = false;
+    notifyListeners();
+  }
+
+  Future<void> updateMapRoute() async {
+    // Tags this call so a slower, superseded fetch (e.g. the user tapped
+    // another subscription before this one finished) can detect it's stale
+    // and avoid overwriting newer state when it eventually resolves.
+    final requestId = ++_routeFetchId;
+
+    if (currentUserRole == 'passenger') {
+      if (showMatchingUI) {
+        // --- CASE 1: Finding a driver (Dropdown Trip Route) ---
+        if (currentPassengerTrip == null) return _clearMap();
+        routeStart = _latLngFromMap(currentPassengerTrip!, 'pickup_lat', 'pickup_lng');
+        routeEnd = _latLngFromMap(currentPassengerTrip!, 'dropoff_lat', 'dropoff_lng');
+      } else {
+        // --- CASE 2: Viewing Subscriptions (Selected Sub Route) ---
+        if (selectedSubscriptionId == null || activeSubscriptions.isEmpty) return _clearMap();
+
+        final sub = activeSubscriptions.firstWhere(
+                (s) => s['id'] == selectedSubscriptionId,
+            orElse: () => <String, dynamic>{}
+        );
+
+        if (sub.isEmpty) return _clearMap();
+
+        routeStart = _latLngFromMap(sub, 'pickup_lat', 'pickup_lng');
+        routeEnd = _latLngFromMap(sub, 'dropoff_lat', 'dropoff_lng');
+      }
+    } else {
+      // Driver view logic will go here later
+      return _clearMap();
+    }
+
+    mapRoute = [];
+    isRouteLoading = true;
+    notifyListeners(); // Snap markers to the new pins, erase the old line, show the spinner.
+
+    try {
+      final route = await _orsService.getRoute(routeStart!, routeEnd!);
+      if (requestId != _routeFetchId) return; // A newer selection has since superseded this fetch.
+
+      mapRoute = route;
+      displayRoute = [
+        routeStart!,
+        ...mapRoute,
+        routeEnd!,
+      ];
+    } catch (e) {
+      print('⚠️ Error updating map route: $e');
+    } finally {
+      if (requestId == _routeFetchId) {
+        isRouteLoading = false;
+        notifyListeners();
+      }
+    }
   }
 }
