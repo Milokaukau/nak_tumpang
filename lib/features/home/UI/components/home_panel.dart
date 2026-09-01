@@ -121,6 +121,32 @@ class HomePanel extends StatelessWidget {
   // VIEW MODE: PASSENGER MATCHING UI
   // ==========================================
   List<Widget> _buildPassengerMatchingView(HomeViewModel viewModel) {
+
+    if (viewModel.availableTrips.isEmpty) {
+      return [
+        if (viewModel.activeSubscriptions.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () => viewModel.toggleMatchingUI(false),
+                icon: const Icon(Icons.arrow_back, color: AppColors.black),
+                label: const Text('Back to Subscriptions', style: TextStyle(color: AppColors.black, fontWeight: FontWeight.bold)),
+              ),
+            ),
+          ),
+        const SizedBox(height: 64),
+        const Center(
+          child: Text(
+            'You have no pending trips to match.\nAll your trips currently have drivers!',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: AppColors.greyText, fontSize: 16, height: 1.5),
+          ),
+        ),
+      ];
+    }
+
     return [
       // Back Button if they have existing subscriptions
       if (viewModel.activeSubscriptions.isNotEmpty)

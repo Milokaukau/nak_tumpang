@@ -85,15 +85,25 @@ class HomeViewModel extends ChangeNotifier {
 
     try {
       final userId = '94d34b82-eba4-4267-9524-df1841996de0';
+
+      // 1. Fetch both trips and subscriptions first
       final trips = await _homeService.fetchPassengerTrips(userId);
+      final rawSubs = await _homeService.fetchAllPassengerSubscriptions(userId);
 
       if (trips.isNotEmpty) {
-        availableTrips = trips;
-        currentPassengerTrip = trips.first;
-        currentPassenger = trips.first['users'];
-
-        final rawSubs = await _homeService.fetchAllPassengerSubscriptions(userId);
+        currentPassenger = trips.first['users']; // Grab user info safely
         activeSubscriptions = _mapSubscriptions(rawSubs, isForPassenger: true);
+
+        // 2. Filter out trips that already have an active subscription
+        final subbedTripIds = activeSubscriptions.map((s) => s['passenger_trip_id']).toSet();
+        availableTrips = trips.where((t) => !subbedTripIds.contains(t['id'])).toList();
+
+        // 3. Set the default selected trip (if any are left)
+        if (availableTrips.isNotEmpty) {
+          currentPassengerTrip = availableTrips.first;
+        } else {
+          currentPassengerTrip = null;
+        }
 
         if (activeSubscriptions.isNotEmpty) {
           selectedSubscriptionId = activeSubscriptions.first['id'];
@@ -106,7 +116,7 @@ class HomeViewModel extends ChangeNotifier {
 
         showMatchingUI = activeSubscriptions.isEmpty;
 
-        await updateMapRoute();
+        updateMapRoute();
 
         if (showMatchingUI) {
           await _matchCurrentRouteType();
@@ -121,28 +131,26 @@ class HomeViewModel extends ChangeNotifier {
   }
 
   Future<void> changeTrip(String tripId) async {
-    if (isScreenLoading) return;
-    isScreenLoading = true;
-    notifyListeners();
+    // --- REMOVED isScreenLoading completely from here. ---
+    // This allows the UI to stay visible while isDirectLoading/isMixedLoading
+    // handles the localized spinners under the filter row.
 
     try {
       final selected = availableTrips.firstWhere((t) => t['id'] == tripId);
       currentPassengerTrip = selected;
+
       _hasFoundDirect = false;
       _hasFoundMixed = false;
       matchedDrivers.clear();
       mixedMatchedRoutes.clear();
 
+      updateMapRoute(); // Do not await, update map instantly
+
       if (showMatchingUI) {
         await _matchCurrentRouteType();
       }
-
-      await updateMapRoute();
     } catch (e) {
       print('⚠️ Error changing trip: $e');
-    } finally {
-      isScreenLoading = false;
-      notifyListeners();
     }
   }
 
