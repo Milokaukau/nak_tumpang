@@ -92,6 +92,12 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  void _startRegister() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const RegisterScreen()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -225,13 +231,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   onEnter: (_) => setState(() => _isHoveringRegister = true),
                   onExit: (_) => setState(() => _isHoveringRegister = false),
                   child: GestureDetector(
-                    onTap: _isLoading
-                        ? null
-                        : () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const RegisterScreen()),
-                      );
-                    },
+                    onTap: _isLoading ? null : _startRegister,
                     child: Column(
                       children: [
                         Text('New here?', style: TextStyle(color: AppColors.greyText, fontSize: 12)),

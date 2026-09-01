@@ -43,6 +43,7 @@ dependencies:
   supabase_flutter: ^2.17.2
   sqflite: ^2.4.3
   path: ^1.9.1
+  image_picker: ^1.1.2
 
 dev_dependencies:
   flutter_test:

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:nak_tumpang/features/home/UI/screens/home_screen.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
+import 'package:nak_tumpang/core/utils/ic_no_formatter.dart';
+import 'package:nak_tumpang/core/utils/validators.dart';
+import 'package:nak_tumpang/features/profile/UI/screens/profile_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -13,6 +15,7 @@ class RegisterScreen extends StatefulWidget {
 
 class _RegisterScreenState extends State<RegisterScreen> {
   final _nameController = TextEditingController();
+  final _icController = TextEditingController();
   final _phoneController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -24,11 +27,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _isLoading = false;
   bool _autoValidate = false;
   String? _errorMessage;
-
-  // Per-field error messages, rendered manually below each box so they
-  // align flush-left with the labels instead of using Flutter's default
-  // (indented) error text.
   String? _nameError;
+
+  String? _icError;
   String? _phoneError;
   String? _emailError;
   String? _passwordError;
@@ -36,15 +37,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   final supabase = Supabase.instance.client;
 
-  // Malaysian mobile number, local format only (no +60 typed by user):
-  // starts with 01, second digit 0-4 or 6-9 (excludes 05 which isn't a
-  // mobile prefix), followed by 7-8 more digits.
-  static final RegExp _phoneRegex = RegExp(r'^01[0-46-9][0-9]{6,8}$');
-  static final RegExp _emailRegex = RegExp(r'^[\w.+-]+@[\w-]+\.[\w.-]+$');
-
   @override
   void dispose() {
     _nameController.dispose();
+    _icController.dispose();
     _phoneController.dispose();
     _phoneFocusNode.dispose();
     _emailController.dispose();
@@ -53,46 +49,24 @@ class _RegisterScreenState extends State<RegisterScreen> {
     super.dispose();
   }
 
-  String? _validateName(String? v) {
-    if (v == null || v.trim().isEmpty) return 'Full name is required';
-    if (v.trim().length < 2) return 'Name is too short';
-    return null;
-  }
+  String? _validateName(String? v) => Validators.name(v);
 
-  String? _validatePhone(String? v) {
-    if (v == null || v.trim().isEmpty) return 'Phone number is required';
-    final cleaned = v.trim().replaceAll(RegExp(r'[\s-]'), '');
-    if (!_phoneRegex.hasMatch(cleaned)) {
-      return 'Enter a valid number, e.g. 0123456789';
-    }
-    return null;
-  }
+  String? _validateIC(String? v) => Validators.ic(v);
 
-  String? _validateEmail(String? v) {
-    if (v == null || v.trim().isEmpty) return 'Email is required';
-    if (!_emailRegex.hasMatch(v.trim())) return 'Enter a valid email';
-    return null;
-  }
+  String? _validatePhone(String? v) => Validators.phoneLocal(v);
 
-  String? _validatePassword(String? v) {
-    if (v == null || v.isEmpty) return 'Password is required';
-    if (v.length < 6) return 'At least 6 characters';
-    if (!RegExp(r'[A-Za-z]').hasMatch(v) || !RegExp(r'[0-9]').hasMatch(v)) {
-      return 'Include at least one letter and one number';
-    }
-    return null;
-  }
+  String? _validateEmail(String? v) => Validators.email(v);
 
-  String? _validateConfirmPassword(String? v) {
-    if (v == null || v.isEmpty) return 'Please confirm your password';
-    if (v != _passwordController.text) return 'Passwords do not match';
-    return null;
-  }
+  String? _validatePassword(String? v) => Validators.password(v);
+
+  String? _validateConfirmPassword(String? v) =>
+      Validators.confirmPassword(v, _passwordController.text);
 
   void _revalidateIfNeeded() {
     if (!_autoValidate) return;
     setState(() {
       _nameError = _validateName(_nameController.text);
+      _icError = _validateIC(_icController.text);
       _phoneError = _validatePhone(_phoneController.text);
       _emailError = _validateEmail(_emailController.text);
       _passwordError = _validatePassword(_passwordController.text);
@@ -104,6 +78,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     setState(() {
       _autoValidate = true;
       _nameError = _validateName(_nameController.text);
+      _icError = _validateIC(_icController.text);
       _phoneError = _validatePhone(_phoneController.text);
       _emailError = _validateEmail(_emailController.text);
       _passwordError = _validatePassword(_passwordController.text);
@@ -111,6 +86,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     });
 
     if (_nameError != null ||
+        _icError != null ||
         _phoneError != null ||
         _emailError != null ||
         _passwordError != null ||
@@ -123,24 +99,34 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _errorMessage = null;
     });
 
-    final cleanedPhone =
-    _phoneController.text.trim().replaceAll(RegExp(r'[\s-]'), '');
-    final fullPhoneForStorage = '+60${cleanedPhone.substring(1)}'; // drop leading 0, prefix +60
-
+    final fullPhoneForStorage = Validators.toStoredPhone(_phoneController.text);
+    final cleanedIC = _icController.text.replaceAll(RegExp(r'[^0-9]'), '');
     try {
-      await supabase.auth.signUp(
+      final response = await supabase.auth.signUp(
         email: _emailController.text.trim(),
         password: _passwordController.text,
         data: {
           'name': _nameController.text.trim(),
+          'ic_number': cleanedIC,
           'phone': fullPhoneForStorage,
-          'role': 'passenger', // default; changeable later in Profile
+          'role': 'passenger', // placeholder; the popup below sets the real one
         },
       );
 
+      // double check if email exists
+      final identities = response.user?.identities;
+      if (identities != null && identities.isEmpty) {
+        setState(() => _errorMessage =
+        'An account with this email already exists. Please log in instead.');
+        return;
+      }
+
       if (!mounted) return;
+
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const HomeScreen()),
+        MaterialPageRoute(
+          builder: (_) => const ProfileScreen(isFirstTimeSetup: true),
+        ),
       );
     } on AuthException catch (e) {
       setState(() => _errorMessage = e.message);
@@ -156,9 +142,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     return Scaffold(
       backgroundColor: AppColors.white,
       appBar: AppBar(
-        backgroundColor: AppColors.white,
-        elevation: 0,
-        title: Text('Create Account', style: TextStyle(color: AppColors.black)),
+        title: const Text('Create Account'),
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -166,7 +150,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text('Full Name', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
+              Text('Full Name (as per IC)', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
               const SizedBox(height: 6),
               TextField(
                 controller: _nameController,
@@ -175,6 +159,21 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 onChanged: (_) => _revalidateIfNeeded(),
               ),
               _errorText(_nameError),
+              const SizedBox(height: 18),
+
+              Text('IC Number', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
+              const SizedBox(height: 6),
+              TextField(
+                controller: _icController,
+                keyboardType: TextInputType.number,
+                inputFormatters: [MalaysianICInputFormatter()],
+                decoration: _fieldDecoration().copyWith(
+                  hintText: '990101-14-5678',
+                  hintStyle: TextStyle(color: AppColors.greyText.withValues(alpha: 0.6)),
+                ),
+                onChanged: (_) => _revalidateIfNeeded(),
+              ),
+              _errorText(_icError),
               const SizedBox(height: 18),
 
               Text('Phone Number', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
@@ -332,9 +331,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 
-  /// Renders a validation error flush-left, aligned with the field's
-  /// label and box edge above it. Returns an empty (zero-height) widget
-  /// when there's no error, so nothing shifts when errors appear/disappear.
+  // error messages aligned left to the box edge
+  // no changes if no error
   Widget _errorText(String? error) {
     if (error == null) return const SizedBox.shrink();
     return Padding(
