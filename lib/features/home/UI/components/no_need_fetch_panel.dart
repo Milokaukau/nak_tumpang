@@ -14,6 +14,8 @@ class NoNeedFetchPanel extends StatelessWidget {
   final String dropoffName;
   final String pickupTime;
   final String driverPhone;
+  final DateTime? minDate;
+  final DateTime? maxDate;
   final VoidCallback? onSubmitted;
 
   const NoNeedFetchPanel({
@@ -26,6 +28,8 @@ class NoNeedFetchPanel extends StatelessWidget {
     required this.dropoffName,
     required this.pickupTime,
     required this.driverPhone,
+    required this.minDate,
+    required this.maxDate,
     this.onSubmitted,
   });
 
@@ -120,6 +124,8 @@ class NoNeedFetchPanel extends StatelessWidget {
           "$driverName will be notified immediately and won't count you in for pickup on these dates. You won't be charged for this period. Your regular tumpang schedule resumes automatically after.",
           confirmLabel: 'Confirm',
           isSubmitting: vm.isSubmittingException,
+          minDate: minDate,
+          maxDate: maxDate,
           onCancel: () => vm.closeExceptionPanel(),
           onConfirm: () async {
             final success = await vm.submitException(
@@ -130,12 +136,11 @@ class NoNeedFetchPanel extends StatelessWidget {
             if (success) {
               vm.closeExceptionPanel();
               if (context.mounted) {
-                Navigator.of(context).pop(); // close the bottom sheet
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Submitted — passenger(s) will be notified.')),
+                  const SnackBar(content: Text('Submitted — driver will be notified.')),
                 );
               }
-              onSubmitted?.call(); // refresh
+              onSubmitted?.call();
             }
           },
         ),

@@ -8,7 +8,7 @@ class AppProviders {
     return [
       // Registers the ViewModel globally so any screen can access the Passenger data
       ChangeNotifierProvider(
-        create: (_) => HomeViewModel()..fetchMockPassenger(),
+        create: (_) => HomeViewModel(),
       ),
       // Registers the ViewModel globally so subscription list/detail screens share state
       ChangeNotifierProvider(

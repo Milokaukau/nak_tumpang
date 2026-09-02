@@ -12,7 +12,6 @@ class AppColors {
   static const Color greyBorder = Color(0xFFE0E0E0);
 
   // Specific UI Colors
-  static const Color transitRed = Color(0xFF701A22);
   static const Color driverBlueBg = Color(0xFFD6E4FF);
 
   // Status Colors (used by calendar/exception module)

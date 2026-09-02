@@ -19,6 +19,8 @@ class ExceptionRequestForm extends StatelessWidget {
   final VoidCallback onCancel;
   final VoidCallback onConfirm;
   final bool isSubmitting;
+  final DateTime? minDate;
+  final DateTime? maxDate;
 
   const ExceptionRequestForm({
     super.key,
@@ -38,17 +40,41 @@ class ExceptionRequestForm extends StatelessWidget {
     required this.onCancel,
     required this.onConfirm,
     this.isSubmitting = false,
+    this.minDate,
+    this.maxDate,
   });
 
   Future<void> _pickDate(BuildContext context, bool isStart) async {
-    final now = DateTime.now();
+    // Open picker without strict bounds
     final picked = await showDatePicker(
       context: context,
-      initialDate: (isStart ? startDate : endDate) ?? now,
-      firstDate: isStart ? now : (startDate ?? now),
-      lastDate: now.add(const Duration(days: 365)),
+      initialDate: (isStart ? startDate : endDate) ?? (minDate ?? DateTime.now()),
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
     );
+
     if (picked != null) {
+      // If a minimum and maximum date exist (subscription period)
+      if (minDate != null && maxDate != null) {
+        // Strip time to only compare dates
+        final purePicked = DateTime(picked.year, picked.month, picked.day);
+        final pureMin = DateTime(minDate!.year, minDate!.month, minDate!.day);
+        final pureMax = DateTime(maxDate!.year, maxDate!.month, maxDate!.day);
+
+        if (purePicked.isBefore(pureMin) || purePicked.isAfter(pureMax)) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Not allowed: Date must be within the subscription period.'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+          return; // Stop here, do not update the date
+        }
+      }
+
+      // Update if valid
       isStart ? onStartDateChanged(picked) : onEndDateChanged(picked);
     }
   }

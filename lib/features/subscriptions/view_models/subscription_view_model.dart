@@ -16,9 +16,10 @@ class SubscriptionViewModel extends ChangeNotifier {
 
     final results = await _service.fetchSubscriptions(userId: userId, role: role);
 
-    for (var sub in results) {
+    // Run exception checks in parallel for faster load times
+    await Future.wait(results.map((sub) async {
       sub['has_active_exception'] = await _service.hasActiveException(sub['id']);
-    }
+    }));
 
     subscriptions = results;
     isLoading = false;
@@ -36,10 +37,41 @@ class SubscriptionViewModel extends ChangeNotifier {
   Future<bool> cancelSubscription({
     required String subscriptionId,
     required String cancelledByRole,
+    String? reason,
+  }) async {
+    try {
+      isLoading = true; // Fixed: removed underscore
+      notifyListeners();
+
+      // Fixed: Delegating to your service layer to match your architecture
+      final success = await _service.cancelSubscription(
+        subscriptionId: subscriptionId,
+        cancelledByRole: cancelledByRole,
+        reason: reason,
+      );
+
+      isLoading = false; // Fixed: removed underscore
+      notifyListeners();
+      return success;
+    } catch (e) {
+      isLoading = false; // Fixed: removed underscore
+      notifyListeners();
+      debugPrint('Error cancelling subscription: $e');
+      return false;
+    }
+  }
+
+  Future<bool> updateException({
+    required String exceptionId,
+    required DateTime startDate,
+    required DateTime endDate,
+    required String reason,
   }) {
-    return _service.cancelSubscription(
-      subscriptionId: subscriptionId,
-      cancelledByRole: cancelledByRole,
+    return _service.updateException(
+      exceptionId: exceptionId,
+      startDate: startDate,
+      endDate: endDate,
+      reason: reason,
     );
   }
 }

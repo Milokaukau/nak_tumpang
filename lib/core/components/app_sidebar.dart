@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/features/profile/UI/screens/profile_screen.dart';
 import 'package:nak_tumpang/features/auth/UI/screens/login_screen.dart';
 import 'package:nak_tumpang/features/subscriptions/UI/screens/subscription_list_screen.dart';
+import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
 
 class HamburgerButton extends StatelessWidget {
   const HamburgerButton({super.key});
@@ -126,12 +128,12 @@ class AppSidebar extends StatelessWidget {
         nextScreen = const ProfileScreen();
         break;
       case 1:
-        nextScreen = const SubscriptionListScreen(
-          userId: '31db9203-05d0-42af-8641-50e48e9c163a', // for subscription testing:
-          // 31db9203-05d0-42af-8641-50e48e9c163a
-          //ccf6036f-0097-4369-b94f-0a22ee7987de
-          role: 'passenger',
+        final homeVm = Provider.of<HomeViewModel>(context, listen: false);
+        nextScreen = SubscriptionListScreen(
+          userId: homeVm.currentUserId ?? '',
+          role: homeVm.currentUserRole,
         );
+        break;
         break;
       case 2:
         nextScreen = const ProfileScreen(); // Replace with actual screen

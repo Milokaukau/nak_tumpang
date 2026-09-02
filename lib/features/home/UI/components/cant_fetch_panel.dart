@@ -14,6 +14,8 @@ class CantFetchPanel extends StatelessWidget {
   final String dropoffName;
   final String pickupTime;
   final String passengerPhone;
+  final DateTime? minDate;
+  final DateTime? maxDate;
   final VoidCallback? onSubmitted;
 
   const CantFetchPanel({
@@ -26,6 +28,8 @@ class CantFetchPanel extends StatelessWidget {
     required this.dropoffName,
     required this.pickupTime,
     required this.passengerPhone,
+    required this.minDate,
+    required this.maxDate,
     this.onSubmitted,
   });
 
@@ -113,6 +117,8 @@ class CantFetchPanel extends StatelessWidget {
           '$passengerName will be notified immediately and can look for another driver for these dates. Your regular tumpang schedule resumes automatically after.',
           confirmLabel: 'Confirm',
           isSubmitting: vm.isSubmittingException,
+          minDate: minDate,
+          maxDate: maxDate,
           onCancel: () => vm.closeExceptionPanel(),
           onConfirm: () async {
             final success = await vm.submitException(
@@ -123,12 +129,11 @@ class CantFetchPanel extends StatelessWidget {
             if (success) {
               vm.closeExceptionPanel();
               if (context.mounted) {
-                Navigator.of(context).pop(); // close the bottom sheet
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Submitted — driver will be notified.')),
+                  const SnackBar(content: Text('Submitted — passenger will be notified.')),
                 );
               }
-              onSubmitted?.call(); // refresh
+              onSubmitted?.call();
             }
           },
         ),

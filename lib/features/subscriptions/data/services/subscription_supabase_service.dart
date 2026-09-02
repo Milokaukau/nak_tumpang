@@ -1,9 +1,80 @@
+import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class SubscriptionSupabaseService {
   final _supabase = Supabase.instance.client;
 
-  /// Fetches all subscriptions where the given user is either the passenger or driver.
+  Map<String, dynamic>? _asMap(dynamic value) {
+    if (value is Map<String, dynamic>) return value;
+    if (value is List && value.isNotEmpty && value.first is Map<String, dynamic>) {
+      return value.first as Map<String, dynamic>;
+    }
+    return null;
+  }
+
+  Map<String, dynamic> _normalizeSubscription(Map<String, dynamic> sub, String currentRole) {
+    final passengerTrip = _asMap(sub['passenger_trips']);
+    final driverTrip = _asMap(sub['driver_trips']);
+    final passengerUser = _asMap(passengerTrip?['users']);
+    final driverUser = _asMap(driverTrip?['users']);
+
+    final driverId = driverUser?['id'] ?? driverTrip?['user_id'] ?? '';
+    final driverName = driverUser?['name'] ?? 'Driver';
+    final driverPhone = driverUser?['phone'] ?? '';
+    final driverImageUrl = driverUser?['profile_image_url'] ?? driverUser?['imageUrl'];
+
+    final passengerId = passengerUser?['id'] ?? passengerTrip?['user_id'] ?? '';
+    final passengerName = passengerUser?['name'] ?? 'Passenger';
+    final passengerPhone = passengerUser?['phone'] ?? '';
+    final passengerImageUrl = passengerUser?['profile_image_url'] ?? passengerUser?['imageUrl'];
+
+    final pickupLocation = sub['pickup_location'] ??
+        passengerTrip?['pickup_location'] ??
+        passengerTrip?['pickup_name'] ??
+        driverTrip?['pickup_location'] ??
+        driverTrip?['pickup_name'] ??
+        '';
+
+    final dropoffLocation = sub['dropoff_location'] ??
+        sub['destination_location'] ??
+        passengerTrip?['dropoff_location'] ??
+        passengerTrip?['destination_location'] ??
+        passengerTrip?['destination_name'] ??
+        passengerTrip?['dropoff_name'] ??
+        driverTrip?['dropoff_location'] ??
+        driverTrip?['destination_location'] ??
+        driverTrip?['destination_name'] ??
+        driverTrip?['dropoff_name'] ??
+        '';
+
+    final pickupTime = sub['pickup_time'] ?? passengerTrip?['pickup_time'] ?? driverTrip?['pickup_time'] ?? '';
+
+    final isPassenger = currentRole == 'passenger';
+    final otherName = isPassenger ? driverName : passengerName;
+    final otherPhone = isPassenger ? driverPhone : passengerPhone;
+    final otherImageUrl = isPassenger ? driverImageUrl : passengerImageUrl;
+
+    return {
+      ...sub,
+      'driver_id': driverId,
+      'driver_name': driverName,
+      'driver_phone': driverPhone,
+      'driver_image_url': driverImageUrl,
+      'passenger_id': passengerId,
+      'passenger_name': passengerName,
+      'passenger_phone': passengerPhone,
+      'passenger_image_url': passengerImageUrl,
+      'name': otherName,
+      'phone': otherPhone,
+      'imageUrl': otherImageUrl,
+      'pickup_location': pickupLocation,
+      'dropoff_location': dropoffLocation,
+      'pickup_time': pickupTime,
+      'driver_trips': driverTrip,
+      'passenger_trips': passengerTrip,
+    };
+  }
+
   Future<List<Map<String, dynamic>>> fetchSubscriptions({
     required String userId,
     required String role,
@@ -12,35 +83,34 @@ class SubscriptionSupabaseService {
       final tripTable = role == 'passenger' ? 'passenger_trips' : 'driver_trips';
       final tripIdField = role == 'passenger' ? 'passenger_trip_id' : 'driver_trip_id';
 
-      print('🔍 Step 1: querying $tripTable for user_id=$userId');
       final tripsResponse = await _supabase
           .from(tripTable)
           .select('id')
           .eq('user_id', userId);
-      print('🔍 Step 1 result: $tripsResponse');
 
       final tripIds = (tripsResponse as List)
           .map((t) => t['id'] as String)
           .toList();
-      print('🔍 tripIds: $tripIds');
 
       if (tripIds.isEmpty) return [];
 
-      print('🔍 Step 2: querying tumpang_subscription where $tripIdField in $tripIds');
       final response = await _supabase
           .from('tumpang_subscription')
-          .select('*, passenger_trips(*, users(*)), driver_trips(*, users(*))')
+          .select('''
+            *,
+            passenger_trips:passenger_trip_id (*, users (*)),
+            driver_trips:driver_trip_id (*, users (*))
+          ''')
           .inFilter(tripIdField, tripIds);
-      print('🔍 Step 2 result: $response');
 
-      return List<Map<String, dynamic>>.from(response);
+      final rawList = List<Map<String, dynamic>>.from(response);
+      return rawList.map((sub) => _normalizeSubscription(sub, role)).toList();
     } catch (e) {
       print("Error in fetchSubscriptions: $e");
       return [];
     }
   }
 
-  /// Checks whether a subscription has any active (non-cancelled) exceptions.
   Future<bool> hasActiveException(String subscriptionId) async {
     try {
       final response = await _supabase
@@ -55,7 +125,6 @@ class SubscriptionSupabaseService {
     }
   }
 
-  /// Fetches all active exceptions for a subscription, most recent first.
   Future<List<Map<String, dynamic>>> fetchExceptionsForSubscription(String subscriptionId) async {
     try {
       final response = await _supabase
@@ -73,10 +142,7 @@ class SubscriptionSupabaseService {
 
   Future<bool> cancelException(String exceptionId) async {
     try {
-      await _supabase
-          .from('tumpang_exception')
-          .update({'status': 'cancelled'})
-          .eq('id', exceptionId);
+      await _supabase.from('tumpang_exception').delete().eq('id', exceptionId);
       return true;
     } catch (e) {
       print("Error in cancelException: $e");
@@ -84,25 +150,53 @@ class SubscriptionSupabaseService {
     }
   }
 
-  /// Cancels a subscription. Deposit refund logic depends on who cancels:
-  /// - driver cancels early -> refund
-  /// - passenger cancels early -> forfeit
   Future<bool> cancelSubscription({
     required String subscriptionId,
-    required String cancelledByRole, // 'passenger' or 'driver'
+    required String cancelledByRole,
+    String? reason,
   }) async {
     try {
-      final refund = cancelledByRole == 'driver';
-      await _supabase.from('tumpang_subscription').update({
+      final updateData = {
         'status': 'inactive',
-        'ended_by': cancelledByRole,
+        'ended_by': cancelledByRole.toLowerCase(),
         'ended_at': DateTime.now().toIso8601String(),
-        'deposit_refunded': refund,
-      }).eq('id', subscriptionId);
+      };
+
+      if (reason != null && reason.isNotEmpty) {
+        updateData['cancellation_reason'] = reason;
+      }
+
+      await Supabase.instance.client
+          .from('tumpang_subscription')
+          .update(updateData)
+          .eq('id', subscriptionId);
+
       return true;
     } catch (e) {
-      print("Error in cancelSubscription: $e");
+      debugPrint('Supabase Error cancelling subscription: $e');
       return false;
     }
   }
+
+  Future<bool> updateException({
+    required String exceptionId,
+    required DateTime startDate,
+    required DateTime endDate,
+    required String reason,
+  }) async {
+    try {
+      await _supabase.from('tumpang_exception').update({
+        'start_date': _formatDate(startDate),
+        'end_date': _formatDate(endDate),
+        'reason': reason,
+      }).eq('id', exceptionId);
+      return true;
+    } catch (e) {
+      print("Error in updateException: $e");
+      return false;
+    }
+  }
+
+  String _formatDate(DateTime d) =>
+      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 }

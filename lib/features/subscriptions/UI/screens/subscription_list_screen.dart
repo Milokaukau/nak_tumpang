@@ -26,12 +26,14 @@ class _SubscriptionListScreenState extends State<SubscriptionListScreen> {
   @override
   void initState() {
     super.initState();
-    Future.microtask(() {
-      context.read<SubscriptionViewModel>().fetchSubscriptions(
-        userId: widget.userId,
-        role: widget.role,
-      );
-    });
+    Future.microtask(() => _refresh());
+  }
+
+  Future<void> _refresh() async {
+    await context.read<SubscriptionViewModel>().fetchSubscriptions(
+      userId: widget.userId,
+      role: widget.role,
+    );
   }
 
   @override
@@ -63,41 +65,56 @@ class _SubscriptionListScreenState extends State<SubscriptionListScreen> {
             Expanded(
               child: vm.isLoading
                   ? const Center(child: CircularProgressIndicator(color: AppColors.primaryYellow))
-                  : filtered.isEmpty
-                  ? const Center(
-                  child: Text('No tumpangs found.', style: TextStyle(color: AppColors.greyText)))
-                  : ListView.builder(
-                itemCount: filtered.length,
-                itemBuilder: (context, index) {
-                  final sub = filtered[index];
-                  // Other party is whichever side the current user is NOT on
-                  final driverTrips = sub['driver_trips'] as Map<String, dynamic>?;
-                  final passengerTrips = sub['passenger_trips'] as Map<String, dynamic>?;
-                  final otherUser = widget.role == 'passenger'
-                      ? (driverTrips != null ? driverTrips['users'] : null)
-                      : (passengerTrips != null ? passengerTrips['users'] : null);
+                  : RefreshIndicator(
+                color: AppColors.primaryYellow,
+                onRefresh: _refresh,
+                child: filtered.isEmpty
+                    ? ListView(
+                  children: const [
+                    SizedBox(height: 100),
+                    Center(
+                      child: Text('No tumpangs found.', style: TextStyle(color: AppColors.greyText)),
+                    ),
+                  ],
+                )
+                    : ListView.builder(
+                  itemCount: filtered.length,
+                  itemBuilder: (context, index) {
+                    final sub = filtered[index];
 
-                  return SubscriptionCard(
-                    name: otherUser?['name'] ?? 'Unknown',
-                    pickupName: sub['pickup_location'] ?? '',
-                    dropoffName: sub['dropoff_location'] ?? '',
-                    pickupTime: sub['pickup_time'] ?? '',
-                    isActive: sub['status'] == 'active',
-                    hasActiveException: sub['has_active_exception'] ?? false,
-                    onViewDetails: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => SubscriptionDetailScreen(
-                            subscription: sub,
-                            currentUserId: widget.userId,
-                            role: widget.role,
+                    return SubscriptionCard(
+                      name: sub['name'] ?? 'Unknown',
+                      phone: sub['phone'] ?? 'N/A',
+                      imageUrl: sub['imageUrl'],
+                      pickupName: sub['pickup_location'] ?? '',
+                      dropoffName: sub['dropoff_location'] ?? '',
+                      pickupTime: sub['pickup_time'] ?? '',
+                      isActive: sub['status'] == 'active',
+                      hasActiveException: sub['has_active_exception'] ?? false,
+                      showPayButton: widget.role == 'passenger' && sub['status'] == 'active',
+                      onPayPressed: () {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Redirecting to payment...'),
                           ),
-                        ),
-                      );
-                    },
-                  );
-                },
+                        );
+                      },
+                      onViewDetails: () async {
+                        final result = await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => SubscriptionDetailScreen(
+                              subscription: sub,
+                              currentUserId: widget.userId,
+                              role: widget.role,
+                            ),
+                          ),
+                        );
+                        _refresh();
+                      },
+                    );
+                  },
+                ),
               ),
             ),
           ],

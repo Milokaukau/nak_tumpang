@@ -5,22 +5,35 @@ import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/components/app_sidebar.dart';
 import 'package:nak_tumpang/features/home/UI/components/home_panel.dart';
 import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
-import 'package:nak_tumpang/features/home/UI/components/exception_test_panel.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
   @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  @override
+  void initState() {
+    super.initState();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<HomeViewModel>().fetchMockPassenger();
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    // context.select ensures the map only rebuilds if the specific name string changes
-    final passengerName = context.select<HomeViewModel, String?>(
-            (viewModel) => viewModel.currentPassenger?['name']
-    );
+    final userName = context.select<HomeViewModel, String?>(
+            (viewModel) => viewModel.currentUserName);
+    final userRole = context.select<HomeViewModel, String>(
+            (viewModel) => viewModel.currentUserRole);
 
     return Scaffold(
       endDrawer: AppSidebar(
-        userName: passengerName ?? 'Loading...',
-        userRole: 'Passenger',
+        userName: userName ?? 'Loading...',
+        userRole: userRole == 'driver' ? 'Driver' : 'Passenger',
         selectedIndex: -1,
       ),
       body: Stack(
@@ -42,9 +55,7 @@ class HomeScreen extends StatelessWidget {
             right: 16,
             child: HamburgerButton(),
           ),
-
-          // No parameters passed! HomePanel handles its own state.
-          const ExceptionTestPanel(),
+          const HomePanel(),
         ],
       ),
     );
