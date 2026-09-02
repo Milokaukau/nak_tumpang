@@ -470,7 +470,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     _revalidateIfNeeded();
                   }
                 ),
-                _errorText(_nameError),
+                _errorText(_phoneError),
                 Padding(
                   padding: const EdgeInsets.only(top: 4),
                   child: Text(
