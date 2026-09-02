@@ -4,7 +4,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:nak_tumpang/features/negotiation/UI/screens/request_list_screen.dart';
+import 'package:nak_tumpang/features/payment/UI/screens/payment_screen.dart';
 
 class DebugLoginScreen extends StatefulWidget {
   const DebugLoginScreen({super.key});
@@ -36,8 +36,8 @@ class _DebugLoginScreenState extends State<DebugLoginScreen> {
       }
 
       if (!mounted) return;
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (context) => const RequestListScreen()),
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (context) => const PaymentScreen()),
       );
     } on AuthException catch (e) {
       setState(() => _error = e.message);
@@ -58,7 +58,7 @@ class _DebugLoginScreenState extends State<DebugLoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('DEBUG LOGIN — negotiation module test')),
+      appBar: AppBar(title: const Text('DEBUG LOGIN — payment module test')),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
@@ -66,7 +66,7 @@ class _DebugLoginScreenState extends State<DebugLoginScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const Text(
-              'This screen is temporary. It exists only so this module '
+              'This screen is temporary. It exists only so the payment module '
                   'can be tested with a real Supabase Auth session before '
                   'the real login screen is merged.',
               style: TextStyle(color: Colors.grey, fontSize: 12),
@@ -92,7 +92,7 @@ class _DebugLoginScreenState extends State<DebugLoginScreen> {
               onPressed: _isLoading ? null : _signIn,
               child: _isLoading
                   ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Text('Sign In'),
+                  : const Text('Sign In & Go to Payments'),
             ),
           ],
         ),

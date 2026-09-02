@@ -1,42 +1,63 @@
 import 'package:flutter/material.dart';
+import 'package:nak_tumpang/core/theme/app_colors.dart';
 
 class PaymentBottomBar extends StatelessWidget {
   final double totalAmount;
-  final bool hasSelection;
+  final int selectedCount;
+  final bool isProcessing;
   final VoidCallback onPayPressed;
 
   const PaymentBottomBar({
-    Key? key,
+    super.key,
     required this.totalAmount,
-    required this.hasSelection,
+    required this.selectedCount,
+    required this.isProcessing,
     required this.onPayPressed,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 10, offset: Offset(0, -5))],
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        border: Border(top: BorderSide(color: AppColors.greyBorder, width: 1)),
+        boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 6, offset: Offset(0, -2))],
       ),
       child: SafeArea(
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(
-              'Total: RM ${totalAmount.toStringAsFixed(2)}',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '$selectedCount selected',
+                  style: const TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.w500),
+                ),
+                Text(
+                  'Total: RM ${totalAmount.toStringAsFixed(2)}',
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.black),
+                ),
+              ],
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.amber,
-                foregroundColor: Colors.black,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                backgroundColor: AppColors.primaryYellow,
+                foregroundColor: AppColors.black,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
               ),
-              onPressed: hasSelection ? onPayPressed : null,
-              child: const Text('Pay Selected', style: TextStyle(fontWeight: FontWeight.bold)),
+              onPressed: (selectedCount > 0 && !isProcessing) ? onPayPressed : null,
+              child: isProcessing
+                  ? const SizedBox(
+                height: 20,
+                width: 20,
+                child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.black),
+              )
+                  : const Text('Pay with Card', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
             ),
           ],
         ),

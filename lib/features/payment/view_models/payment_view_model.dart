@@ -1,4 +1,8 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter_stripe/flutter_stripe.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nak_tumpang/core/entities/payment.dart';
 import 'package:nak_tumpang/features/payment/data/services/payment_supabase_service.dart';
@@ -8,51 +12,55 @@ class PaymentViewModel extends ChangeNotifier {
   final SupabaseClient _supabase = Supabase.instance.client;
 
   List<Payment> pendingPayments = [];
+  List<Payment> paymentHistory = [];
   Set<String> selectedPaymentIds = {};
 
   bool isLoading = false;
+  bool isProcessingPayment = false;
   String? errorMessage;
 
   PaymentViewModel() {
+    _initSession();
     _supabase.auth.onAuthStateChange.listen((data) {
-      // Fallback to currentSession in case the stream data is momentarily empty on boot
-      final session = data.session ?? _supabase.auth.currentSession;
-
-      if (session != null) {
-        errorMessage = null;
-        fetchPayments();
-      } else {
-        pendingPayments.clear();
-        selectedPaymentIds.clear();
-
-        // ONLY show the login error if they explicitly pressed Sign Out
-        if (data.event == AuthChangeEvent.signedOut) {
-          errorMessage = 'User not authenticated. Please log in.';
-        } else {
-          errorMessage = null;
-        }
-
-        notifyListeners();
-      }
+      _initSession();
     });
+  }
+
+  void _initSession() {
+    final session = _supabase.auth.currentSession;
+    if (session != null) {
+      errorMessage = null;
+      fetchAllPayments();
+    } else {
+      pendingPayments.clear();
+      paymentHistory.clear();
+      selectedPaymentIds.clear();
+      notifyListeners();
+    }
   }
 
   double get totalSelectedAmount {
     return pendingPayments
         .where((p) => selectedPaymentIds.contains(p.id))
-        .fold(0, (sum, item) => sum + item.amount);
+        .fold(0.0, (sum, item) => sum + item.amount);
   }
 
-  Future<void> fetchPayments() async {
+  Future<void> fetchAllPayments() async {
     isLoading = true;
     errorMessage = null;
     notifyListeners();
 
     try {
       final userId = _supabase.auth.currentUser?.id;
-      if (userId == null) return;
+      if (userId == null) {
+        isLoading = false;
+        notifyListeners();
+        return;
+      }
 
       pendingPayments = await _service.fetchPendingPayments(userId);
+      paymentHistory = await _service.fetchPaymentHistory(userId);
+      selectedPaymentIds.removeWhere((id) => !pendingPayments.any((p) => p.id == id));
     } catch (e) {
       errorMessage = 'Failed to load payments: $e';
     } finally {
@@ -70,26 +78,83 @@ class PaymentViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<bool> processMockPayment(String paymentMethod) async {
-    isLoading = true;
+  void selectAll() {
+    if (selectedPaymentIds.length == pendingPayments.length) {
+      selectedPaymentIds.clear();
+    } else {
+      selectedPaymentIds = pendingPayments.map((p) => p.id).toSet();
+    }
+    notifyListeners();
+  }
+
+  Future<bool> paySelectedWithStripe() async {
+    if (selectedPaymentIds.isEmpty) return false;
+
+    isProcessingPayment = true;
     notifyListeners();
 
     try {
-      for (final id in selectedPaymentIds) {
-        await _service.completePayment(
-          paymentId: id,
-          paymentMethod: paymentMethod,
-        );
+      final secretKey = dotenv.env['STRIPE_SECRET_KEY'];
+      if (secretKey == null || secretKey.isEmpty || !secretKey.startsWith('sk_')) {
+        throw Exception('Invalid STRIPE_SECRET_KEY in .env file.');
       }
 
+      final amountInCents = (totalSelectedAmount * 100).toInt();
+
+      final response = await http.post(
+        Uri.parse('https://api.stripe.com/v1/payment_intents'),
+        headers: {
+          'Authorization': 'Bearer $secretKey',
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: {
+          'amount': amountInCents.toString(),
+          'currency': 'myr',
+          'payment_method_types[]': 'card',
+          'description': 'Nak Tumpang Invoice Settlement (${selectedPaymentIds.length} items)',
+        },
+      );
+
+      if (response.statusCode != 200) {
+        final err = jsonDecode(response.body);
+        throw Exception(err['error']?['message'] ?? 'Stripe PaymentIntent failure.');
+      }
+
+      final paymentIntent = jsonDecode(response.body);
+
+      await Stripe.instance.initPaymentSheet(
+        paymentSheetParameters: SetupPaymentSheetParameters(
+          paymentIntentClientSecret: paymentIntent['client_secret'],
+          merchantDisplayName: 'Nak Tumpang',
+          style: ThemeMode.light,
+          billingDetails: const BillingDetails(
+            address: Address(
+              country: 'MY',
+              city: '',
+              line1: '',
+              line2: '',
+              postalCode: '',
+              state: '',
+            ),
+          ),
+        ),
+      );
+
+      await Stripe.instance.presentPaymentSheet();
+
+      await _service.completePaymentBatch(selectedPaymentIds.toList());
       selectedPaymentIds.clear();
-      await fetchPayments();
+      await fetchAllPayments();
       return true;
+    } on StripeException catch (e) {
+      debugPrint('Stripe payment cancelled/failed: ${e.error.localizedMessage}');
+      return false;
     } catch (e) {
-      errorMessage = 'Payment failed: $e';
+      errorMessage = e.toString();
+      debugPrint('General Payment Error: $e');
       return false;
     } finally {
-      isLoading = false;
+      isProcessingPayment = false;
       notifyListeners();
     }
   }
