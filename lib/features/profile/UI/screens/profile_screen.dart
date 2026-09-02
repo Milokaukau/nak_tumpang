@@ -1,17 +1,14 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:provider/provider.dart';
+import 'package:nak_tumpang/core/components/base_button.dart';
 import 'package:nak_tumpang/features/auth/UI/screens/login_screen.dart';
 import 'package:nak_tumpang/features/home/UI/screens/home_screen.dart';
 import 'package:nak_tumpang/features/profile/UI/components/role_selection_dialog.dart';
-import 'package:nak_tumpang/features/profile/data/services/profile_storage_service.dart';
+import 'package:nak_tumpang/features/profile/view_models/profile_view_model.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
-import 'package:nak_tumpang/core/utils/validators.dart';
 
-class ProfileScreen extends StatefulWidget {
+class ProfileScreen extends StatelessWidget {
   /// When true, this screen is shown right after a brand-new sign-up
   /// so the user can fill in their details for the first time.
   final bool isFirstTimeSetup;
@@ -19,299 +16,56 @@ class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key, this.isFirstTimeSetup = false});
 
   @override
-  State<ProfileScreen> createState() => _ProfileScreenState();
+  Widget build(BuildContext context) {
+    return ChangeNotifierProvider(
+      create: (_) => ProfileViewModel(isFirstTimeSetup: isFirstTimeSetup),
+      child: const _ProfileView(),
+    );
+  }
+
 }
 
-class _ProfileScreenState extends State<ProfileScreen> {
-  final supabase = Supabase.instance.client;
-  final _formKey = GlobalKey<FormState>();
+class _ProfileView extends StatefulWidget {
+  const _ProfileView();
 
-  final _nameController = TextEditingController();
-  final _phoneController = TextEditingController();
-  final _licenseNumberController = TextEditingController();
-  final _emailController = TextEditingController();
-  final _newPasswordController = TextEditingController();
-  final _confirmPasswordController = TextEditingController();
-  final _icController = TextEditingController();
-  final _phoneFocusNode = FocusNode();
+  @override
+  State<_ProfileView> createState() => _ProfileViewState();
+}
 
-  bool _obscureNewPassword = true;
-  bool _obscureConfirmPassword = true;
-
-  // Driving license numbers don't follow one official public format the
-  // way the IC does, so this is a light sanity check rather than a strict
-  // pattern: letters, digits, spaces and dashes only, no emoji/junk paste.
-  final _licenseNumberRegex = RegExp(r'^[A-Z0-9](?:[A-Z0-9\s-]*[A-Z0-9])?$');
-
-  String? _validateLicenseNumber(String? v) {
-    if (_role != 'driver') return null;
-    final trimmed = v?.trim() ?? '';
-    if (trimmed.isEmpty) return 'Driving license number is required';
-    if (trimmed.length < 4) return 'Please enter a valid driver license number';
-    if (!_licenseNumberRegex.hasMatch(trimmed)) {
-      return 'Letters, numbers, spaces and dashes only';
-    }
-    return null;
-  }
-
-  void _revalidateIfNeeded() {
-    if (!_autoValidate) return;
-    setState(() {
-      _nameError = Validators.name(_nameController.text);
-      _phoneError = Validators.phoneLocal(_phoneController.text);
-      _emailError = Validators.email(_emailController.text);
-      _licenseNumberError = _validateLicenseNumber(_licenseNumberController.text);
-      _newPasswordError = Validators.password(_newPasswordController.text, optional: true);
-      _confirmPasswordError = Validators.confirmPassword(
-        _confirmPasswordController.text,
-        _newPasswordController.text,
-        optional: true,
-      );
-    });
-  }
-
-  final _storageService = ProfileStorageService();
-
-  String _role = 'passenger';
-  String? _originalRole; // role as loaded from the DB; used to lock edits
-  String? _email;
-  String? _icNumber; // set once at registration, shown read-only here
-
-  Uint8List? _avatarBytes;
-  String? _avatarUrl;
-  bool _isUploadingAvatar = false;
+class _ProfileViewState extends State<_ProfileView> {
   bool _isHoveringAvatar = false;
-
-  Uint8List? _licenseBytes;
-  String? _licenseUrl;
-  bool _isUploadingLicense = false;
-
-  bool _isLoading = true;
-  bool _isSaving = false;
-  String? _errorMessage;
-  String? _successMessage;
-
-  bool _autoValidate = false;
-  String? _nameError;
-  String? _phoneError;
-  String? _emailError;
-  String? _licenseNumberError;
-  String? _newPasswordError;
-  String? _confirmPasswordError;
 
   @override
   void initState() {
     super.initState();
-    _loadProfile();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _initialLoad());
   }
 
-  @override
-  void dispose() {
-    _nameController.dispose();
-    _phoneController.dispose();
-    _phoneFocusNode.dispose();
-    _licenseNumberController.dispose();
-    _emailController.dispose();
-    _newPasswordController.dispose();
-    _confirmPasswordController.dispose();
-    _icController.dispose();
-    super.dispose();
-  }
-
-  String _formatIC(String? raw) {
-    if (raw == null || raw.isEmpty) return '';
-    final digits = raw.replaceAll(RegExp(r'[^0-9]'), '');
-    if (digits.length != 12) return digits; // fallback, don't crash on bad data
-    return '${digits.substring(0, 6)}-${digits.substring(6, 8)}-${digits.substring(8, 12)}';
-  }
-
-  Future<void> _loadProfile() async {
-    final userId = supabase.auth.currentUser?.id;
-    if (userId == null) return;
-
-    try {
-      final data = await supabase
-          .from('users')
-          .select()
-          .eq('id', userId)
-          .single();
-
-      debugPrint('RAW USER ROW: $data');
-
-      setState(() {
-        _nameController.text = data['name'] ?? '';
-        _phoneController.text = Validators.localDigitsFromStored(data['phone']);
-        _licenseNumberController.text = data['license_number'] ?? '';
-        _role = data['role'] ?? 'passenger';
-        _originalRole = data['role'] as String?;
-        _email = data['email'] ?? supabase.auth.currentUser?.email;
-        _emailController.text = _email ?? '';
-        _icNumber = data['ic_number'] as String?;
-        _icController.text = _formatIC(_icNumber);
-        _avatarUrl = data['avatar_url'] as String?;
-        _licenseUrl = data['license_url'] as String?;
-        _isLoading = false;
-      });
-    } catch (e) {
-      setState(() {
-        _email = supabase.auth.currentUser?.email;
-        _emailController.text = _email ?? '';
-        _isLoading = false;
-      });
-    }
+  Future<void> _initialLoad() async {
+    final vm = context.read<ProfileViewModel>();
+    await vm.loadProfile();
 
     // Brand-new account -> ask Passenger or Driver before they fill in
-    // the rest, same as before this was wired up.
-    if (widget.isFirstTimeSetup && mounted) {
+    // the rest. Shown here (not in the view model) since it needs a
+    // BuildContext.
+    if (vm.isFirstTimeSetup && mounted) {
       final role = await RoleSelectionDialog.show(context);
-      if (mounted) setState(() => _role = role);
+      if (mounted) vm.setRole(role);
     }
   }
 
-  Future<void> _pickAvatar() async {
-    final bytes = await _storageService.pickImage(source: ImageSource.gallery);
-    if (bytes != null) setState(() => _avatarBytes = bytes);
-  }
-
-  Future<void> _pickLicense() async {
-    final bytes = await _storageService.pickImage(source: ImageSource.gallery);
-    if (bytes != null) setState(() => _licenseBytes = bytes);
-  }
-
-  Future<void> _saveProfile() async {
-    setState(() {
-      _autoValidate = true;
-      _nameError = Validators.name(_nameController.text);
-      _phoneError = Validators.phoneLocal(_phoneController.text);
-      _emailError = Validators.email(_emailController.text);
-      _licenseNumberError = _validateLicenseNumber(_licenseNumberController.text);
-      _newPasswordError = Validators.password(_newPasswordController.text, optional: true);
-      _confirmPasswordError = Validators.confirmPassword(
-        _confirmPasswordController.text,
-        _newPasswordController.text,
-        optional: true,
+  Future<void> _save(ProfileViewModel vm) async {
+    final result = await vm.save();
+    if (!mounted) return;
+    if (result == ProfileSaveResult.firstTimeSetupComplete) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const HomeScreen()),
       );
-    });
-
-    if (_nameError != null ||
-        _phoneError != null ||
-        _emailError != null ||
-        _licenseNumberError != null ||
-        _newPasswordError != null ||
-        _confirmPasswordError != null) {
-      return;
-    }
-
-    // Role is only settable during first-time setup (via the dropdown
-    // above, which mirrors the Passenger/Driver dialog). On every later
-    // save, ignore whatever is in `_role` and use the role already on
-    // file, so it can never be switched after the account is created.
-    final roleToSave = widget.isFirstTimeSetup ? _role : (_originalRole ?? _role);
-
-    // Driver must have a license photo on file (either already uploaded,
-    // or picked just now) before they can continue.
-    if (roleToSave == 'driver' && _licenseUrl == null && _licenseBytes == null) {
-      setState(() => _errorMessage = 'Please upload your driving license.');
-      return;
-    }
-
-    final userId = supabase.auth.currentUser?.id;
-    if (userId == null) return;
-
-    setState(() {
-      _isSaving = true;
-      _errorMessage = null;
-      _successMessage = null;
-    });
-
-    try {
-      // Email/password live on the auth user, not the `users` table, so
-      // they're updated via Supabase Auth first. A changed email triggers
-      // Supabase's own confirmation flow (a link sent to the new address);
-      // the change only takes effect once that's clicked.
-      final newEmail = _emailController.text.trim();
-      final emailChanged = newEmail.isNotEmpty && newEmail != (_email ?? '');
-      if (emailChanged) {
-        await supabase.auth.updateUser(UserAttributes(email: newEmail));
-      }
-
-      final newPassword = _newPasswordController.text;
-      if (newPassword.isNotEmpty) {
-        await supabase.auth.updateUser(UserAttributes(password: newPassword));
-      }
-
-      if (_avatarBytes != null) {
-        setState(() => _isUploadingAvatar = true);
-        _avatarUrl = await _storageService.uploadUserFile(
-          bytes: _avatarBytes!,
-          bucket: 'avatars',
-          userId: userId,
-          fileName: 'avatar.jpg',
-        );
-        setState(() => _isUploadingAvatar = false);
-      }
-
-      if (roleToSave == 'driver' && _licenseBytes != null) {
-        setState(() => _isUploadingLicense = true);
-        _licenseUrl = await _storageService.uploadUserFile(
-          bytes: _licenseBytes!,
-          bucket: 'driver-licenses',
-          userId: userId,
-          fileName: 'license.jpg',
-          public: false,
-        );
-        setState(() => _isUploadingLicense = false);
-      }
-
-      await supabase.from('users').update({
-        'name': _nameController.text.trim(),
-        'phone': Validators.toStoredPhone(_phoneController.text),
-        'role': roleToSave,
-        'avatar_url': _avatarUrl,
-        // Left as the current (confirmed) email even if a change was just
-        // requested — it only actually changes once the confirmation
-        // link is clicked, at which point this gets synced on next load.
-        'email': _email ?? newEmail,
-        'license_number': roleToSave == 'driver' ? _licenseNumberController.text.trim() : null,
-        'license_url': roleToSave == 'driver' ? _licenseUrl : null,
-        'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', userId);
-
-      // Password fields are never pre-filled from stored data, so clear
-      // them after a successful save rather than leaving them sitting
-      // in the form.
-      _newPasswordController.clear();
-      _confirmPasswordController.clear();
-
-      if (!mounted) return;
-
-      if (widget.isFirstTimeSetup) {
-        // First-time setup complete -> continue into the app.
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const HomeScreen()),
-        );
-      } else {
-        setState(() => _successMessage = emailChanged
-            ? 'Profile updated. Check your new email to confirm the change.'
-            : 'Profile updated.');
-      }
-    } on AuthException catch (e) {
-      setState(() => _errorMessage = e.message);
-    } catch (e) {
-      setState(() => _errorMessage = 'Could not save. Please try again.');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isSaving = false;
-          _isUploadingAvatar = false;
-          _isUploadingLicense = false;
-        });
-      }
     }
   }
 
-  Future<void> _logout() async {
-    await supabase.auth.signOut();
+  Future<void> _logout(ProfileViewModel vm) async {
+    await vm.logout();
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const LoginScreen()),
@@ -319,17 +73,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  String get _initials {
-    final name = _nameController.text.trim();
-    if (name.isEmpty) return '?';
-    final parts = name.split(' ').where((p) => p.isNotEmpty).toList();
-    if (parts.length == 1) return parts[0][0].toUpperCase();
-    return (parts[0][0] + parts[1][0]).toUpperCase();
-  }
-
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
+    final vm = context.watch<ProfileViewModel>();
+
+    if (vm.isLoading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
@@ -337,269 +85,378 @@ class _ProfileScreenState extends State<ProfileScreen> {
       backgroundColor: AppColors.white,
       appBar: AppBar(
         title: Text(
-          widget.isFirstTimeSetup ? 'Complete your profile' : 'My Profile',
+          vm.isFirstTimeSetup ? 'Complete your profile' : 'My Profile',
         ),
-        automaticallyImplyLeading: !widget.isFirstTimeSetup,
+        automaticallyImplyLeading: !vm.isFirstTimeSetup,
         actions: [
-          if (!widget.isFirstTimeSetup)
+          if (!vm.isFirstTimeSetup)
             IconButton(
               icon: const Icon(Icons.logout),
               tooltip: 'Log out',
-              onPressed: _logout,
+              onPressed: () => _logout(vm),
             ),
         ],
       ),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // Avatar - tap to pick a photo, falls back to initials
-                Center(
-                  child: MouseRegion(
-                    cursor: _isUploadingAvatar
-                        ? SystemMouseCursors.basic
-                        : SystemMouseCursors.click,
-                    onEnter: (_) => setState(() => _isHoveringAvatar = true),
-                    onExit: (_) => setState(() => _isHoveringAvatar = false),
-                    child: GestureDetector(
-                      onTap: _isUploadingAvatar ? null : _pickAvatar,
-                      child: Stack(
-                        children: [
-                          CircleAvatar(
-                            radius: 44,
-                            backgroundColor: AppColors.primaryYellow,
-                            backgroundImage: _avatarBytes != null
-                                ? MemoryImage(_avatarBytes!)
-                                : (_avatarUrl != null
-                                ? NetworkImage(_avatarUrl!) as ImageProvider
-                                : null),
-                            child: _isUploadingAvatar
-                                ? const CircularProgressIndicator(color: Colors.white)
-                                : (_avatarBytes == null && _avatarUrl == null)
-                                ? Text(
-                              _initials,
-                              style: const TextStyle(
-                                fontSize: 28,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white,
-                              ),
-                            )
-                                : null,
-                          ),
-                          // Gray shade over the avatar, shown only on hover
-                          // to signal that it's tappable.
-                          Positioned.fill(
-                            child: IgnorePointer(
-                              child: AnimatedOpacity(
-                                opacity: _isHoveringAvatar ? 1 : 0,
-                                duration: const Duration(milliseconds: 150),
-                                child: CircleAvatar(
-                                  radius: 44,
-                                  backgroundColor: Colors.black.withValues(alpha: 0.35),
-                                ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Avatar - tap to pick a photo, falls back to initials
+              Center(
+                child: MouseRegion(
+                  cursor: vm.isUploadingAvatar
+                      ? SystemMouseCursors.basic
+                      : SystemMouseCursors.click,
+                  onEnter: (_) => setState(() => _isHoveringAvatar = true),
+                  onExit: (_) => setState(() => _isHoveringAvatar = false),
+                  child: GestureDetector(
+                    onTap: vm.isUploadingAvatar ? null : vm.pickAvatar,
+                    child: Stack(
+                      children: [
+                        CircleAvatar(
+                          radius: 44,
+                          backgroundColor: AppColors.primaryYellow,
+                          backgroundImage: vm.avatarBytes != null
+                              ? MemoryImage(vm.avatarBytes!)
+                              : (vm.avatarUrl != null
+                              ? NetworkImage(vm.avatarUrl!) as ImageProvider
+                              : null),
+                          child: vm.isUploadingAvatar
+                              ? const CircularProgressIndicator(color: Colors.white)
+                              : (vm.avatarBytes == null && vm.avatarUrl == null)
+                              ? Text(
+                            vm.initials,
+                            style: const TextStyle(
+                              fontSize: 28,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          )
+                              : null,
+                        ),
+                        // Gray shade over the avatar, shown only on hover
+                        // to signal that it's tappable.
+                        Positioned.fill(
+                          child: IgnorePointer(
+                            child: AnimatedOpacity(
+                              opacity: _isHoveringAvatar ? 1 : 0,
+                              duration: const Duration(milliseconds: 150),
+                              child: CircleAvatar(
+                                radius: 44,
+                                backgroundColor: Colors.black.withValues(alpha: 0.35),
                               ),
                             ),
                           ),
-                          Positioned(
-                            right: 0,
-                            bottom: 0,
-                            child: CircleAvatar(
-                              radius: 14,
-                              backgroundColor: AppColors.black,
-                              child: Icon(Icons.camera_alt, size: 14, color: AppColors.white),
-                            ),
+                        ),
+                        Positioned(
+                          right: 0,
+                          bottom: 0,
+                          child: CircleAvatar(
+                            radius: 14,
+                            backgroundColor: AppColors.black,
+                            child: Icon(Icons.camera_alt, size: 14, color: AppColors.white),
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
-                const SizedBox(height: 28),
+              ),
+              const SizedBox(height: 28),
 
-                // Name
-                Text('Full Name (as per IC)', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
+              // Name
+              Text('Full Name (as per IC)', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
+              const SizedBox(height: 6),
+              TextField(
+                controller: vm.nameController,
+                decoration: _fieldDecoration(),
+                onChanged: (_) {
+                  vm.notifyUiOnly(); // updates avatar initials live
+                  vm.revalidateIfNeeded();
+                },
+              ),
+              _errorText(vm.nameError),
+              const SizedBox(height: 18),
+
+              // IC number - set at registration, locked here so it can
+              // never drift from the identity used to register the account.
+              if (vm.icNumber != null) ...[
+                Text('IC number', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
                 const SizedBox(height: 6),
                 TextField(
-                  controller: _nameController,
+                  controller: vm.icController,
+                  enabled: false,
                   decoration: _fieldDecoration(),
-                  onChanged: (_) {
-                    setState(() {}); // updates avatar initials live
-                    _revalidateIfNeeded();
-                  },
                 ),
-                _errorText(_nameError),
                 const SizedBox(height: 18),
+              ],
 
-                // IC number - set at registration, locked here so it can
-                // never drift from the identity used to register the account.
-                if (_icNumber != null) ...[
-                  Text('IC number', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
-                  const SizedBox(height: 6),
-                  TextField(
-                    controller: _icController,
-                    enabled: false,
-                    decoration: _fieldDecoration(),
-                  ),
-                  const SizedBox(height: 18),
-                ],
-
-                // Phone
-                Text('Phone Number', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
-                const SizedBox(height: 6),
-                TextField(
-                  controller: _phoneController,
-                  focusNode: _phoneFocusNode,
-                  keyboardType: TextInputType.phone,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.digitsOnly,
-                    LengthLimitingTextInputFormatter(11),
+              // Phone — the +60 prefix is a fixed Text widget outside the
+              // TextField (not InputDecoration.prefixText), so it's always
+              // visible instead of only appearing once the field is
+              // focused or has content.
+              Text('Phone Number', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
+              const SizedBox(height: 6),
+              AnimatedBuilder(
+                animation: vm.phoneFocusNode,
+                builder: (context, child) {
+                  return Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: vm.phoneError != null
+                            ? Colors.red
+                            : (vm.phoneFocusNode.hasFocus
+                            ? AppColors.primaryYellow
+                            : AppColors.greyBorder),
+                        width: (vm.phoneError != null || vm.phoneFocusNode.hasFocus) ? 1.5 : 1,
+                      ),
+                    ),
+                    child: child,
+                  );
+                },
+                child: Row(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(left: 14),
+                      child: Text(
+                        '+60',
+                        style: TextStyle(color: AppColors.greyText, fontWeight: FontWeight.w500),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: TextField(
+                        controller: vm.phoneController,
+                        focusNode: vm.phoneFocusNode,
+                        keyboardType: TextInputType.phone,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                          LengthLimitingTextInputFormatter(9),
+                        ],
+                        style: TextStyle(color: AppColors.black),
+                        decoration: InputDecoration(
+                          hintText: '123456789',
+                          hintStyle: TextStyle(color: AppColors.greyText.withValues(alpha: 0.5)),
+                          contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                          border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
+                        ),
+                        onChanged: (_) {
+                          vm.notifyUiOnly(); // updates avatar initials live
+                          vm.revalidateIfNeeded();
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
                   ],
-                  decoration: _fieldDecoration(hint: '0123456789').copyWith(
-                    prefixText: '+60  ',
-                    prefixStyle: TextStyle(color: AppColors.greyText, fontWeight: FontWeight.w500),
-                  ),
-                  onChanged: (_) {
-                    setState(() {}); // updates avatar initials live
-                    _revalidateIfNeeded();
-                  }
                 ),
-                _errorText(_nameError),
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    'Enter your number starting with 01, e.g. 0123456789',
-                    style: TextStyle(color: AppColors.greyText, fontSize: 11),
-                  ),
-                ),
-                const SizedBox(height: 18),
+              ),
+              _errorText(vm.phoneError),
+              const SizedBox(height: 18),
 
-                // Email — editable, but Supabase Auth only applies the
-                // change once the confirmation link sent to the new
-                // address is clicked.
-                Text('Email', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
-                const SizedBox(height: 6),
-                TextField(
-                  controller: _emailController,
+              // Email — editable, but Supabase Auth only applies the
+              // change once the confirmation link sent to the new
+              // address is clicked.
+              Text('Email', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
+              const SizedBox(height: 6),
+              TextField(
+                  controller: vm.emailController,
                   keyboardType: TextInputType.emailAddress,
                   decoration: _fieldDecoration(hint: 'e.g. name@example.com'),
-                    onChanged: (_) {
-                      setState(() {}); // updates avatar initials live
-                      _revalidateIfNeeded();
-                    }
-                ),
-                _errorText(_emailError),
-                const SizedBox(height: 18),
+                  onChanged: (_) {
+                    vm.notifyUiOnly();
+                    vm.revalidateIfNeeded();
+                  }
+              ),
+              _errorText(vm.emailError),
+              const SizedBox(height: 18),
 
-                // Role — chosen once via the Passenger/Driver dialog right
-                // after sign-up and locked in afterwards. Editable here only
-                // during first-time setup, before the account is saved; once
-                // saved it's shown read-only so it can't be switched later.
-                Text('I am a', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
-                const SizedBox(height: 6),
-                if (widget.isFirstTimeSetup)
-                  DropdownButtonFormField<String>(
-                    initialValue: _role,
-                    decoration: _fieldDecoration(),
-                    items: const [
-                      DropdownMenuItem(value: 'passenger', child: Text('Passenger')),
-                      DropdownMenuItem(value: 'driver', child: Text('Driver')),
-                    ],
-                    onChanged: (value) {
-                      if (value != null) setState(() => _role = value);
-                    },
-                  )
-                else
-                  TextFormField(
-                    initialValue: _role == 'driver' ? 'Driver' : 'Passenger',
-                    enabled: false,
-                    decoration: _fieldDecoration(),
+              // Role — chosen once via the Passenger/Driver dialog right
+              // after sign-up and locked in afterwards. Editable here only
+              // during first-time setup, before the account is saved; once
+              // saved it's shown read-only so it can't be switched later.
+              Text('I am a', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
+              const SizedBox(height: 6),
+              if (vm.isFirstTimeSetup)
+                DropdownButtonFormField<String>(
+                  initialValue: vm.role,
+                  decoration: _fieldDecoration(),
+                  items: const [
+                    DropdownMenuItem(value: 'passenger', child: Text('Passenger')),
+                    DropdownMenuItem(value: 'driver', child: Text('Driver')),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) vm.setRole(value);
+                  },
+                )
+              else
+              // Read-only after signup, so this is a plain locked pill
+              // rather than a text field the user might think they can
+              // edit — with darker text to stay legible.
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppColors.greyBorder),
+                    color: AppColors.lightYellow.withValues(alpha: 0.5),
                   ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        vm.role == 'driver' ? Icons.directions_car : Icons.person,
+                        size: 18,
+                        color: AppColors.black,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        vm.role == 'driver' ? 'Driver' : 'Passenger',
+                        style: TextStyle(color: AppColors.black, fontWeight: FontWeight.w600),
+                      ),
+                      const Spacer(),
+                      Icon(Icons.lock_outline, size: 16, color: AppColors.greyText),
+                    ],
+                  ),
+                ),
 
-                // Driving license - drivers only
-                if (_role == 'driver') ...[
-                  const SizedBox(height: 18),
-                  Text('Driving License Number', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
-                  const SizedBox(height: 6),
-                  TextField(
-                    controller: _licenseNumberController,
+              // Driving license - drivers only
+              if (vm.role == 'driver') ...[
+                const SizedBox(height: 18),
+                Text('Driving License Number', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
+                const SizedBox(height: 6),
+                TextField(
+                    controller: vm.licenseNumberController,
                     textCapitalization: TextCapitalization.characters,
                     inputFormatters: [
                       UpperCaseTextFormatter(),
                       LengthLimitingTextInputFormatter(20),
                     ],
                     decoration: _fieldDecoration(hint: 'e.g. D1234567', hintColor: Colors.grey),
-                      onChanged: (_) {
-                        setState(() {}); // updates avatar initials live
-                        _revalidateIfNeeded();
-                      }
-                  ),
-                  const SizedBox(height: 18),
+                    onChanged: (_) {
+                      vm.notifyUiOnly();
+                      vm.revalidateIfNeeded();
+                    }
+                ),
+                _errorText(vm.licenseNumberError),
+                const SizedBox(height: 18),
 
-                  Text('Driving License Photo', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
-                  const SizedBox(height: 6),
-                  InkWell(
-                    onTap: _isUploadingLicense ? null : _pickLicense,
-                    borderRadius: BorderRadius.circular(8),
-                    child: Container(
-                      height: 140,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: AppColors.greyBorder),
+                Text('Driving License Photo', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
+                const SizedBox(height: 6),
+                InkWell(
+                  onTap: vm.isUploadingLicense ? null : vm.pickLicense,
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    height: 140,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: AppColors.greyBorder),
+                    ),
+                    child: vm.isUploadingLicense
+                        ? const Center(child: CircularProgressIndicator())
+                        : vm.licenseBytes != null
+                        ? ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.memory(vm.licenseBytes!, fit: BoxFit.cover, width: double.infinity),
+                    )
+                        : vm.licenseUrl != null
+                        ? ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.network(vm.licenseUrl!, fit: BoxFit.cover, width: double.infinity),
+                    )
+                        : Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.upload_file, color: AppColors.greyText),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Tap to upload your driving license',
+                            style: TextStyle(color: AppColors.greyText, fontSize: 12),
+                          ),
+                        ],
                       ),
-                      child: _isUploadingLicense
-                          ? const Center(child: CircularProgressIndicator())
-                          : _licenseBytes != null
-                          ? ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: Image.memory(_licenseBytes!, fit: BoxFit.cover, width: double.infinity),
-                      )
-                          : _licenseUrl != null
-                          ? ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: Image.network(_licenseUrl!, fit: BoxFit.cover, width: double.infinity),
-                      )
-                          : Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.upload_file, color: AppColors.greyText),
-                            const SizedBox(height: 6),
-                            Text(
-                              'Tap to upload your driving license',
-                              style: TextStyle(color: AppColors.greyText, fontSize: 12),
-                            ),
-                          ],
+                    ),
+                  ),
+                ),
+              ],
+
+              // Change password — collapsed by default behind a link, so
+              // opening it up is a deliberate action. Once open, the
+              // current password is required before a new one is accepted.
+              if (!vm.isFirstTimeSetup) ...[
+                const SizedBox(height: 18),
+                if (!vm.showChangePassword)
+                  InkWell(
+                    onTap: vm.toggleChangePassword,
+                    borderRadius: BorderRadius.circular(4),
+                    child: Row(
+                      children: [
+                        Icon(Icons.lock_reset, size: 18, color: AppColors.primaryYellow),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Change Password',
+                          style: TextStyle(
+                            color: AppColors.primaryYellow,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else ...[
+                  Row(
+                    children: [
+                      Text('Change Password', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
+                      const Spacer(),
+                      InkWell(
+                        onTap: vm.toggleChangePassword,
+                        child: Text(
+                          'Cancel',
+                          style: TextStyle(
+                            color: AppColors.greyText,
+                            fontSize: 12,
+                          ),
                         ),
                       ),
-                    ),
+                    ],
                   ),
-                ],
+                  const SizedBox(height: 10),
 
-                // Change password — optional, both fields left blank
-                // leaves the current password untouched.
-                if (!widget.isFirstTimeSetup) ...[
-                  const SizedBox(height: 18),
-                  Text('Change Password', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
-                  const SizedBox(height: 6),
+                  Text('Current Password', style: TextStyle(color: AppColors.greyText, fontSize: 12)),
+                  const SizedBox(height: 4),
                   TextField(
-                    controller: _newPasswordController,
-                    obscureText: _obscureNewPassword,
-                    decoration: _fieldDecoration(hint: 'Leave blank to keep current password').copyWith(
+                    controller: vm.currentPasswordController,
+                    obscureText: vm.obscureCurrentPassword,
+                    decoration: _fieldDecoration(hint: 'Your current password').copyWith(
                       suffixIcon: IconButton(
-                        icon: Icon(_obscureNewPassword ? Icons.visibility_off : Icons.visibility),
-                        onPressed: () => setState(() => _obscureNewPassword = !_obscureNewPassword),
+                        icon: Icon(vm.obscureCurrentPassword ? Icons.visibility_off : Icons.visibility),
+                        onPressed: vm.toggleObscureCurrentPassword,
                       ),
                     ),
-                      onChanged: (_) {
-                        setState(() {}); // updates avatar initials live
-                        _revalidateIfNeeded();
-                      }
+                    onChanged: (_) => vm.revalidateIfNeeded(),
                   ),
-                  _errorText(_newPasswordError),
+                  _errorText(vm.currentPasswordError),
+                  const SizedBox(height: 14),
+
+                  Text('New Password', style: TextStyle(color: AppColors.greyText, fontSize: 12)),
+                  const SizedBox(height: 4),
+                  TextField(
+                    controller: vm.newPasswordController,
+                    obscureText: vm.obscureNewPassword,
+                    decoration: _fieldDecoration(hint: 'New password').copyWith(
+                      suffixIcon: IconButton(
+                        icon: Icon(vm.obscureNewPassword ? Icons.visibility_off : Icons.visibility),
+                        onPressed: vm.toggleObscureNewPassword,
+                      ),
+                    ),
+                    onChanged: (_) => vm.revalidateIfNeeded(),
+                  ),
+                  _errorText(vm.newPasswordError),
                   Padding(
                     padding: const EdgeInsets.only(top: 4),
                     child: Text(
@@ -607,61 +464,43 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       style: TextStyle(color: AppColors.greyText, fontSize: 11),
                     ),
                   ),
-                  const SizedBox(height: 18),
-                  TextFormField(
-                    controller: _confirmPasswordController,
-                    obscureText: _obscureConfirmPassword,
-                    decoration: _fieldDecoration(hint: 'Confirm new password').copyWith(
+                  const SizedBox(height: 14),
+
+                  Text('Confirm New Password', style: TextStyle(color: AppColors.greyText, fontSize: 12)),
+                  const SizedBox(height: 4),
+                  TextField(
+                    controller: vm.confirmPasswordController,
+                    obscureText: vm.obscureConfirmPassword,
+                    decoration: _fieldDecoration(hint: 'Re-enter new password').copyWith(
                       suffixIcon: IconButton(
-                        icon: Icon(_obscureConfirmPassword ? Icons.visibility_off : Icons.visibility),
-                        onPressed: () => setState(() => _obscureConfirmPassword = !_obscureConfirmPassword),
+                        icon: Icon(vm.obscureConfirmPassword ? Icons.visibility_off : Icons.visibility),
+                        onPressed: vm.toggleObscureConfirmPassword,
                       ),
                     ),
-                    validator: (v) => Validators.confirmPassword(
-                      v,
-                      _newPasswordController.text,
-                      optional: true,
-                    ),
-                      onChanged: (_) {
-                        setState(() {}); // updates avatar initials live
-                        _revalidateIfNeeded();
-                      }
+                    onChanged: (_) => vm.revalidateIfNeeded(),
                   ),
-                  _errorText(_confirmPasswordError),
+                  _errorText(vm.confirmPasswordError),
                 ],
-
-                if (_errorMessage != null) ...[
-                  const SizedBox(height: 14),
-                  Text(_errorMessage!, style: const TextStyle(color: Colors.red), textAlign: TextAlign.center),
-                ],
-                if (_successMessage != null) ...[
-                  const SizedBox(height: 14),
-                  Text(_successMessage!, style: const TextStyle(color: Colors.green), textAlign: TextAlign.center),
-                ],
-
-                const SizedBox(height: 28),
-                SizedBox(
-                  height: 48,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primaryYellow,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    ),
-                    onPressed: _isSaving ? null : _saveProfile,
-                    child: _isSaving
-                        ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                    )
-                        : Text(
-                      widget.isFirstTimeSetup ? 'Continue' : 'Save Changes',
-                      style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ),
               ],
-            ),
+
+              if (vm.errorMessage != null) ...[
+                const SizedBox(height: 14),
+                Text(vm.errorMessage!, style: const TextStyle(color: Colors.red), textAlign: TextAlign.center),
+              ],
+              if (vm.successMessage != null) ...[
+                const SizedBox(height: 14),
+                Text(vm.successMessage!, style: const TextStyle(color: Colors.green), textAlign: TextAlign.center),
+              ],
+
+              const SizedBox(height: 28),
+              BaseButton(
+                text: vm.isFirstTimeSetup ? 'Continue' : 'Save Changes',
+                height: 48,
+                isLoading: vm.isSaving,
+                textStyle: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+                onPressed: () => _save(vm),
+              ),
+            ],
           ),
         ),
       ),
@@ -699,6 +538,7 @@ Widget _errorText(String? error) {
     ),
   );
 }
+
 /// Uppercases text as the user types, so driving license numbers are
 /// stored and compared consistently (e.g. "d1234567" -> "D1234567").
 class UpperCaseTextFormatter extends TextInputFormatter {

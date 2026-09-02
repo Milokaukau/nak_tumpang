@@ -4,10 +4,12 @@
 class Validators {
   Validators._();
 
-  // Malaysian mobile, local format: 01 + [0,2-9] + 6-8 digits.
+  // Malaysian mobile, local format without the leading '0': 1 + [0,2-9] +
+  // 6-8 digits. The leading '0' is dropped because the field always sits
+  // right next to a fixed '+60' prefix, so re-typing the '0' is redundant.
   // Expects the '+60' country code to already be stripped off (see
   // [localDigitsFromStored]) — the field only ever holds the local part.
-  static final RegExp phoneRegex = RegExp(r'^01[0-46-9][0-9]{6,8}$');
+  static final RegExp phoneRegex = RegExp(r'^1[0-46-9][0-9]{6,8}$');
   static final RegExp emailRegex = RegExp(r'^[\w.+-]+@[\w-]+\.[\w.-]+$');
 
   static String? name(String? v) {
@@ -23,13 +25,13 @@ class Validators {
     return null;
   }
 
-  /// [v] is the local digits-only phone text (e.g. "0123456789") as typed
-  /// into the field next to the fixed '+60' prefix.
+  /// [v] is the local digits-only phone text (e.g. "123456789", no leading
+  /// '0') as typed into the field next to the fixed '+60' prefix.
   static String? phoneLocal(String? v) {
     if (v == null || v.trim().isEmpty) return 'Phone number is required';
     final cleaned = v.trim().replaceAll(RegExp(r'[\s-]'), '');
     if (!phoneRegex.hasMatch(cleaned)) {
-      return 'Enter a valid number, e.g. 0123456789';
+      return 'Enter a valid number, e.g. 123456789';
     }
     return null;
   }
@@ -65,26 +67,30 @@ class Validators {
   }
 
   /// Strips spaces/dashes and any '+60'/'60' country-code prefix from a
-  /// stored phone number, leaving the local digits starting with '0'
-  /// (e.g. "+60123456789" -> "0123456789"). Used to bring an
+  /// stored phone number, leaving the bare local digits with no leading
+  /// '0' (e.g. "+60123456789" -> "123456789"). Used to bring an
   /// already-saved phone back into the form the phone field edits.
   static String localDigitsFromStored(String? stored) {
     if (stored == null) return '';
     var cleaned = stored.trim().replaceAll(RegExp(r'[\s-]'), '');
     if (cleaned.startsWith('+60')) {
-      cleaned = '0${cleaned.substring(3)}';
+      cleaned = cleaned.substring(3);
     } else if (cleaned.startsWith('60')) {
-      cleaned = '0${cleaned.substring(2)}';
+      cleaned = cleaned.substring(2);
+    } else if (cleaned.startsWith('0')) {
+      // Handles data saved before the leading '0' was dropped from the
+      // stored format.
+      cleaned = cleaned.substring(1);
     }
     return cleaned;
   }
 
-  /// Turns local digits (e.g. "0123456789") into the '+60...' form saved
-  /// to the database, matching how Register stores new numbers.
+  /// Turns local digits with no leading '0' (e.g. "123456789") into the
+  /// '+60...' form saved to the database.
   static String toStoredPhone(String localDigits) {
     final cleaned = localDigits.trim().replaceAll(RegExp(r'[\s-]'), '');
     if (cleaned.isEmpty) return cleaned;
-    return '+60${cleaned.substring(1)}';
+    return '+60$cleaned';
   }
 
   /// Formats a 12-digit IC number as "YYMMDD-PB-###G" for display,

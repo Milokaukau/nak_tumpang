@@ -135,7 +135,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   style: TextStyle(
                     color: AppColors.primaryYellow,
                     fontWeight: FontWeight.bold,
-                    fontSize: 22,
+                    fontSize: 34,
                   ),
                 ),
                 Text(
@@ -144,7 +144,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   style: TextStyle(
                     color: AppColors.black,
                     fontWeight: FontWeight.bold,
-                    fontSize: 32,
+                    fontSize: 30,
                   ),
                 ),
                 const SizedBox(height: 8),

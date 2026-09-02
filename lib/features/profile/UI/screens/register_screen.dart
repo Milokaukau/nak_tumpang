@@ -102,6 +102,22 @@ class _RegisterScreenState extends State<RegisterScreen> {
     final fullPhoneForStorage = Validators.toStoredPhone(_phoneController.text);
     final cleanedIC = _icController.text.replaceAll(RegExp(r'[^0-9]'), '');
     try {
+      // Check IC uniqueness BEFORE creating the auth user. Without this,
+      // signUp() succeeds and commits, then the upsert into `users` below
+      // fails on the duplicate IC, leaving an orphaned auth user behind
+      // (so retrying then says the email already exists, even though
+      // nothing was ever actually created for that email).
+      final existingIC = await supabase
+          .from('users')
+          .select('id')
+          .eq('ic_number', cleanedIC)
+          .maybeSingle();
+
+      if (existingIC != null) {
+        setState(() => _errorMessage = 'This IC number is already registered.');
+        return;
+      }
+
       final response = await supabase.auth.signUp(
         email: _emailController.text.trim(),
         password: _passwordController.text,
@@ -121,6 +137,21 @@ class _RegisterScreenState extends State<RegisterScreen> {
         return;
       }
 
+      // Don't rely solely on a DB trigger to create the `users` row — upsert
+      // it directly so name, IC and phone are guaranteed to be there even if
+      // the trigger is missing or doesn't copy every field.
+      final newUserId = response.user?.id;
+      if (newUserId != null) {
+        await supabase.from('users').upsert({
+          'id': newUserId,
+          'name': _nameController.text.trim(),
+          'ic_number': cleanedIC,
+          'phone': fullPhoneForStorage,
+          'email': _emailController.text.trim(),
+          'role': 'passenger',
+        });
+      }
+
       if (!mounted) return;
 
       Navigator.of(context).pushReplacement(
@@ -130,8 +161,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
       );
     } on AuthException catch (e) {
       setState(() => _errorMessage = e.message);
+    } on PostgrestException catch (e) {
+      // Surfaces the real DB error (e.g. unique constraint) instead of
+      // hiding it behind a generic message.
+      setState(() => _errorMessage = e.code == '23505'
+          ? 'That IC number or account detail is already registered.'
+          : e.message);
     } catch (e) {
-      setState(() => _errorMessage = 'Something went wrong. Please try again.');
+      setState(() => _errorMessage = 'Something went wrong: $e');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -185,10 +222,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
-                        color: _phoneFocusNode.hasFocus
+                        color: _phoneError != null
+                            ? Colors.red
+                            : (_phoneFocusNode.hasFocus
                             ? AppColors.primaryYellow
-                            : AppColors.greyBorder,
-                        width: _phoneFocusNode.hasFocus ? 1.5 : 1,
+                            : AppColors.greyBorder),
+                        width: (_phoneError != null || _phoneFocusNode.hasFocus) ? 1.5 : 1,
                       ),
                     ),
                     child: child,
@@ -211,11 +250,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         keyboardType: TextInputType.phone,
                         inputFormatters: [
                           FilteringTextInputFormatter.digitsOnly,
-                          LengthLimitingTextInputFormatter(11),
+                          LengthLimitingTextInputFormatter(9),
                         ],
                         style: TextStyle(color: AppColors.black),
                         decoration: InputDecoration(
-                          hintText: '0123456789',
+                          hintText: '123456789',
                           hintStyle: TextStyle(color: AppColors.greyText.withValues(alpha: 0.5)),
                           contentPadding: const EdgeInsets.symmetric(vertical: 12),
                           border: InputBorder.none,
@@ -230,13 +269,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
               ),
               _errorText(_phoneError),
-              Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Text(
-                  'Enter your number starting with 01, e.g. 0123456789',
-                  style: TextStyle(color: AppColors.greyText, fontSize: 11),
-                ),
-              ),
               const SizedBox(height: 18),
 
               Text('Email', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
