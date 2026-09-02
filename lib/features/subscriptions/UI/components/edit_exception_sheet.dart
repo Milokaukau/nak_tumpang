@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
-import 'package:nak_tumpang/core/components/exception_request_form.dart';
+import 'package:nak_tumpang/features/home/UI/components/exception_request_form/exception_request_form.dart';
 import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
 import 'package:nak_tumpang/features/subscriptions/view_models/subscription_view_model.dart';
 
