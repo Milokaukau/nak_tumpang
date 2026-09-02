@@ -107,7 +107,7 @@ class RequestListCard extends StatelessWidget {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => ViewRequestScreen(requestId: request.id),
+                        builder: (context) => NegotiationScreen(requestId: request.id),
                       ),
                     );
                   },

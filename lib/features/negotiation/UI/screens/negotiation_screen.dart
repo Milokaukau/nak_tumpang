@@ -13,26 +13,33 @@ import 'package:nak_tumpang/features/negotiation/UI/components/route_map_header.
 import 'package:nak_tumpang/features/negotiation/UI/screens/tumpang_summary_screen.dart';
 import 'package:nak_tumpang/features/negotiation/utils/negotiation_error.dart';
 
-class ViewRequestScreen extends StatefulWidget {
+class NegotiationScreen extends StatefulWidget {
   final String requestId;
 
-  const ViewRequestScreen({
+  const NegotiationScreen({
     super.key,
     required this.requestId,
   });
 
   @override
-  State<ViewRequestScreen> createState() => _ViewRequestScreenState();
+  State<NegotiationScreen> createState() => _NegotiationScreenState();
 }
 
-class _ViewRequestScreenState extends State<ViewRequestScreen> {
-  /// Shared error-handling wrapper for every negotiation mutation fired
-  /// from this screen (propose/accept for each field, the atomic date
-  /// range, and reject). Every one of these already throws
-  /// [NegotiationException] with a safe, user-facing message on failure
-  /// (see NegotiationViewModel / runNegotiationAction) - this is just the
-  /// one place that catches it, shows it, and refreshes the UI, so each
-  /// button doesn't need its own try/catch.
+class _NegotiationScreenState extends State<NegotiationScreen> {
+  String _formatAmPm(String dbTime) {
+    if (dbTime.isEmpty) return dbTime;
+    try {
+      final parts = dbTime.split(':');
+      final hour = int.parse(parts[0]);
+      final minute = parts[1];
+      final period = hour >= 12 ? 'PM' : 'AM';
+      final displayHour = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
+      return '$displayHour:$minute $period';
+    } catch (e) {
+      return dbTime;
+    }
+  }
+
   Future<void> _runNegotiationAction(Future<void> Function() action) async {
     try {
       await action();
@@ -66,10 +73,6 @@ class _ViewRequestScreenState extends State<ViewRequestScreen> {
               throw NegotiationException('Please enter a valid fee amount.');
             }
             final dynamic valueToSubmit = fieldPrefix == 'fee' ? parsedFee! : newValue;
-            // Errors here (NegotiationException or otherwise) propagate up
-            // through ProposeValueBottomSheet's own try/catch, which shows
-            // them inline in the still-open sheet and lets the user retry
-            // without losing what they typed.
             await controller.proposeNewTerm(requestId: widget.requestId, fieldPrefix: fieldPrefix, value: valueToSubmit);
           },
         );
@@ -114,12 +117,6 @@ class _ViewRequestScreenState extends State<ViewRequestScreen> {
     });
   }
 
-  /// Opens the combined Tumpang Dates picker and submits both dates as a
-  /// single atomic proposal (NegotiationViewModel.proposeTumpangDateRange
-  /// -> the `propose_tumpang_dates` RPC), instead of two separate
-  /// `proposeNewTerm('sub_start', ...)` / `proposeNewTerm('sub_end', ...)`
-  /// calls that could leave the request half-updated if the second call
-  /// never completed.
   void _openDateRangeProposalSheet(BuildContext context, NegotiationViewModel controller, String currentStart, String currentEnd) {
     showModalBottomSheet(
       context: context,
@@ -159,10 +156,6 @@ class _ViewRequestScreenState extends State<ViewRequestScreen> {
 
     if (confirmed != true) return;
 
-    // Deliberately not using _runNegotiationAction here: on success we need
-    // to pop this whole screen (the request no longer exists to view)
-    // rather than just refresh it, and on failure we must NOT pop - the
-    // user needs to stay on the screen and be able to retry.
     try {
       await controller.rejectEntireRequest(widget.requestId);
       if (mounted) Navigator.pop(context);
@@ -206,7 +199,6 @@ class _ViewRequestScreenState extends State<ViewRequestScreen> {
 
           final targetTripId = isDriver ? request.passengerTripId : request.driverTripId;
 
-          // Determine overall agreement logic for Test Cases 8 & 9
           final bool isFullyAgreed = request.fee.isAccepted &&
               request.pickupTime.isAccepted &&
               request.pickupLocation.isAccepted &&
@@ -269,7 +261,7 @@ class _ViewRequestScreenState extends State<ViewRequestScreen> {
 
                     NegotiationFieldRow(
                       title: 'Pickup Time',
-                      value: request.pickupTime.value,
+                      value: _formatAmPm(request.pickupTime.value),
                       isAccepted: request.pickupTime.isAccepted,
                       isRequestedByMe: request.pickupTime.requestedBy == controller.currentUserId,
                       onPropose: () => _openTimeProposalSheet(context, controller, request.pickupTime.value),
@@ -289,7 +281,7 @@ class _ViewRequestScreenState extends State<ViewRequestScreen> {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'RM ${request.totalFee.toStringAsFixed(2)} total',
+                            'Total: RM ${request.totalFee.toStringAsFixed(2)}',
                             style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.black),
                           ),
                         ],

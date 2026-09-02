@@ -27,6 +27,20 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
   final SupabaseClient _supabase = Supabase.instance.client;
   bool _isProcessing = false;
 
+  String _formatAmPm(String dbTime) {
+    if (dbTime.isEmpty) return dbTime;
+    try {
+      final parts = dbTime.split(':');
+      final hour = int.parse(parts[0]);
+      final minute = parts[1];
+      final period = hour >= 12 ? 'PM' : 'AM';
+      final displayHour = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
+      return '$displayHour:$minute $period';
+    } catch (e) {
+      return dbTime;
+    }
+  }
+
   int _calculateDepositMonths(DateTime start, DateTime? end) {
     if (end == null) return 3;
     final diffDays = end.difference(start).inDays;
@@ -35,16 +49,12 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
   }
 
   Future<void> _handlePayDeposit(TumpangRequest request, double depositAmount) async {
-    final controller = Provider.of<NegotiationViewModel>(context, listen: false);
-    final passengerId = controller.currentUserId;
-
     setState(() => _isProcessing = true);
 
     try {
-      // 1. Create a Payment Intent directly with Stripe
       final secretKey = dotenv.env['STRIPE_SECRET_KEY'];
-      if (secretKey == null || secretKey.isEmpty) {
-        throw Exception('STRIPE_SECRET_KEY is missing in .env');
+      if (secretKey == null || secretKey.isEmpty || !secretKey.startsWith('sk_')) {
+        throw Exception('Invalid STRIPE_SECRET_KEY. Must start with sk_');
       }
 
       final response = await http.post(
@@ -54,61 +64,62 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
           'Content-Type': 'application/x-www-form-urlencoded',
         },
         body: {
-          'amount': (depositAmount * 100).toInt().toString(), // Amount in cents
+          'amount': (depositAmount * 100).toInt().toString(),
           'currency': 'myr',
           'payment_method_types[]': 'card',
         },
       );
 
       if (response.statusCode != 200) {
-        final err = jsonDecode(response.body);
-        throw Exception(err['error']?['message'] ?? 'Failed to create PaymentIntent');
+        throw Exception('Stripe API Error: ${response.body}');
       }
 
       final paymentIntent = jsonDecode(response.body);
-      final clientSecret = paymentIntent['client_secret'];
 
-      // 2. Initialize the Native Stripe Payment Sheet
       await Stripe.instance.initPaymentSheet(
         paymentSheetParameters: SetupPaymentSheetParameters(
-          paymentIntentClientSecret: clientSecret,
+          paymentIntentClientSecret: paymentIntent['client_secret'],
           merchantDisplayName: 'Nak Tumpang',
           style: ThemeMode.light,
+          billingDetails: const BillingDetails(
+            address: Address(
+              country: 'MY',
+              city: '',
+              line1: '',
+              line2: '',
+              postalCode: '',
+              state: '',
+            ),
+          ),
         ),
       );
 
-      // 3. Present the Sheet to User
       await Stripe.instance.presentPaymentSheet();
 
-      // 4. Update Supabase Records on Success
       final startDate = DateTime.parse(request.subscriptionStartDate.value);
-      final endDate = DateTime.tryParse(request.subscriptionEndDate.value);
+      final endDate = DateTime.tryParse(request.subscriptionEndDate.value) ?? startDate;
       final subId = 'sub_${DateTime.now().millisecondsSinceEpoch}';
 
       await _supabase.from('tumpang_subscription').insert({
         'id': subId,
-        'passenger_id': passengerId,
-        'driver_id': request.pickupTime.requestedBy,
-        'pickup_location': {
-          'lat': request.pickupLocation.lat,
-          'lng': request.pickupLocation.lng,
-          'name': request.pickupLocation.name,
-        },
-        'dropoff_location': {
-          'lat': request.dropoffLocation.lat,
-          'lng': request.dropoffLocation.lng,
-          'name': request.dropoffLocation.name,
-        },
+        'passenger_trip_id': request.passengerTripId,
+        'driver_trip_id': request.driverTripId,
+        'pickup_lat': request.pickupLocation.lat,
+        'pickup_lng': request.pickupLocation.lng,
+        'pickup_location': request.pickupLocation.name,
+        'dropoff_lat': request.dropoffLocation.lat,
+        'dropoff_lng': request.dropoffLocation.lng,
+        'dropoff_location': request.dropoffLocation.name,
         'pickup_time': request.pickupTime.value,
         'fee': request.fee.value,
+        'deposit': depositAmount,
+        'deposit_refunded': false,
         'subscription_start_date': startDate.toIso8601String().split('T').first,
-        'subscription_end_date': endDate?.toIso8601String().split('T').first,
-        'deposit_amount': depositAmount,
-        'deposit_status': 'held',
+        'subscription_end_date': endDate.toIso8601String().split('T').first,
         'status': 'active',
       });
 
-      final paymentId = 'pay_${DateTime.now().year.toString().substring(2)}${DateTime.now().month.toString().padLeft(2, '0')}${DateTime.now().day.toString().padLeft(2, '0')}_${subId.substring(4, 8)}';
+      final paymentId = 'pay_${DateTime.now().millisecondsSinceEpoch}';
       await _supabase.from('payments').insert({
         'id': paymentId,
         'tumpang_subscription_id': subId,
@@ -116,6 +127,7 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
         'year': DateTime.now().year,
         'due_date': DateTime.now().toIso8601String(),
         'paid_at': DateTime.now().toIso8601String(),
+        'amount': depositAmount,
       });
 
       await _supabase.from('tumpang_request').update({
@@ -124,7 +136,7 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Payment Successful! Subscription is now active.'), backgroundColor: Colors.green),
+        const SnackBar(content: Text('Payment Successful!'), backgroundColor: Colors.green),
       );
       Navigator.of(context).popUntil((route) => route.isFirst);
 
@@ -136,7 +148,7 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Payment Error: $e'), backgroundColor: Colors.red),
+        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
       );
     } finally {
       if (mounted) setState(() => _isProcessing = false);
@@ -166,7 +178,7 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
           }
 
           final request = snapshot.data!;
-          final dailyFee = request.fee.value; // fee.value is stored as a per-day rate
+          final dailyFee = request.fee.value;
           final monthlyFee = dailyFee * 30;
 
           final startDate = DateTime.tryParse(request.subscriptionStartDate.value) ?? DateTime.now();
@@ -215,7 +227,7 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
                         _SummaryRow(label: 'Dropoff Location', value: request.dropoffLocation.name),
                         _SummaryRow(label: 'Tumpang Start', value: request.subscriptionStartDate.value),
                         _SummaryRow(label: 'Tumpang End', value: request.subscriptionEndDate.value),
-                        _SummaryRow(label: 'Pickup Time', value: request.pickupTime.value),
+                        _SummaryRow(label: 'Pickup Time', value: _formatAmPm(request.pickupTime.value)), // ADDED FORMATTING HERE
                         const SizedBox(height: 16),
                         _SummaryRow(label: 'Tumpang Fee', value: 'RM ${dailyFee.toStringAsFixed(2)}/day\nRM ${monthlyFee.toStringAsFixed(2)}/month (approx.)\nRM ${request.totalFee.toStringAsFixed(2)} for ${request.subscriptionDays} days', isBold: true),
                         const SizedBox(height: 8),
@@ -234,7 +246,7 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
                             onPressed: _isProcessing ? null : () => _handlePayDeposit(request, depositAmount),
                             child: _isProcessing
                                 ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.black))
-                                : const Text('pay deposit to confirm', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                                : const Text('Pay deposit to confirm', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                           ),
                         ),
                       ],
