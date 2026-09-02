@@ -127,7 +127,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _loadProfile() async {
     final userId = supabase.auth.currentUser?.id;
-    if (userId == null) return;
+    if (userId == null) {
+      if (mounted) setState(() => _isLoading = false);
+      return;
+    }
 
     try {
       final data = await supabase
