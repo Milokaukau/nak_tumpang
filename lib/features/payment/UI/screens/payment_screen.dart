@@ -53,7 +53,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Pending Payments', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+        title: const Text('Payments', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
         backgroundColor: Colors.white,
         elevation: 0.5,
         iconTheme: const IconThemeData(color: Colors.black),
@@ -81,7 +81,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
           }
 
           if (viewModel.pendingPayments.isEmpty) {
-            return const Center(child: Text("All caught up! No pending payments."));
+            return const Center(child: Text("No pending payments."));
           }
 
           return ListView.builder(

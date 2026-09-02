@@ -67,6 +67,8 @@ class RequestListCard extends StatelessWidget {
                           const SizedBox(height: 4),
                           Text(
                             '${request.pickupLocation.name} - ${request.dropoffLocation.name}',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
@@ -76,6 +78,8 @@ class RequestListCard extends StatelessWidget {
                           const SizedBox(height: 4),
                           Text(
                             'pickup time: ${request.pickupTime.value}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                               fontSize: 14,
                               color: AppColors.black,
@@ -84,6 +88,8 @@ class RequestListCard extends StatelessWidget {
                           const SizedBox(height: 4),
                           Text(
                             displayPhone,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                               fontSize: 14,
                               color: AppColors.black,

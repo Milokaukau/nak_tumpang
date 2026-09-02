@@ -5,7 +5,8 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_stripe/flutter_stripe.dart'; // 1. Import Stripe
 import 'package:nak_tumpang/core/theme/app_theme.dart';
 import 'package:nak_tumpang/core/app_providers.dart';
-import 'package:nak_tumpang/features/home/UI/screens/home_screen.dart';
+//import 'package:nak_tumpang/features/home/UI/screens/home_screen.dart';
+import 'package:nak_tumpang/debug_login_screen.dart'; // temp for debug
 import 'package:nak_tumpang/core/services/local_db_service.dart';
 
 void main() async {
@@ -47,7 +48,8 @@ class TumpangApp extends StatelessWidget {
       title: 'Tumpang',
       theme: AppTheme.lightTheme,
       debugShowCheckedModeBanner: false,
-      home: const HomeScreen(),
+      //home: const HomeScreen(),
+      home: const DebugLoginScreen(), // temp for debug
     );
   }
 }

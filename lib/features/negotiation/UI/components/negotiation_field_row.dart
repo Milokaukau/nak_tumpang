@@ -23,6 +23,40 @@ class NegotiationFieldRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Collapsed one-line row for fields that are already settled — keeps the
+    // screen short when most terms have already been accepted.
+    if (isAccepted) {
+      return Container(
+        width: double.infinity,
+        margin: const EdgeInsets.only(bottom: 10.0),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: AppColors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppColors.greyBorder),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.check_circle, color: Colors.green, size: 18),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: const TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.w600)),
+                  Text(value, style: const TextStyle(fontSize: 14, color: AppColors.black, fontWeight: FontWeight.w500)),
+                ],
+              ),
+            ),
+            TextButton(
+              onPressed: onPropose,
+              child: const Text('Edit'),
+            ),
+          ],
+        ),
+      );
+    }
+
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: 16.0),
@@ -62,30 +96,7 @@ class NegotiationFieldRow extends StatelessWidget {
                 ],
 
                 // Conditional UI based on Negotiation State
-                if (isAccepted) ...[
-                  const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.check_circle, color: Colors.green, size: 20),
-                      SizedBox(width: 8),
-                      Text('Accepted', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 16)),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppColors.black,
-                        side: const BorderSide(color: AppColors.greyBorder),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
-                      ),
-                      onPressed: onPropose,
-                      child: const Text('Edit / Propose New'),
-                    ),
-                  ),
-                ] else if (isRequestedByMe) ...[
+                if (isRequestedByMe) ...[
                   const Text('(Waiting for Acceptance)', style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 12),
                   SizedBox(
@@ -98,7 +109,7 @@ class NegotiationFieldRow extends StatelessWidget {
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
                       ),
                       onPressed: onPropose,
-                      child: const Text('Edit Proposal'),
+                      child: const Text('Edit'),
                     ),
                   ),
                 ] else ...[
@@ -124,8 +135,8 @@ class NegotiationFieldRow extends StatelessWidget {
                       Expanded(
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.black,
-                            foregroundColor: AppColors.white,
+                            backgroundColor: AppColors.primaryYellow,
+                            foregroundColor: AppColors.black,
                             padding: const EdgeInsets.symmetric(vertical: 12),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
                           ),

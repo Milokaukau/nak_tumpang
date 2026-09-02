@@ -4,12 +4,7 @@ import 'package:nak_tumpang/features/negotiation/view_models/negotiation_view_mo
 import 'package:nak_tumpang/features/negotiation/UI/components/request_list_card.dart';
 
 class RequestListScreen extends StatefulWidget {
-  final String role;
-
-  const RequestListScreen({
-    super.key,
-    this.role = 'driver',
-  });
+  const RequestListScreen({super.key});
 
   @override
   State<RequestListScreen> createState() => _RequestListScreenState();
@@ -20,7 +15,7 @@ class _RequestListScreenState extends State<RequestListScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<NegotiationViewModel>().fetchActiveTripAndInitialize(widget.role);
+      context.read<NegotiationViewModel>().fetchRequests();
     });
   }
 
@@ -44,37 +39,25 @@ class _RequestListScreenState extends State<RequestListScreen> {
           }
 
           if (vm.errorMessage != null) {
-            final isAuthError = vm.errorMessage == 'User not authenticated. Please log in.';
-
             return Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(vm.errorMessage!, textAlign: TextAlign.center),
-                  const SizedBox(height: 16),
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFDF0E3), // Peach/orange tint from your image
-                      foregroundColor: Colors.brown,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(20),
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(vm.errorMessage!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.red)),
+                    const SizedBox(height: 16),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFFDF0E3),
+                        foregroundColor: Colors.brown,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                       ),
-                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                      onPressed: () => vm.fetchRequests(),
+                      child: const Text('Retry'),
                     ),
-                    onPressed: () {
-                      if (isAuthError) {
-                        // Redirect to your login screen
-                        Navigator.pushNamed(context, '/login');
-                        // OR: Navigator.push(context, MaterialPageRoute(builder: (_) => const LoginScreen()));
-                      } else {
-                        // Standard retry for network/database errors
-                        vm.fetchActiveTripAndInitialize(widget.role);
-                      }
-                    },
-                    child: Text(isAuthError ? 'Log In' : 'Retry'),
-                  ),
-                ],
+                  ],
+                ),
               ),
             );
           }
@@ -82,11 +65,12 @@ class _RequestListScreenState extends State<RequestListScreen> {
           if (vm.pendingRequests.isEmpty) {
             return RefreshIndicator(
               onRefresh: () => vm.refreshRequests(),
-              child: ListView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                children: const [
-                  SizedBox(height: 200),
-                  Center(child: Text('No pending requests found.\nPull down to refresh.', textAlign: TextAlign.center)),
+              child: Stack(
+                children: [
+                  ListView(physics: const AlwaysScrollableScrollPhysics()),
+                  const Center(
+                    child: Text('No pending requests found.\nPull down to refresh.', textAlign: TextAlign.center),
+                  ),
                 ],
               ),
             );

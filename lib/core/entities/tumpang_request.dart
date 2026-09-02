@@ -34,8 +34,12 @@ class NegotiatedLocation extends LocationNode {
 
   factory NegotiatedLocation.fromJson(Map<String, dynamic> json, String prefix) {
     return NegotiatedLocation(
-      lat: (json['${prefix}_lat'] ?? 0.0).toDouble(),
-      lng: (json['${prefix}_lng'] ?? 0.0).toDouble(),
+      lat: json['${prefix}_lat'] != null
+          ? double.parse(json['${prefix}_lat'].toString())
+          : 0.0,
+      lng: json['${prefix}_lng'] != null
+          ? double.parse(json['${prefix}_lng'].toString())
+          : 0.0,
       name: json['${prefix}_name']?.toString() ?? '',
       requestedBy: json['${prefix}_requested_by']?.toString() ?? '',
       isAccepted: json['${prefix}_is_accepted'] ?? false,
@@ -54,6 +58,20 @@ class TumpangRequest {
   final NegotiatedField<double> fee;
   final NegotiatedField<String> subscriptionStartDate;
   final NegotiatedField<String> subscriptionEndDate;
+
+  /// Number of days in the subscription period (inclusive of both ends).
+  /// Returns 0 if either date is missing/unparseable.
+  int get subscriptionDays {
+    final start = DateTime.tryParse(subscriptionStartDate.value);
+    final end = DateTime.tryParse(subscriptionEndDate.value);
+    if (start == null || end == null) return 0;
+    final diff = end.difference(start).inDays + 1;
+    return diff > 0 ? diff : 0;
+  }
+
+  /// fee.value is stored as a PER-DAY rate in Supabase.
+  /// Total = daily rate * number of days in the subscription period.
+  double get totalFee => fee.value * subscriptionDays;
 
   TumpangRequest({
     required this.id,

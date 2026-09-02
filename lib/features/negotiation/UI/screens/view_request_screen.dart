@@ -4,6 +4,9 @@ import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/entities/tumpang_request.dart';
 import 'package:nak_tumpang/features/negotiation/view_models/negotiation_view_model.dart';
 import 'package:nak_tumpang/features/negotiation/UI/components/propose_value_bottom_sheet.dart';
+import 'package:nak_tumpang/features/negotiation/UI/components/date_range_proposal_bottom_sheet.dart';
+import 'package:nak_tumpang/features/negotiation/UI/screens/location_picker_screen.dart';
+import 'package:nak_tumpang/features/negotiation/UI/components/time_proposal_bottom_sheet.dart';
 import 'package:nak_tumpang/features/negotiation/UI/components/negotiation_field_row.dart';
 import 'package:nak_tumpang/features/negotiation/UI/components/negotiation_summary_card.dart';
 import 'package:nak_tumpang/features/negotiation/UI/components/route_map_header.dart';
@@ -47,8 +50,84 @@ class _ViewRequestScreenState extends State<ViewRequestScreen> {
     ).then((_) { if (mounted) setState(() {}); });
   }
 
-  Future<void> _openDateRangePicker(BuildContext context, NegotiationViewModel controller, String currentStartDate, String currentEndDate) async {
-    // ... [keep logic from source 14] ...
+  void _openLocationPicker(BuildContext context, NegotiationViewModel controller, String title, String fieldPrefix, String currentName, double currentLat, double currentLng) {
+    Navigator.push<Map<String, dynamic>>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => LocationPickerScreen(
+          title: title,
+          initialName: currentName,
+          initialLat: currentLat,
+          initialLng: currentLng,
+        ),
+      ),
+    ).then((result) async {
+      if (result != null) {
+        await controller.proposeNewTerm(
+          requestId: widget.requestId,
+          fieldPrefix: fieldPrefix,
+          value: result['name'],
+          lat: result['lat'],
+          lng: result['lng'],
+        );
+      }
+      if (mounted) setState(() {});
+    });
+  }
+
+  void _openTimeProposalSheet(BuildContext context, NegotiationViewModel controller, String currentTime) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) => TimeProposalBottomSheet(initialTime: currentTime),
+    ).then((result) async {
+      if (result != null && result is String) {
+        await controller.proposeNewTerm(requestId: widget.requestId, fieldPrefix: 'pickup_time', value: result);
+      }
+      if (mounted) setState(() {});
+    });
+  }
+
+  void _openDateRangeProposalSheet(BuildContext context, NegotiationViewModel controller, String currentStart, String currentEnd) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) => DateRangeProposalBottomSheet(initialStartDate: currentStart, initialEndDate: currentEnd),
+    ).then((result) async {
+      if (result != null && result is Map) {
+        await controller.proposeNewTerm(requestId: widget.requestId, fieldPrefix: 'sub_start', value: result['start']);
+        await controller.proposeNewTerm(requestId: widget.requestId, fieldPrefix: 'sub_end', value: result['end']);
+      }
+      if (mounted) setState(() {});
+    });
+  }
+
+  Future<void> _confirmReject(BuildContext context, NegotiationViewModel controller) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Reject Request?'),
+        content: const Text('This will permanently reject the request. This action cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Reject'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await controller.rejectEntireRequest(widget.requestId);
+      if (mounted) Navigator.pop(context);
+    }
   }
 
   @override
@@ -116,7 +195,7 @@ class _ViewRequestScreenState extends State<ViewRequestScreen> {
                       isAccepted: request.pickupLocation.isAccepted,
                       isRequestedByMe: request.pickupLocation.requestedBy == controller.currentUserId,
                       topWidget: RouteMapHeader(label: request.pickupLocation.name, lat: request.pickupLocation.lat, lng: request.pickupLocation.lng),
-                      onPropose: () => _openProposalSheet(context, controller, 'Pickup Location', request.pickupLocation.name, 'pickup'),
+                      onPropose: () => _openLocationPicker(context, controller, 'Pickup Location', 'pickup', request.pickupLocation.name, request.pickupLocation.lat, request.pickupLocation.lng),
                       onAccept: () async { await controller.acceptTerm(widget.requestId, 'pickup'); if (mounted) setState(() {}); },
                     ),
 
@@ -126,19 +205,59 @@ class _ViewRequestScreenState extends State<ViewRequestScreen> {
                       isAccepted: request.dropoffLocation.isAccepted,
                       isRequestedByMe: request.dropoffLocation.requestedBy == controller.currentUserId,
                       topWidget: RouteMapHeader(label: request.dropoffLocation.name, lat: request.dropoffLocation.lat, lng: request.dropoffLocation.lng),
-                      onPropose: () => _openProposalSheet(context, controller, 'Dropoff Location', request.dropoffLocation.name, 'dropoff'),
+                      onPropose: () => _openLocationPicker(context, controller, 'Dropoff Location', 'dropoff', request.dropoffLocation.name, request.dropoffLocation.lat, request.dropoffLocation.lng),
                       onAccept: () async { await controller.acceptTerm(widget.requestId, 'dropoff'); if (mounted) setState(() {}); },
                     ),
 
-                    // ... (Include Tumpang Date, Time, Fee fields just as they are)[cite: 14] ...
+                    NegotiationFieldRow(
+                      title: 'Tumpang Dates',
+                      value: '${request.subscriptionStartDate.value} to ${request.subscriptionEndDate.value}',
+                      isAccepted: request.subscriptionStartDate.isAccepted && request.subscriptionEndDate.isAccepted,
+                      isRequestedByMe: request.subscriptionStartDate.requestedBy == controller.currentUserId,
+                      onPropose: () => _openDateRangeProposalSheet(context, controller, request.subscriptionStartDate.value, request.subscriptionEndDate.value),
+                      onAccept: () async {
+                        await controller.acceptTerm(widget.requestId, 'sub_start');
+                        await controller.acceptTerm(widget.requestId, 'sub_end');
+                        if (mounted) setState(() {});
+                      },
+                    ),
+
+                    NegotiationFieldRow(
+                      title: 'Pickup Time',
+                      value: request.pickupTime.value,
+                      isAccepted: request.pickupTime.isAccepted,
+                      isRequestedByMe: request.pickupTime.requestedBy == controller.currentUserId,
+                      onPropose: () => _openTimeProposalSheet(context, controller, request.pickupTime.value),
+                      onAccept: () async { await controller.acceptTerm(widget.requestId, 'pickup_time'); if (mounted) setState(() {}); },
+                    ),
+
+                    NegotiationFieldRow(
+                      title: 'Tumpang Fee',
+                      value: 'RM ${request.fee.value.toStringAsFixed(2)}',
+                      isAccepted: request.fee.isAccepted,
+                      isRequestedByMe: request.fee.requestedBy == controller.currentUserId,
+                      topWidget: Column(
+                        children: [
+                          Text(
+                            'RM ${request.fee.value.toStringAsFixed(2)}/day  x  ${request.subscriptionDays} day${request.subscriptionDays == 1 ? '' : 's'}',
+                            style: const TextStyle(fontSize: 13, color: AppColors.black),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'RM ${request.totalFee.toStringAsFixed(2)} total',
+                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.black),
+                          ),
+                        ],
+                      ),
+                      onPropose: () => _openProposalSheet(context, controller, 'Fee (per day)', request.fee.value.toStringAsFixed(2), 'fee'),
+                      onAccept: () async { await controller.acceptTerm(widget.requestId, 'fee'); if (mounted) setState(() {}); },
+                    ),
 
                     NegotiationSummaryCard(
                       request: request,
                       isFullyAgreed: isFullyAgreed,
-                      onReject: () async {
-                        await controller.rejectEntireRequest(widget.requestId);
-                        if (mounted) Navigator.pop(context);
-                      },
+                      isDriver: isDriver,
+                      onReject: () => _confirmReject(context, controller),
                       onProceedToSummary: () {
                         Navigator.push(
                           context,

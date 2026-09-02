@@ -15,19 +15,28 @@ class PaymentViewModel extends ChangeNotifier {
 
   PaymentViewModel() {
     _supabase.auth.onAuthStateChange.listen((data) {
-      if (data.session != null) {
+      // Fallback to currentSession in case the stream data is momentarily empty on boot
+      final session = data.session ?? _supabase.auth.currentSession;
+
+      if (session != null) {
         errorMessage = null;
         fetchPayments();
       } else {
         pendingPayments.clear();
         selectedPaymentIds.clear();
-        errorMessage = 'User not authenticated. Please log in.';
+
+        // ONLY show the login error if they explicitly pressed Sign Out
+        if (data.event == AuthChangeEvent.signedOut) {
+          errorMessage = 'User not authenticated. Please log in.';
+        } else {
+          errorMessage = null;
+        }
+
         notifyListeners();
       }
     });
   }
 
-  // This was missing!
   double get totalSelectedAmount {
     return pendingPayments
         .where((p) => selectedPaymentIds.contains(p.id))
@@ -52,7 +61,6 @@ class PaymentViewModel extends ChangeNotifier {
     }
   }
 
-  // This was missing!
   void toggleSelection(String id) {
     if (selectedPaymentIds.contains(id)) {
       selectedPaymentIds.remove(id);
@@ -62,7 +70,6 @@ class PaymentViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  // This was missing!
   Future<bool> processMockPayment(String paymentMethod) async {
     isLoading = true;
     notifyListeners();

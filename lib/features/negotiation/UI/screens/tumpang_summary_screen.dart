@@ -166,8 +166,8 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
           }
 
           final request = snapshot.data!;
-          final monthlyFee = request.fee.value;
-          final dailyFee = (monthlyFee / 30).toStringAsFixed(2);
+          final dailyFee = request.fee.value; // fee.value is stored as a per-day rate
+          final monthlyFee = dailyFee * 30;
 
           final startDate = DateTime.tryParse(request.subscriptionStartDate.value) ?? DateTime.now();
           final endDate = DateTime.tryParse(request.subscriptionEndDate.value);
@@ -217,7 +217,7 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
                         _SummaryRow(label: 'Tumpang End', value: request.subscriptionEndDate.value),
                         _SummaryRow(label: 'Pickup Time', value: request.pickupTime.value),
                         const SizedBox(height: 16),
-                        _SummaryRow(label: 'Tumpang Fee', value: 'RM $dailyFee/day\nRM ${monthlyFee.toStringAsFixed(2)}/month', isBold: true),
+                        _SummaryRow(label: 'Tumpang Fee', value: 'RM ${dailyFee.toStringAsFixed(2)}/day\nRM ${monthlyFee.toStringAsFixed(2)}/month (approx.)\nRM ${request.totalFee.toStringAsFixed(2)} for ${request.subscriptionDays} days', isBold: true),
                         const SizedBox(height: 8),
                         _SummaryRow(label: 'Deposit', value: 'RM ${depositAmount.toStringAsFixed(2)} ($depositMonths month${depositMonths > 1 ? 's' : ''})', isBold: true),
                         const SizedBox(height: 24),

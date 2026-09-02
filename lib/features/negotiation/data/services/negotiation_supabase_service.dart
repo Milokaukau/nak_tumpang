@@ -1,5 +1,3 @@
-// lib/features/negotiation/data/services/negotiation_supabase_service.dart
-
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nak_tumpang/core/entities/tumpang_request.dart';
 
@@ -11,7 +9,6 @@ class NegotiationSupabaseService {
 
   final String _table = 'tumpang_request';
 
-  // Standard one-time HTTP GET for a single request
   Future<TumpangRequest?> fetchSingleRequest(String requestId) async {
     final response = await _supabase
         .from(_table)
@@ -23,24 +20,22 @@ class NegotiationSupabaseService {
     return TumpangRequest.fromJson(response);
   }
 
-  // Standard one-time HTTP GET for Driver's pending requests
   Future<List<TumpangRequest>> fetchRequestsForDriver(String driverTripId) async {
     final List<dynamic> rows = await _supabase
         .from(_table)
         .select()
         .eq('driver_trip_id', driverTripId)
-        .eq('status', 'negotiating');
+        .or('status.eq.pending,status.eq.negotiating');
 
     return rows.map((row) => TumpangRequest.fromJson(row)).toList();
   }
 
-  // Standard one-time HTTP GET for Passenger's pending requests
   Future<List<TumpangRequest>> fetchRequestsForPassenger(String passengerTripId) async {
     final List<dynamic> rows = await _supabase
         .from(_table)
         .select()
         .eq('passenger_trip_id', passengerTripId)
-        .eq('status', 'negotiating');
+        .or('status.eq.pending,status.eq.negotiating');
 
     return rows.map((row) => TumpangRequest.fromJson(row)).toList();
   }
@@ -63,6 +58,10 @@ class NegotiationSupabaseService {
       updates['${fieldPrefix}_name'] = value;
       if (lat != null) updates['${fieldPrefix}_lat'] = lat;
       if (lng != null) updates['${fieldPrefix}_lng'] = lng;
+    } else if (fieldPrefix == 'sub_start' || fieldPrefix == 'sub_end') {
+      // DB column is sub_start_date / sub_end_date, but requested_by and
+      // is_accepted columns use the shorter sub_start / sub_end prefix.
+      updates['${fieldPrefix}_date'] = value;
     } else {
       updates[fieldPrefix] = value;
     }
