@@ -1,181 +1,45 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/utils/ic_no_formatter.dart';
-import 'package:nak_tumpang/core/utils/validators.dart';
 import 'package:nak_tumpang/features/profile/UI/screens/profile_screen.dart';
+import 'package:nak_tumpang/features/profile/view_models/register_view_model.dart';
 
-class RegisterScreen extends StatefulWidget {
+class RegisterScreen extends StatelessWidget {
   const RegisterScreen({super.key});
 
   @override
-  State<RegisterScreen> createState() => _RegisterScreenState();
+  Widget build(BuildContext context) {
+    return ChangeNotifierProvider(
+      create: (_) => RegisterViewModel(),
+      child: const _RegisterView(),
+    );
+  }
 }
 
-class _RegisterScreenState extends State<RegisterScreen> {
-  final _nameController = TextEditingController();
-  final _icController = TextEditingController();
-  final _phoneController = TextEditingController();
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
-  final _confirmPasswordController = TextEditingController();
-  final _phoneFocusNode = FocusNode();
-
-  bool _obscurePassword = true;
-  bool _obscureConfirmPassword = true;
-  bool _isLoading = false;
-  bool _autoValidate = false;
-  String? _errorMessage;
-  String? _nameError;
-
-  String? _icError;
-  String? _phoneError;
-  String? _emailError;
-  String? _passwordError;
-  String? _confirmError;
-
-  final supabase = Supabase.instance.client;
+class _RegisterView extends StatefulWidget {
+  const _RegisterView();
 
   @override
-  void dispose() {
-    _nameController.dispose();
-    _icController.dispose();
-    _phoneController.dispose();
-    _phoneFocusNode.dispose();
-    _emailController.dispose();
-    _passwordController.dispose();
-    _confirmPasswordController.dispose();
-    super.dispose();
-  }
+  State<_RegisterView> createState() => _RegisterViewState();
+}
 
-  String? _validateName(String? v) => Validators.name(v);
-
-  String? _validateIC(String? v) => Validators.ic(v);
-
-  String? _validatePhone(String? v) => Validators.phoneLocal(v);
-
-  String? _validateEmail(String? v) => Validators.email(v);
-
-  String? _validatePassword(String? v) => Validators.password(v);
-
-  String? _validateConfirmPassword(String? v) =>
-      Validators.confirmPassword(v, _passwordController.text);
-
-  void _revalidateIfNeeded() {
-    if (!_autoValidate) return;
-    setState(() {
-      _nameError = _validateName(_nameController.text);
-      _icError = _validateIC(_icController.text);
-      _phoneError = _validatePhone(_phoneController.text);
-      _emailError = _validateEmail(_emailController.text);
-      _passwordError = _validatePassword(_passwordController.text);
-      _confirmError = _validateConfirmPassword(_confirmPasswordController.text);
-    });
-  }
-
-  Future<void> _register() async {
-    setState(() {
-      _autoValidate = true;
-      _nameError = _validateName(_nameController.text);
-      _icError = _validateIC(_icController.text);
-      _phoneError = _validatePhone(_phoneController.text);
-      _emailError = _validateEmail(_emailController.text);
-      _passwordError = _validatePassword(_passwordController.text);
-      _confirmError = _validateConfirmPassword(_confirmPasswordController.text);
-    });
-
-    if (_nameError != null ||
-        _icError != null ||
-        _phoneError != null ||
-        _emailError != null ||
-        _passwordError != null ||
-        _confirmError != null) {
-      return;
-    }
-
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
-    final fullPhoneForStorage = Validators.toStoredPhone(_phoneController.text);
-    final cleanedIC = _icController.text.replaceAll(RegExp(r'[^0-9]'), '');
-    try {
-      // Check IC uniqueness BEFORE creating the auth user. Without this,
-      // signUp() succeeds and commits, then the upsert into `users` below
-      // fails on the duplicate IC, leaving an orphaned auth user behind
-      // (so retrying then says the email already exists, even though
-      // nothing was ever actually created for that email).
-      final existingIC = await supabase
-          .from('users')
-          .select('id')
-          .eq('ic_number', cleanedIC)
-          .maybeSingle();
-
-      if (existingIC != null) {
-        setState(() => _errorMessage = 'This IC number is already registered.');
-        return;
-      }
-
-      final response = await supabase.auth.signUp(
-        email: _emailController.text.trim(),
-        password: _passwordController.text,
-        data: {
-          'name': _nameController.text.trim(),
-          'ic_number': cleanedIC,
-          'phone': fullPhoneForStorage,
-          'role': 'passenger', // placeholder; the popup below sets the real one
-        },
-      );
-
-      // double check if email exists
-      final identities = response.user?.identities;
-      if (identities != null && identities.isEmpty) {
-        setState(() => _errorMessage =
-        'An account with this email already exists. Please log in instead.');
-        return;
-      }
-
-      // Don't rely solely on a DB trigger to create the `users` row — upsert
-      // it directly so name, IC and phone are guaranteed to be there even if
-      // the trigger is missing or doesn't copy every field.
-      final newUserId = response.user?.id;
-      if (newUserId != null) {
-        await supabase.from('users').upsert({
-          'id': newUserId,
-          'name': _nameController.text.trim(),
-          'ic_number': cleanedIC,
-          'phone': fullPhoneForStorage,
-          'email': _emailController.text.trim(),
-          'role': 'passenger',
-        });
-      }
-
-      if (!mounted) return;
-
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => const ProfileScreen(isFirstTimeSetup: true),
-        ),
-      );
-    } on AuthException catch (e) {
-      setState(() => _errorMessage = e.message);
-    } on PostgrestException catch (e) {
-      // Surfaces the real DB error (e.g. unique constraint) instead of
-      // hiding it behind a generic message.
-      setState(() => _errorMessage = e.code == '23505'
-          ? 'That IC number or account detail is already registered.'
-          : e.message);
-    } catch (e) {
-      setState(() => _errorMessage = 'Something went wrong: $e');
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
+class _RegisterViewState extends State<_RegisterView> {
+  Future<void> _register(RegisterViewModel vm) async {
+    final success = await vm.submit();
+    if (!mounted || !success) return;
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) => const ProfileScreen(isFirstTimeSetup: true),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final vm = context.watch<RegisterViewModel>();
+
     return Scaffold(
       backgroundColor: AppColors.white,
       appBar: AppBar(
@@ -190,44 +54,44 @@ class _RegisterScreenState extends State<RegisterScreen> {
               Text('Full Name (as per IC)', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
               const SizedBox(height: 6),
               TextField(
-                controller: _nameController,
+                controller: vm.nameController,
                 textCapitalization: TextCapitalization.words,
                 decoration: _fieldDecoration(),
-                onChanged: (_) => _revalidateIfNeeded(),
+                onChanged: (_) => vm.revalidateIfNeeded(),
               ),
-              _errorText(_nameError),
+              _errorText(vm.nameError),
               const SizedBox(height: 18),
 
               Text('IC Number', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
               const SizedBox(height: 6),
               TextField(
-                controller: _icController,
+                controller: vm.icController,
                 keyboardType: TextInputType.number,
                 inputFormatters: [MalaysianICInputFormatter()],
                 decoration: _fieldDecoration().copyWith(
                   hintText: '990101-14-5678',
                   hintStyle: TextStyle(color: AppColors.greyText.withValues(alpha: 0.6)),
                 ),
-                onChanged: (_) => _revalidateIfNeeded(),
+                onChanged: (_) => vm.revalidateIfNeeded(),
               ),
-              _errorText(_icError),
+              _errorText(vm.icError),
               const SizedBox(height: 18),
 
               Text('Phone Number', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
               const SizedBox(height: 6),
               AnimatedBuilder(
-                animation: _phoneFocusNode,
+                animation: vm.phoneFocusNode,
                 builder: (context, child) {
                   return Container(
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
-                        color: _phoneError != null
+                        color: vm.phoneError != null
                             ? Colors.red
-                            : (_phoneFocusNode.hasFocus
+                            : (vm.phoneFocusNode.hasFocus
                             ? AppColors.primaryYellow
                             : AppColors.greyBorder),
-                        width: (_phoneError != null || _phoneFocusNode.hasFocus) ? 1.5 : 1,
+                        width: (vm.phoneError != null || vm.phoneFocusNode.hasFocus) ? 1.5 : 1,
                       ),
                     ),
                     child: child,
@@ -245,8 +109,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     const SizedBox(width: 6),
                     Expanded(
                       child: TextField(
-                        controller: _phoneController,
-                        focusNode: _phoneFocusNode,
+                        controller: vm.phoneController,
+                        focusNode: vm.phoneFocusNode,
                         keyboardType: TextInputType.phone,
                         inputFormatters: [
                           FilteringTextInputFormatter.digitsOnly,
@@ -261,45 +125,45 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           enabledBorder: InputBorder.none,
                           focusedBorder: InputBorder.none,
                         ),
-                        onChanged: (_) => _revalidateIfNeeded(),
+                        onChanged: (_) => vm.revalidateIfNeeded(),
                       ),
                     ),
                     const SizedBox(width: 8),
                   ],
                 ),
               ),
-              _errorText(_phoneError),
+              _errorText(vm.phoneError),
               const SizedBox(height: 18),
 
               Text('Email', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
               const SizedBox(height: 6),
               TextField(
-                controller: _emailController,
+                controller: vm.emailController,
                 keyboardType: TextInputType.emailAddress,
                 decoration: _fieldDecoration(),
-                onChanged: (_) => _revalidateIfNeeded(),
+                onChanged: (_) => vm.revalidateIfNeeded(),
               ),
-              _errorText(_emailError),
+              _errorText(vm.emailError),
               const SizedBox(height: 18),
 
               Text('Password', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
               const SizedBox(height: 6),
               TextField(
-                controller: _passwordController,
-                obscureText: _obscurePassword,
+                controller: vm.passwordController,
+                obscureText: vm.obscurePassword,
                 decoration: _fieldDecoration(
                   suffixIcon: IconButton(
                     icon: Icon(
-                      _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                      vm.obscurePassword ? Icons.visibility_off : Icons.visibility,
                       color: AppColors.greyText,
                       size: 20,
                     ),
-                    onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                    onPressed: vm.toggleObscurePassword,
                   ),
                 ),
-                onChanged: (_) => _revalidateIfNeeded(),
+                onChanged: (_) => vm.revalidateIfNeeded(),
               ),
-              _errorText(_passwordError),
+              _errorText(vm.passwordError),
               Padding(
                 padding: const EdgeInsets.only(top: 2),
                 child: Text(
@@ -312,26 +176,25 @@ class _RegisterScreenState extends State<RegisterScreen> {
               Text('Confirm Password', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
               const SizedBox(height: 6),
               TextField(
-                controller: _confirmPasswordController,
-                obscureText: _obscureConfirmPassword,
+                controller: vm.confirmPasswordController,
+                obscureText: vm.obscureConfirmPassword,
                 decoration: _fieldDecoration(
                   suffixIcon: IconButton(
                     icon: Icon(
-                      _obscureConfirmPassword ? Icons.visibility_off : Icons.visibility,
+                      vm.obscureConfirmPassword ? Icons.visibility_off : Icons.visibility,
                       color: AppColors.greyText,
                       size: 20,
                     ),
-                    onPressed: () =>
-                        setState(() => _obscureConfirmPassword = !_obscureConfirmPassword),
+                    onPressed: vm.toggleObscureConfirmPassword,
                   ),
                 ),
-                onChanged: (_) => _revalidateIfNeeded(),
+                onChanged: (_) => vm.revalidateIfNeeded(),
               ),
-              _errorText(_confirmError),
+              _errorText(vm.confirmError),
 
-              if (_errorMessage != null) ...[
+              if (vm.errorMessage != null) ...[
                 const SizedBox(height: 16),
-                Text(_errorMessage!, style: const TextStyle(color: Colors.red), textAlign: TextAlign.center),
+                Text(vm.errorMessage!, style: const TextStyle(color: Colors.red), textAlign: TextAlign.center),
               ],
 
               const SizedBox(height: 28),
@@ -342,8 +205,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     backgroundColor: AppColors.primaryYellow,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
-                  onPressed: _isLoading ? null : _register,
-                  child: _isLoading
+                  onPressed: vm.isLoading ? null : () => _register(vm),
+                  child: vm.isLoading
                       ? const SizedBox(
                     height: 20,
                     width: 20,

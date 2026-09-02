@@ -13,12 +13,16 @@ void main() async {
   // Load the .env file
   await dotenv.load(fileName: ".env");
 
-  // Initialize Supabase
-  await Supabase.initialize(
-    url: dotenv.env['SUPABASE_URL']!,
-    anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
-  );
+  final supabaseUrl = dotenv.env['SUPABASE_URL'];
+  final supabaseAnonKey = dotenv.env['SUPABASE_ANON_KEY'];
 
+  if (supabaseUrl == null || supabaseAnonKey == null) {
+    throw StateError(
+      'Missing SUPABASE_URL or SUPABASE_ANON_KEY — check your .env file.',
+    );
+  }
+
+  await Supabase.initialize(url: supabaseUrl, anonKey: supabaseAnonKey);
   runApp(
     MultiProvider(
       providers: AppProviders.providers,

@@ -44,15 +44,16 @@ class ProfileStorageService {
       fileOptions: const FileOptions(upsert: true),
     );
 
-    if (public) {
-      return _supabase.storage.from(bucket).getPublicUrl(path);
-    }
+    if (public) return _supabase.storage.from(bucket).getPublicUrl(path);
+    return path; // store this, not a signed URL
+  }
 
-    // Private bucket: a signed URL good for a year. Re-sign later if the
-    // driver's license needs to be reviewed again (e.g. for verification).
-    return _supabase.storage.from(bucket).createSignedUrl(
-      path,
-      60 * 60 * 24 * 365,
-    );
+  /// Call this whenever you actually need to show/download a private file.
+  Future<String> getSignedUrl({
+    required String bucket,
+    required String path,
+    int expiresInSeconds = 3600,
+  }) {
+    return _supabase.storage.from(bucket).createSignedUrl(path, expiresInSeconds);
   }
 }

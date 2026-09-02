@@ -1,95 +1,38 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:provider/provider.dart';
 import 'package:nak_tumpang/features/home/UI/screens/home_screen.dart';
 import 'package:nak_tumpang/features/profile/UI/screens/register_screen.dart';
+import 'package:nak_tumpang/features/auth/view_models/login_view_model.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 
-class LoginScreen extends StatefulWidget {
+class LoginScreen extends StatelessWidget {
   const LoginScreen({super.key});
 
   @override
-  State<LoginScreen> createState() => _LoginScreenState();
+  Widget build(BuildContext context) {
+    return ChangeNotifierProvider(
+      create: (_) => LoginViewModel(),
+      child: const _LoginView(),
+    );
+  }
 }
 
-class _LoginScreenState extends State<LoginScreen> {
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
-
-  bool _isLoading = false;
-  bool _isHoveringRegister = false;
-  bool _obscurePassword = true;
-  bool _autoValidate = false;
-  String? _errorMessage;
-
-  // Per-field error messages, rendered manually below each box so they
-  // align flush-left with the labels/box edges instead of using Flutter's
-  // default (indented) error text.
-  String? _emailError;
-  String? _passwordError;
-
-  static final RegExp _emailRegex = RegExp(r'^[\w.+-]+@[\w-]+\.[\w.-]+$');
-
-  final supabase = Supabase.instance.client;
+class _LoginView extends StatefulWidget {
+  const _LoginView();
 
   @override
-  void dispose() {
-    _emailController.dispose();
-    _passwordController.dispose();
-    super.dispose();
-  }
+  State<_LoginView> createState() => _LoginViewState();
+}
 
-  String? _validateEmail(String? v) {
-    if (v == null || v.trim().isEmpty) return 'Email is required';
-    if (!_emailRegex.hasMatch(v.trim())) return 'Enter a valid email';
-    return null;
-  }
+class _LoginViewState extends State<_LoginView> {
+  bool _isHoveringRegister = false;
 
-  String? _validatePassword(String? v) {
-    if (v == null || v.isEmpty) return 'Password is required';
-    if (v.length < 6) return 'At least 6 characters';
-    return null;
-  }
-
-  void _revalidateIfNeeded() {
-    if (!_autoValidate) return;
-    setState(() {
-      _emailError = _validateEmail(_emailController.text);
-      _passwordError = _validatePassword(_passwordController.text);
-    });
-  }
-
-  Future<void> _submit() async {
-    setState(() {
-      _autoValidate = true;
-      _emailError = _validateEmail(_emailController.text);
-      _passwordError = _validatePassword(_passwordController.text);
-    });
-
-    if (_emailError != null || _passwordError != null) return;
-
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
-    final email = _emailController.text.trim();
-    final password = _passwordController.text;
-
-    try {
-      await supabase.auth.signInWithPassword(email: email, password: password);
-      if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const HomeScreen()),
-      );
-    } on AuthException catch (e) {
-      setState(() => _errorMessage = e.message.contains('Invalid login credentials')
-          ? 'Incorrect email or password.'
-          : e.message);
-    } catch (e) {
-      setState(() => _errorMessage = 'Something went wrong. Please try again.');
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
+  Future<void> _submit(LoginViewModel vm) async {
+    final success = await vm.submit();
+    if (!mounted || !success) return;
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => const HomeScreen()),
+    );
   }
 
   void _startRegister() {
@@ -100,6 +43,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final vm = context.watch<LoginViewModel>();
+
     return Scaffold(
       backgroundColor: AppColors.white,
       body: SafeArea(
@@ -135,7 +80,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   style: TextStyle(
                     color: AppColors.primaryYellow,
                     fontWeight: FontWeight.bold,
-                    fontSize: 34,
+                    fontSize: 22,
                   ),
                 ),
                 Text(
@@ -144,7 +89,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   style: TextStyle(
                     color: AppColors.black,
                     fontWeight: FontWeight.bold,
-                    fontSize: 30,
+                    fontSize: 32,
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -159,38 +104,38 @@ class _LoginScreenState extends State<LoginScreen> {
                 Text('Email', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
                 const SizedBox(height: 6),
                 TextField(
-                  controller: _emailController,
+                  controller: vm.emailController,
                   keyboardType: TextInputType.emailAddress,
                   decoration: _fieldDecoration(),
-                  onChanged: (_) => _revalidateIfNeeded(),
+                  onChanged: (_) => vm.revalidateIfNeeded(),
                 ),
-                _errorText(_emailError),
+                _errorText(vm.emailError),
                 const SizedBox(height: 18),
 
                 // Password
                 Text('Password', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
                 const SizedBox(height: 6),
                 TextField(
-                  controller: _passwordController,
-                  obscureText: _obscurePassword,
+                  controller: vm.passwordController,
+                  obscureText: vm.obscurePassword,
                   decoration: _fieldDecoration(
                     suffixIcon: IconButton(
                       icon: Icon(
-                        _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                        vm.obscurePassword ? Icons.visibility_off : Icons.visibility,
                         color: AppColors.greyText,
                         size: 20,
                       ),
-                      onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                      onPressed: vm.toggleObscurePassword,
                     ),
                   ),
-                  onChanged: (_) => _revalidateIfNeeded(),
+                  onChanged: (_) => vm.revalidateIfNeeded(),
                 ),
-                _errorText(_passwordError),
+                _errorText(vm.passwordError),
 
-                if (_errorMessage != null) ...[
+                if (vm.errorMessage != null) ...[
                   const SizedBox(height: 14),
                   Text(
-                    _errorMessage!,
+                    vm.errorMessage!,
                     style: const TextStyle(color: Colors.red),
                     textAlign: TextAlign.center,
                   ),
@@ -206,8 +151,8 @@ class _LoginScreenState extends State<LoginScreen> {
                         borderRadius: BorderRadius.circular(8),
                       ),
                     ),
-                    onPressed: _isLoading ? null : _submit,
-                    child: _isLoading
+                    onPressed: vm.isLoading ? null : () => _submit(vm),
+                    child: vm.isLoading
                         ? const SizedBox(
                       height: 20,
                       width: 20,
@@ -231,7 +176,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   onEnter: (_) => setState(() => _isHoveringRegister = true),
                   onExit: (_) => setState(() => _isHoveringRegister = false),
                   child: GestureDetector(
-                    onTap: _isLoading ? null : _startRegister,
+                    onTap: vm.isLoading ? null : _startRegister,
                     child: Column(
                       children: [
                         Text('New here?', style: TextStyle(color: AppColors.greyText, fontSize: 12)),

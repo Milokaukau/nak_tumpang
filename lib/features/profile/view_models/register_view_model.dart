@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nak_tumpang/core/utils/validators.dart';
 
@@ -30,11 +31,17 @@ class RegisterViewModel extends ChangeNotifier {
 
   final _supabase = Supabase.instance.client;
 
+  RegisterViewModel() {
+    // Rebuild the phone field's focus-dependent border when focus changes.
+    phoneFocusNode.addListener(notifyListeners);
+  }
+
   @override
   void dispose() {
     nameController.dispose();
     icController.dispose();
     phoneController.dispose();
+    phoneFocusNode.removeListener(notifyListeners);
     phoneFocusNode.dispose();
     emailController.dispose();
     passwordController.dispose();
@@ -93,19 +100,19 @@ class RegisterViewModel extends ChangeNotifier {
 
     try {
       // Check IC uniqueness BEFORE creating the auth user. Without this,
-      // a duplicate IC fails silently in the DB trigger that creates the
-      // profiles row *after* auth.signUp() has already committed, leaving
-      // an orphaned auth user behind (email "already exists" on retry,
-      // even though nothing was ever actually created for that email).
+      // signUp() succeeds and commits, then the upsert into `users` below
+      // fails on the duplicate IC, leaving an orphaned auth user behind
+      // (so retrying then says the email already exists, even though
+      // nothing was ever actually created for that email).
       final existingIC = await _supabase
-          .from('profiles')
+          .from('users')
           .select('id')
           .eq('ic_number', cleanedIC)
           .maybeSingle();
 
       if (existingIC != null) {
         icError = 'This IC number is already registered';
-        errorMessage = 'This IC number is already registered';
+        errorMessage = 'This IC number is already registered.';
         return false;
       }
 
@@ -127,12 +134,34 @@ class RegisterViewModel extends ChangeNotifier {
         return false;
       }
 
+      // Don't rely solely on a DB trigger to create the `users` row — upsert
+      // it directly so name, IC and phone are guaranteed to be there even if
+      // the trigger is missing or doesn't copy every field.
+      final newUserId = response.user?.id;
+      if (newUserId != null) {
+        await _supabase.from('users').upsert({
+          'id': newUserId,
+          'name': nameController.text.trim(),
+          'ic_number': cleanedIC,
+          'phone': fullPhoneForStorage,
+          'email': emailController.text.trim(),
+          'role': 'passenger',
+        });
+      }
+
       return true;
     } on AuthException catch (e) {
       errorMessage = e.message;
       return false;
+    } on PostgrestException catch (e) {
+      // Surfaces the real DB error (e.g. unique constraint) instead of
+      // hiding it behind a generic message.
+      errorMessage = e.code == '23505'
+          ? 'That IC number or account detail is already registered.'
+          : e.message;
+      return false;
     } catch (e) {
-      errorMessage = 'Something went wrong. Please try again.';
+      errorMessage = 'Something went wrong: $e';
       return false;
     } finally {
       isLoading = false;

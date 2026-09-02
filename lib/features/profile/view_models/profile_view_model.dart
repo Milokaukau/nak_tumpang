@@ -70,7 +70,8 @@ class ProfileViewModel extends ChangeNotifier {
   bool isUploadingAvatar = false;
 
   Uint8List? licenseBytes;
-  String? licenseUrl;
+  String? licenseUrl;      // signed URL for display only — never save this to DB
+  String? _licensePath;    // raw "<userId>/<fileName>" path — this is what gets saved
   bool isUploadingLicense = false;
 
   bool isLoading = true;
@@ -136,7 +137,13 @@ class ProfileViewModel extends ChangeNotifier {
         _role = data['role'] ?? 'passenger';
         _originalRole = data['role'] as String?;
         avatarUrl = data['avatar_url'] as String?;
-        licenseUrl = data['license_url'] as String?;
+        _licensePath = data['license_url'] as String?;
+        if (_licensePath != null) {
+          licenseUrl = await _storageService.getSignedUrl(
+            bucket: 'driver-licenses',
+            path: _licensePath!,
+          );
+        }
         _icNumber = data['ic_number'] as String? ?? meta?['ic_number'] as String?;
       }
       icController.text = _formatIC(_icNumber);
@@ -332,12 +339,18 @@ class ProfileViewModel extends ChangeNotifier {
       if (roleToSave == 'driver' && licenseBytes != null) {
         isUploadingLicense = true;
         notifyListeners();
-        licenseUrl = await _storageService.uploadUserFile(
+        _licensePath = await _storageService.uploadUserFile(
           bytes: licenseBytes!,
           bucket: 'driver-licenses',
           userId: userId,
           fileName: 'license.jpg',
           public: false,
+        );
+        // Also refresh the signed URL so it displays immediately after save,
+        // without needing another round trip to loadProfile().
+        licenseUrl = await _storageService.getSignedUrl(
+          bucket: 'driver-licenses',
+          path: _licensePath!,
         );
         isUploadingLicense = false;
       }
@@ -351,7 +364,7 @@ class ProfileViewModel extends ChangeNotifier {
         'avatar_url': avatarUrl,
         'email': _email ?? newEmail,
         'license_number': roleToSave == 'driver' ? licenseNumberController.text.trim() : null,
-        'license_url': roleToSave == 'driver' ? licenseUrl : null,
+        'license_url': roleToSave == 'driver' ? _licensePath : null,
         'updated_at': DateTime.now().toIso8601String(),
       });
 
