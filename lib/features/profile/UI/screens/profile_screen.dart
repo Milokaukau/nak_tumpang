@@ -139,7 +139,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           .eq('id', userId)
           .single();
 
-      debugPrint('RAW USER ROW: $data');
+      // debugPrint('Loaded user profile row');
 
       setState(() {
         _nameController.text = data['name'] ?? '';
