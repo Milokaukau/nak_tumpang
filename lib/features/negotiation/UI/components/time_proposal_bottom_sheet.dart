@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:nak_tumpang/core/theme/app_colors.dart';
 
 /// Lets the user propose a new Pickup Time using the native time picker
 /// instead of typing it manually. Returns a "HH:mm:00" string via
@@ -45,7 +46,7 @@ class _TimeProposalBottomSheetState extends State<TimeProposalBottomSheet> {
         return Theme(
           data: Theme.of(context).copyWith(
             colorScheme: const ColorScheme.light(
-              primary: Colors.amber,
+              primary: AppColors.primaryYellow,
               onPrimary: Colors.white,
               onSurface: Colors.black,
             ),
@@ -91,8 +92,8 @@ class _TimeProposalBottomSheetState extends State<TimeProposalBottomSheet> {
             width: double.infinity,
             child: ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.amber,
-                foregroundColor: Colors.black,
+                backgroundColor: AppColors.primaryYellow,
+                foregroundColor: AppColors.black,
               ),
               onPressed: () {
                 Navigator.pop(context, _format(_selectedTime));

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:provider/provider.dart';
 import 'package:nak_tumpang/features/negotiation/view_models/negotiation_view_model.dart';
 import 'package:nak_tumpang/features/negotiation/UI/components/request_list_card.dart';
@@ -22,13 +23,13 @@ class _RequestListScreenState extends State<RequestListScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.white,
       appBar: AppBar(
-        title: const Text('Request List', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-        backgroundColor: Colors.white,
+        title: const Text('Request List', style: TextStyle(color: AppColors.black, fontWeight: FontWeight.bold)),
+        backgroundColor: AppColors.white,
         elevation: 0.5,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black),
+          icon: const Icon(Icons.arrow_back, color: AppColors.black),
           onPressed: () => Navigator.maybePop(context),
         ),
       ),
@@ -49,8 +50,8 @@ class _RequestListScreenState extends State<RequestListScreen> {
                     const SizedBox(height: 16),
                     ElevatedButton(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFFDF0E3),
-                        foregroundColor: Colors.brown,
+                        backgroundColor: AppColors.primaryYellow,
+                        foregroundColor: AppColors.black,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                       ),
                       onPressed: () => vm.fetchRequests(),

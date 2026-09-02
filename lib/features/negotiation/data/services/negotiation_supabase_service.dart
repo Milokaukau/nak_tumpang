@@ -20,26 +20,6 @@ class NegotiationSupabaseService {
     return TumpangRequest.fromJson(response);
   }
 
-  Future<List<TumpangRequest>> fetchRequestsForDriver(String driverTripId) async {
-    final List<dynamic> rows = await _supabase
-        .from(_table)
-        .select()
-        .eq('driver_trip_id', driverTripId)
-        .or('status.eq.pending,status.eq.negotiating');
-
-    return rows.map((row) => TumpangRequest.fromJson(row)).toList();
-  }
-
-  Future<List<TumpangRequest>> fetchRequestsForPassenger(String passengerTripId) async {
-    final List<dynamic> rows = await _supabase
-        .from(_table)
-        .select()
-        .eq('passenger_trip_id', passengerTripId)
-        .or('status.eq.pending,status.eq.negotiating');
-
-    return rows.map((row) => TumpangRequest.fromJson(row)).toList();
-  }
-
   Future<void> updateNegotiationField({
     required String requestId,
     required String fieldPrefix,
@@ -58,11 +38,9 @@ class NegotiationSupabaseService {
       updates['${fieldPrefix}_name'] = value;
       if (lat != null) updates['${fieldPrefix}_lat'] = lat;
       if (lng != null) updates['${fieldPrefix}_lng'] = lng;
-    } else if (fieldPrefix == 'sub_start' || fieldPrefix == 'sub_end') {
-      // DB column is sub_start_date / sub_end_date, but requested_by and
-      // is_accepted columns use the shorter sub_start / sub_end prefix.
-      updates['${fieldPrefix}_date'] = value;
     } else {
+      // 'sub_start' / 'sub_end' no longer go through here individually -
+      // see proposeTumpangDates() below.
       updates[fieldPrefix] = value;
     }
 
@@ -77,6 +55,45 @@ class NegotiationSupabaseService {
         .from(_table)
         .update({'${fieldPrefix}_is_accepted': true})
         .eq('id', requestId);
+  }
+
+  /// Atomically proposes both the Tumpang start and end date.
+  ///
+  /// This is a SINGLE `.update()` call setting both `sub_start_date` and
+  /// `sub_end_date` (and both requested_by / is_accepted columns) in one
+  /// map. PostgREST turns that into ONE SQL `UPDATE` statement against one
+  /// row - a single statement is atomic by itself in Postgres, so there is
+  /// no window where only one of the two dates has changed. This replaces
+  /// the old pattern of two separate `updateNegotiationField()` calls
+  /// (two HTTP requests, two independent SQL statements), which is what
+  /// let the row end up with sub_start_date changed but sub_end_date
+  /// stale if the second call failed or was interrupted.
+  ///
+  /// [startDate] / [endDate] are "YYYY-MM-DD" strings, matching what the
+  /// date picker already produces - no RPC / server-side function needed.
+  Future<void> proposeTumpangDates({
+    required String requestId,
+    required String startDate,
+    required String endDate,
+    required String requestedById,
+  }) async {
+    await _supabase.from(_table).update({
+      'sub_start_date': startDate,
+      'sub_end_date': endDate,
+      'sub_start_requested_by': requestedById,
+      'sub_end_requested_by': requestedById,
+      'sub_start_is_accepted': false,
+      'sub_end_is_accepted': false,
+    }).eq('id', requestId);
+  }
+
+  /// Atomically accepts both the Tumpang start and end date - same
+  /// single-statement reasoning as [proposeTumpangDates].
+  Future<void> acceptTumpangDates({required String requestId}) async {
+    await _supabase.from(_table).update({
+      'sub_start_is_accepted': true,
+      'sub_end_is_accepted': true,
+    }).eq('id', requestId);
   }
 
   Future<void> rejectRequest(String requestId) async {

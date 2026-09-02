@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
-import 'package:nak_tumpang/features/negotiation/UI/screens/fullscreen_map_screen.dart';
+import 'package:nak_tumpang/features/negotiation/UI/screens/map_screen.dart';
 
 class RouteMapHeader extends StatelessWidget {
   final String label;
@@ -35,7 +35,7 @@ class RouteMapHeader extends StatelessWidget {
             Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (context) => FullscreenMapScreen(label: label, lat: lat, lng: lng),
+                builder: (context) => MapScreen(title: label, initialLat: lat, initialLng: lng, readOnly: true),
               ),
             );
           },

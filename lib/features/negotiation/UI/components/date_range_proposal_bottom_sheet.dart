@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:nak_tumpang/core/theme/app_colors.dart';
+import 'package:nak_tumpang/features/negotiation/utils/date_range_rules.dart';
 
 /// Lets the user propose a Tumpang start + end date together.
 /// Rules:
@@ -6,6 +8,10 @@ import 'package:flutter/material.dart';
 /// - The end date calendar disables (greys out) any date before
 ///   (start + 1 month) — the subscription must be at least 1 month.
 /// - Dates beyond 1 month are freely selectable.
+///
+/// The 1-month rule itself now lives in [DateRangeRules] and is shared
+/// with [NegotiationViewModel.proposeTumpangDateRange], so this picker and
+/// the server-side validation can't drift out of sync.
 class DateRangeProposalBottomSheet extends StatefulWidget {
   final String initialStartDate; // e.g. "2026-09-04"
   final String initialEndDate;   // e.g. "2026-10-04"
@@ -32,17 +38,8 @@ class _DateRangeProposalBottomSheetState extends State<DateRangeProposalBottomSh
     if (_startDate.isBefore(today)) _startDate = today;
 
     final parsedEnd = DateTime.tryParse(widget.initialEndDate);
-    final minEnd = _addOneMonth(_startDate);
+    final minEnd = DateRangeRules.minEndDate(_startDate);
     _endDate = (parsedEnd != null && !parsedEnd.isBefore(minEnd)) ? parsedEnd : minEnd;
-  }
-
-  /// Adds one calendar month, safely clamping the day (e.g. 31 Jan -> 28/29 Feb).
-  DateTime _addOneMonth(DateTime d) {
-    final year = d.month == 12 ? d.year + 1 : d.year;
-    final month = d.month == 12 ? 1 : d.month + 1;
-    final daysInTargetMonth = DateTime(year, month + 1, 0).day;
-    final day = d.day > daysInTargetMonth ? daysInTargetMonth : d.day;
-    return DateTime(year, month, day);
   }
 
   String _format(DateTime d) =>
@@ -50,7 +47,7 @@ class _DateRangeProposalBottomSheetState extends State<DateRangeProposalBottomSh
 
   ThemeData _yellowTheme(BuildContext context) => Theme.of(context).copyWith(
     colorScheme: const ColorScheme.light(
-      primary: Colors.amber,
+      primary: AppColors.primaryYellow,
       onPrimary: Colors.white,
       onSurface: Colors.black,
     ),
@@ -70,13 +67,13 @@ class _DateRangeProposalBottomSheetState extends State<DateRangeProposalBottomSh
       setState(() {
         _startDate = picked;
         // Auto-set end date to exactly 1 month out whenever start date changes.
-        _endDate = _addOneMonth(picked);
+        _endDate = DateRangeRules.addOneMonth(picked);
       });
     }
   }
 
   Future<void> _pickEndDate() async {
-    final minEnd = _addOneMonth(_startDate);
+    final minEnd = DateRangeRules.minEndDate(_startDate);
     final picked = await showDatePicker(
       context: context,
       initialDate: _endDate.isBefore(minEnd) ? minEnd : _endDate,
@@ -137,8 +134,8 @@ class _DateRangeProposalBottomSheetState extends State<DateRangeProposalBottomSh
             width: double.infinity,
             child: ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.amber,
-                foregroundColor: Colors.black,
+                backgroundColor: AppColors.primaryYellow,
+                foregroundColor: AppColors.black,
               ),
               onPressed: () {
                 Navigator.pop(context, {

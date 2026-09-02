@@ -4,7 +4,7 @@ import 'package:nak_tumpang/core/entities/tumpang_request.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/components/base_button.dart';
 import 'package:nak_tumpang/features/negotiation/view_models/negotiation_view_model.dart';
-import 'package:nak_tumpang/features/negotiation/UI/screens/view_request_screen.dart';
+import 'package:nak_tumpang/features/negotiation/UI/screens/negotiation_screen.dart';
 
 class RequestListCard extends StatelessWidget {
   final TumpangRequest request;

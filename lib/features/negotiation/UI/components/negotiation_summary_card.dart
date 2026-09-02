@@ -63,10 +63,35 @@ class NegotiationSummaryCard extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 16),
-                  BaseButton(
-                    text: 'View Tumpang Summary',
-                    onPressed: onProceedToSummary,
-                  ),
+                  // Only the passenger pays the deposit / proceeds into the
+                  // payment flow. Restored driver gate: previously this
+                  // button rendered unconditionally, which let a driver
+                  // navigate straight into TumpangSummaryScreen (the
+                  // payment screen) even though they can't be the one
+                  // paying. TumpangSummaryScreen also independently guards
+                  // against a driver reaching it (defense in depth, in
+                  // case some other navigation path leads there), so this
+                  // isn't the only thing standing between a driver and the
+                  // payment screen.
+                  if (!isDriver)
+                    BaseButton(
+                      text: 'View Tumpang Summary',
+                      onPressed: onProceedToSummary,
+                    )
+                  else
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Text(
+                        'Waiting for the passenger to pay the deposit.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.grey, fontSize: 13),
+                      ),
+                    ),
                 ] else ...[
                   Container(
                     width: double.infinity,

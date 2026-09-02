@@ -5,12 +5,13 @@ import 'package:nak_tumpang/core/entities/tumpang_request.dart';
 import 'package:nak_tumpang/features/negotiation/view_models/negotiation_view_model.dart';
 import 'package:nak_tumpang/features/negotiation/UI/components/propose_value_bottom_sheet.dart';
 import 'package:nak_tumpang/features/negotiation/UI/components/date_range_proposal_bottom_sheet.dart';
-import 'package:nak_tumpang/features/negotiation/UI/screens/location_picker_screen.dart';
+import 'package:nak_tumpang/features/negotiation/UI/screens/map_screen.dart';
 import 'package:nak_tumpang/features/negotiation/UI/components/time_proposal_bottom_sheet.dart';
 import 'package:nak_tumpang/features/negotiation/UI/components/negotiation_field_row.dart';
 import 'package:nak_tumpang/features/negotiation/UI/components/negotiation_summary_card.dart';
 import 'package:nak_tumpang/features/negotiation/UI/components/route_map_header.dart';
-import 'package:nak_tumpang/features/negotiation/UI/screens/tumpang_summary_screen.dart'; // Ensure this is imported
+import 'package:nak_tumpang/features/negotiation/UI/screens/tumpang_summary_screen.dart';
+import 'package:nak_tumpang/features/negotiation/utils/negotiation_error.dart';
 
 class ViewRequestScreen extends StatefulWidget {
   final String requestId;
@@ -25,7 +26,30 @@ class ViewRequestScreen extends StatefulWidget {
 }
 
 class _ViewRequestScreenState extends State<ViewRequestScreen> {
-  // ... (Keep the existing _openProposalSheet and _openDateRangePicker exactly as they are)[cite: 14] ...
+  /// Shared error-handling wrapper for every negotiation mutation fired
+  /// from this screen (propose/accept for each field, the atomic date
+  /// range, and reject). Every one of these already throws
+  /// [NegotiationException] with a safe, user-facing message on failure
+  /// (see NegotiationViewModel / runNegotiationAction) - this is just the
+  /// one place that catches it, shows it, and refreshes the UI, so each
+  /// button doesn't need its own try/catch.
+  Future<void> _runNegotiationAction(Future<void> Function() action) async {
+    try {
+      await action();
+    } on NegotiationException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: Colors.red),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text(kDefaultNegotiationErrorMessage), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() {});
+    }
+  }
 
   void _openProposalSheet(BuildContext context, NegotiationViewModel controller, String title, String currentValue, String fieldPrefix) {
     showModalBottomSheet(
@@ -39,10 +63,13 @@ class _ViewRequestScreenState extends State<ViewRequestScreen> {
           onSubmit: (newValue) async {
             final parsedFee = double.tryParse(newValue);
             if (fieldPrefix == 'fee' && parsedFee == null) {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter a valid fee amount.')));
-              return;
+              throw NegotiationException('Please enter a valid fee amount.');
             }
             final dynamic valueToSubmit = fieldPrefix == 'fee' ? parsedFee! : newValue;
+            // Errors here (NegotiationException or otherwise) propagate up
+            // through ProposeValueBottomSheet's own try/catch, which shows
+            // them inline in the still-open sheet and lets the user retry
+            // without losing what they typed.
             await controller.proposeNewTerm(requestId: widget.requestId, fieldPrefix: fieldPrefix, value: valueToSubmit);
           },
         );
@@ -54,7 +81,7 @@ class _ViewRequestScreenState extends State<ViewRequestScreen> {
     Navigator.push<Map<String, dynamic>>(
       context,
       MaterialPageRoute(
-        builder: (context) => LocationPickerScreen(
+        builder: (context) => MapScreen(
           title: title,
           initialName: currentName,
           initialLat: currentLat,
@@ -63,15 +90,14 @@ class _ViewRequestScreenState extends State<ViewRequestScreen> {
       ),
     ).then((result) async {
       if (result != null) {
-        await controller.proposeNewTerm(
+        await _runNegotiationAction(() => controller.proposeNewTerm(
           requestId: widget.requestId,
           fieldPrefix: fieldPrefix,
           value: result['name'],
           lat: result['lat'],
           lng: result['lng'],
-        );
+        ));
       }
-      if (mounted) setState(() {});
     });
   }
 
@@ -83,12 +109,17 @@ class _ViewRequestScreenState extends State<ViewRequestScreen> {
       builder: (context) => TimeProposalBottomSheet(initialTime: currentTime),
     ).then((result) async {
       if (result != null && result is String) {
-        await controller.proposeNewTerm(requestId: widget.requestId, fieldPrefix: 'pickup_time', value: result);
+        await _runNegotiationAction(() => controller.proposeNewTerm(requestId: widget.requestId, fieldPrefix: 'pickup_time', value: result));
       }
-      if (mounted) setState(() {});
     });
   }
 
+  /// Opens the combined Tumpang Dates picker and submits both dates as a
+  /// single atomic proposal (NegotiationViewModel.proposeTumpangDateRange
+  /// -> the `propose_tumpang_dates` RPC), instead of two separate
+  /// `proposeNewTerm('sub_start', ...)` / `proposeNewTerm('sub_end', ...)`
+  /// calls that could leave the request half-updated if the second call
+  /// never completed.
   void _openDateRangeProposalSheet(BuildContext context, NegotiationViewModel controller, String currentStart, String currentEnd) {
     showModalBottomSheet(
       context: context,
@@ -97,10 +128,12 @@ class _ViewRequestScreenState extends State<ViewRequestScreen> {
       builder: (context) => DateRangeProposalBottomSheet(initialStartDate: currentStart, initialEndDate: currentEnd),
     ).then((result) async {
       if (result != null && result is Map) {
-        await controller.proposeNewTerm(requestId: widget.requestId, fieldPrefix: 'sub_start', value: result['start']);
-        await controller.proposeNewTerm(requestId: widget.requestId, fieldPrefix: 'sub_end', value: result['end']);
+        await _runNegotiationAction(() => controller.proposeTumpangDateRange(
+          requestId: widget.requestId,
+          startDate: result['start'] as String,
+          endDate: result['end'] as String,
+        ));
       }
-      if (mounted) setState(() {});
     });
   }
 
@@ -124,9 +157,25 @@ class _ViewRequestScreenState extends State<ViewRequestScreen> {
       ),
     );
 
-    if (confirmed == true) {
+    if (confirmed != true) return;
+
+    // Deliberately not using _runNegotiationAction here: on success we need
+    // to pop this whole screen (the request no longer exists to view)
+    // rather than just refresh it, and on failure we must NOT pop - the
+    // user needs to stay on the screen and be able to retry.
+    try {
       await controller.rejectEntireRequest(widget.requestId);
       if (mounted) Navigator.pop(context);
+    } on NegotiationException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: Colors.red),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text(kDefaultNegotiationErrorMessage), backgroundColor: Colors.red),
+      );
     }
   }
 
@@ -196,7 +245,7 @@ class _ViewRequestScreenState extends State<ViewRequestScreen> {
                       isRequestedByMe: request.pickupLocation.requestedBy == controller.currentUserId,
                       topWidget: RouteMapHeader(label: request.pickupLocation.name, lat: request.pickupLocation.lat, lng: request.pickupLocation.lng),
                       onPropose: () => _openLocationPicker(context, controller, 'Pickup Location', 'pickup', request.pickupLocation.name, request.pickupLocation.lat, request.pickupLocation.lng),
-                      onAccept: () async { await controller.acceptTerm(widget.requestId, 'pickup'); if (mounted) setState(() {}); },
+                      onAccept: () => _runNegotiationAction(() => controller.acceptTerm(widget.requestId, 'pickup')),
                     ),
 
                     NegotiationFieldRow(
@@ -206,7 +255,7 @@ class _ViewRequestScreenState extends State<ViewRequestScreen> {
                       isRequestedByMe: request.dropoffLocation.requestedBy == controller.currentUserId,
                       topWidget: RouteMapHeader(label: request.dropoffLocation.name, lat: request.dropoffLocation.lat, lng: request.dropoffLocation.lng),
                       onPropose: () => _openLocationPicker(context, controller, 'Dropoff Location', 'dropoff', request.dropoffLocation.name, request.dropoffLocation.lat, request.dropoffLocation.lng),
-                      onAccept: () async { await controller.acceptTerm(widget.requestId, 'dropoff'); if (mounted) setState(() {}); },
+                      onAccept: () => _runNegotiationAction(() => controller.acceptTerm(widget.requestId, 'dropoff')),
                     ),
 
                     NegotiationFieldRow(
@@ -215,11 +264,7 @@ class _ViewRequestScreenState extends State<ViewRequestScreen> {
                       isAccepted: request.subscriptionStartDate.isAccepted && request.subscriptionEndDate.isAccepted,
                       isRequestedByMe: request.subscriptionStartDate.requestedBy == controller.currentUserId,
                       onPropose: () => _openDateRangeProposalSheet(context, controller, request.subscriptionStartDate.value, request.subscriptionEndDate.value),
-                      onAccept: () async {
-                        await controller.acceptTerm(widget.requestId, 'sub_start');
-                        await controller.acceptTerm(widget.requestId, 'sub_end');
-                        if (mounted) setState(() {});
-                      },
+                      onAccept: () => _runNegotiationAction(() => controller.acceptTumpangDateRange(widget.requestId)),
                     ),
 
                     NegotiationFieldRow(
@@ -228,7 +273,7 @@ class _ViewRequestScreenState extends State<ViewRequestScreen> {
                       isAccepted: request.pickupTime.isAccepted,
                       isRequestedByMe: request.pickupTime.requestedBy == controller.currentUserId,
                       onPropose: () => _openTimeProposalSheet(context, controller, request.pickupTime.value),
-                      onAccept: () async { await controller.acceptTerm(widget.requestId, 'pickup_time'); if (mounted) setState(() {}); },
+                      onAccept: () => _runNegotiationAction(() => controller.acceptTerm(widget.requestId, 'pickup_time')),
                     ),
 
                     NegotiationFieldRow(
@@ -250,7 +295,7 @@ class _ViewRequestScreenState extends State<ViewRequestScreen> {
                         ],
                       ),
                       onPropose: () => _openProposalSheet(context, controller, 'Fee (per day)', request.fee.value.toStringAsFixed(2), 'fee'),
-                      onAccept: () async { await controller.acceptTerm(widget.requestId, 'fee'); if (mounted) setState(() {}); },
+                      onAccept: () => _runNegotiationAction(() => controller.acceptTerm(widget.requestId, 'fee')),
                     ),
 
                     NegotiationSummaryCard(
