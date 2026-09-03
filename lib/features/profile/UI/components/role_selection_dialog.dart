@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 
-/// Shown right after an account is created — asks the new user whether
-/// they'll be using Nak Tumpang as a Passenger or a Driver. Not
-/// dismissible by tapping outside; a role must be chosen to continue.
+/// Shown right before the registration form — asks the new user whether
+/// they'll be using Nak Tumpang as a Passenger or a Driver, so the form
+/// after this can show the right fields.
 class RoleSelectionDialog extends StatelessWidget {
   const RoleSelectionDialog({super.key});
 
@@ -29,7 +29,7 @@ class RoleSelectionDialog extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                'Account created!',
+                'How will you be using Nak Tumpang?',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
@@ -37,12 +37,6 @@ class RoleSelectionDialog extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 6),
-              Text(
-                'How will you be using Nak Tumpang?',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: AppColors.greyText, fontSize: 13),
-              ),
-              const SizedBox(height: 24),
               _RoleOption(
                 icon: Icons.directions_walk_rounded,
                 label: 'Passenger',

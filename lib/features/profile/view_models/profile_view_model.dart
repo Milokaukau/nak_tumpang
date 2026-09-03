@@ -40,7 +40,6 @@ class ProfileViewModel extends ChangeNotifier {
   final currentPasswordController = TextEditingController();
   final newPasswordController = TextEditingController();
   final confirmPasswordController = TextEditingController();
-  final icController = TextEditingController();
   final phoneFocusNode = FocusNode();
 
   bool obscureCurrentPassword = true;
@@ -60,10 +59,8 @@ class ProfileViewModel extends ChangeNotifier {
   String _role = 'passenger';
   String? _originalRole; // role as loaded from the DB; used to lock edits
   String? _email;
-  String? _icNumber; // set once at registration, shown read-only here
 
   String get role => _role;
-  String? get icNumber => _icNumber;
 
   Uint8List? avatarBytes;
   String? avatarUrl;
@@ -78,6 +75,12 @@ class ProfileViewModel extends ChangeNotifier {
   bool isSaving = false;
   String? errorMessage;
   String? successMessage;
+
+  // Profile/Route tab (drivers only) — 'profile' or 'route'.
+  String activeTab = 'profile';
+  List<Map<String, dynamic>> driverTrips = [];
+  bool isLoadingRoutes = false;
+  bool _routesLoaded = false;
 
   bool _autoValidate = false;
   String? nameError;
@@ -98,15 +101,7 @@ class ProfileViewModel extends ChangeNotifier {
     currentPasswordController.dispose();
     newPasswordController.dispose();
     confirmPasswordController.dispose();
-    icController.dispose();
     super.dispose();
-  }
-
-  String _formatIC(String? raw) {
-    if (raw == null || raw.isEmpty) return '';
-    final digits = raw.replaceAll(RegExp(r'[^0-9]'), '');
-    if (digits.length != 12) return digits; // fallback, don't crash on bad data
-    return '${digits.substring(0, 6)}-${digits.substring(6, 8)}-${digits.substring(8, 12)}';
   }
 
   /// Loads the signed-in user's profile row. Doesn't show the first-time
@@ -129,26 +124,33 @@ class ProfileViewModel extends ChangeNotifier {
         phoneController.text = Validators.localDigitsFromStored(meta?['phone'] as String?);
         _role = meta?['role'] as String? ?? 'passenger';
         _originalRole = _role;
-        _icNumber = meta?['ic_number'] as String?;
       } else {
         nameController.text = data['name'] ?? '';
         phoneController.text = Validators.localDigitsFromStored(data['phone']);
-        licenseNumberController.text = data['license_number'] ?? '';
         _role = data['role'] ?? 'passenger';
         _originalRole = data['role'] as String?;
         avatarUrl = data['avatar_url'] as String?;
-        _licensePath = data['license_url'] as String?;
+      }
+      _email = data?['email'] as String? ?? supabase.auth.currentUser?.email;
+      emailController.text = _email ?? '';
+
+      // License number/photo live on driver_profiles, not users — only
+      // drivers have a row there, so only look it up for drivers.
+      if (_role == 'driver') {
+        final driverData = await supabase
+            .from('driver_profiles')
+            .select('license_number, license_url')
+            .eq('user_id', userId)
+            .maybeSingle();
+        licenseNumberController.text = driverData?['license_number'] as String? ?? '';
+        _licensePath = driverData?['license_url'] as String?;
         if (_licensePath != null) {
           licenseUrl = await _storageService.getSignedUrl(
             bucket: 'driver-licenses',
             path: _licensePath!,
           );
         }
-        _icNumber = data['ic_number'] as String? ?? meta?['ic_number'] as String?;
       }
-      icController.text = _formatIC(_icNumber);
-      _email = data?['email'] as String? ?? supabase.auth.currentUser?.email;
-      emailController.text = _email ?? '';
     } finally {
       isLoading = false;
       notifyListeners();
@@ -158,6 +160,36 @@ class ProfileViewModel extends ChangeNotifier {
   void setRole(String role) {
     _role = role;
     notifyListeners();
+  }
+
+  /// Switches between the 'profile' and 'route' tabs (drivers only).
+  /// Lazily loads the driver's saved routes the first time 'route' is
+  /// opened, so passengers/first-load never pay for a query they won't
+  /// use.
+  Future<void> setTab(String tab) async {
+    activeTab = tab;
+    notifyListeners();
+    if (tab == 'route' && !_routesLoaded) {
+      await loadDriverRoutes();
+    }
+  }
+
+  Future<void> loadDriverRoutes() async {
+    final userId = supabase.auth.currentUser?.id;
+    if (userId == null) return;
+
+    isLoadingRoutes = true;
+    notifyListeners();
+    try {
+      final rows = await supabase.from('driver_trips').select().eq('user_id', userId);
+      driverTrips = List<Map<String, dynamic>>.from(rows);
+      _routesLoaded = true;
+    } catch (e) {
+      debugPrint('Failed to load driver routes: $e');
+    } finally {
+      isLoadingRoutes = false;
+      notifyListeners();
+    }
   }
 
   void toggleChangePassword() {
@@ -360,13 +392,22 @@ class ProfileViewModel extends ChangeNotifier {
         'name': nameController.text.trim(),
         'phone': Validators.toStoredPhone(phoneController.text),
         'role': roleToSave,
-        if (_icNumber != null) 'ic_number': _icNumber,
         'avatar_url': avatarUrl,
         'email': _email ?? newEmail,
-        'license_number': roleToSave == 'driver' ? licenseNumberController.text.trim() : null,
-        'license_url': roleToSave == 'driver' ? _licensePath : null,
         'updated_at': DateTime.now().toIso8601String(),
       });
+
+      // License number/photo live on driver_profiles now. Only touch
+      // those two columns here — never total_earnings/available_balance/
+      // total_withdrawn, since this upsert must not reset a driver's
+      // wallet back to zero on an unrelated profile edit.
+      if (roleToSave == 'driver') {
+        await supabase.from('driver_profiles').upsert({
+          'user_id': userId,
+          'license_number': licenseNumberController.text.trim(),
+          'license_url': _licensePath,
+        });
+      }
 
       // Password fields are never pre-filled from stored data, so clear
       // them (and collapse the section) after a successful save rather

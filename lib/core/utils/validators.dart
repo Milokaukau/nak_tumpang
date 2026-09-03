@@ -18,13 +18,6 @@ class Validators {
     return null;
   }
 
-  static String? ic(String? v) {
-    if (v == null || v.trim().isEmpty) return 'IC number is required';
-    final digitsOnly = v.replaceAll(RegExp(r'[^0-9]'), '');
-    if (digitsOnly.length != 12) return 'Enter a valid 12-digit IC number';
-    return null;
-  }
-
   /// [v] is the local digits-only phone text (e.g. "123456789", no leading
   /// '0') as typed into the field next to the fixed '+60' prefix.
   static String? phoneLocal(String? v) {
@@ -91,15 +84,5 @@ class Validators {
     final cleaned = localDigits.trim().replaceAll(RegExp(r'[\s-]'), '');
     if (cleaned.isEmpty) return cleaned;
     return '+60$cleaned';
-  }
-
-  /// Formats a 12-digit IC number as "YYMMDD-PB-###G" for display,
-  /// matching the live-typing format used on the register screen.
-  /// Returns the input unchanged if it isn't exactly 12 digits.
-  static String formatICForDisplay(String? digitsOnly) {
-    if (digitsOnly == null) return '';
-    final digits = digitsOnly.replaceAll(RegExp(r'[^0-9]'), '');
-    if (digits.length != 12) return digitsOnly;
-    return '${digits.substring(0, 6)}-${digits.substring(6, 8)}-${digits.substring(8, 12)}';
   }
 }

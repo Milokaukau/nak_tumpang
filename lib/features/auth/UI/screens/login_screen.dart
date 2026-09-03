@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:nak_tumpang/features/home/UI/screens/home_screen.dart';
+import 'package:nak_tumpang/features/profile/UI/components/role_selection_dialog.dart';
 import 'package:nak_tumpang/features/profile/UI/screens/register_screen.dart';
 import 'package:nak_tumpang/features/auth/view_models/login_view_model.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
@@ -35,9 +36,11 @@ class _LoginViewState extends State<_LoginView> {
     );
   }
 
-  void _startRegister() {
+  void _startRegister() async {
+    final role = await RoleSelectionDialog.show(context);
+    if (!mounted) return;
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const RegisterScreen()),
+      MaterialPageRoute(builder: (_) => RegisterScreen(initialRole: role)),
     );
   }
 
