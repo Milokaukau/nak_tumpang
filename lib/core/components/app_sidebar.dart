@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
+import 'package:nak_tumpang/features/payout/UI/screens/driver_balance_screen.dart';
 import 'package:nak_tumpang/features/profile/UI/screens/profile_screen.dart';
 import 'package:nak_tumpang/features/auth/UI/screens/login_screen.dart';
 
@@ -131,7 +132,7 @@ class AppSidebar extends StatelessWidget {
         nextScreen = const ProfileScreen(); // Replace with actual screen
         break;
       case 3:
-        nextScreen = const ProfileScreen(); // Replace with actual screen
+        nextScreen = const DriverBalanceScreen( ); // Replace with actual screen
         break;
       default:
         return;
