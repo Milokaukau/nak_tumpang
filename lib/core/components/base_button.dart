@@ -12,6 +12,11 @@ class BaseButton extends StatelessWidget {
   final Color? foregroundColor;
   final Color? borderColor;
 
+  /// Shows a spinner in place of [text] and disables the button. Lets
+  /// every screen with an async action (login, register, save, ...) rely
+  /// on one loading affordance instead of hand-rolling its own.
+  final bool isLoading;
+
   const BaseButton({
     super.key,
     required this.text,
@@ -23,6 +28,7 @@ class BaseButton extends StatelessWidget {
     this.backgroundColor,
     this.foregroundColor,
     this.borderColor,
+    this.isLoading = false,
   });
 
   @override
@@ -30,8 +36,18 @@ class BaseButton extends StatelessWidget {
     final style = textStyle ?? const TextStyle(fontWeight: FontWeight.bold, fontSize: 14);
     final shape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(8));
 
+    final spinnerColor = isOutlined
+        ? (foregroundColor ?? AppColors.black)
+        : (foregroundColor ?? Colors.white);
+
     // Extracted shared Text widget to prevent repeating code
-    final buttonText = Text(
+    final buttonText = isLoading
+        ? SizedBox(
+      height: 20,
+      width: 20,
+      child: CircularProgressIndicator(strokeWidth: 2, color: spinnerColor),
+    )
+        : Text(
       text,
       style: style,
       textAlign: TextAlign.center,
@@ -39,11 +55,13 @@ class BaseButton extends StatelessWidget {
       overflow: TextOverflow.ellipsis,
     );
 
+    final effectiveOnPressed = isLoading ? null : onPressed;
+
     Widget button;
 
     if (isOutlined) {
       button = OutlinedButton(
-        onPressed: onPressed,
+        onPressed: effectiveOnPressed,
         style: OutlinedButton.styleFrom(
           foregroundColor: foregroundColor ?? AppColors.black,
           side: BorderSide(color: borderColor ?? AppColors.greyBorder),
@@ -54,7 +72,7 @@ class BaseButton extends StatelessWidget {
       );
     } else {
       button = ElevatedButton(
-        onPressed: onPressed,
+        onPressed: effectiveOnPressed,
         style: ElevatedButton.styleFrom(
           backgroundColor: backgroundColor ?? AppColors.primaryYellow,
           foregroundColor: foregroundColor ?? AppColors.black,

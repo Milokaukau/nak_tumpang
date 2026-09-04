@@ -7,9 +7,23 @@ class AppTheme {
     return ThemeData(
       colorScheme: ColorScheme.fromSeed(seedColor: AppColors.primaryYellow),
       scaffoldBackgroundColor: AppColors.white,
-      // Apply Poppins globally
+      // full poppins
       textTheme: GoogleFonts.poppinsTextTheme(),
       useMaterial3: true,
+      // every top bar is yellow
+      appBarTheme: AppBarTheme(
+        backgroundColor: AppColors.primaryYellow,
+        foregroundColor: AppColors.white,
+        elevation: 0,
+        centerTitle: false,
+        iconTheme: const IconThemeData(color: AppColors.white),
+        actionsIconTheme: const IconThemeData(color: AppColors.white),
+        titleTextStyle: GoogleFonts.poppins(
+          color: AppColors.white,
+          fontSize: 18,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
     );
   }
 }
