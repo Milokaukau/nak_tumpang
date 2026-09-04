@@ -11,13 +11,22 @@ class RequestListScreen extends StatefulWidget {
   State<RequestListScreen> createState() => _RequestListScreenState();
 }
 
-class _RequestListScreenState extends State<RequestListScreen> {
+class _RequestListScreenState extends State<RequestListScreen> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<NegotiationViewModel>().fetchRequests();
     });
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   @override
@@ -31,6 +40,17 @@ class _RequestListScreenState extends State<RequestListScreen> {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: AppColors.black),
           onPressed: () => Navigator.maybePop(context),
+        ),
+        bottom: TabBar(
+          controller: _tabController,
+          labelColor: AppColors.black,
+          indicatorColor: AppColors.primaryYellow,
+          indicatorWeight: 3.0,
+          unselectedLabelColor: Colors.grey,
+          tabs: const [
+            Tab(text: 'Pending Requests'),
+            Tab(text: 'Completed'),
+          ],
         ),
       ),
       body: Consumer<NegotiationViewModel>(
@@ -63,32 +83,57 @@ class _RequestListScreenState extends State<RequestListScreen> {
             );
           }
 
-          if (vm.pendingRequests.isEmpty) {
-            return RefreshIndicator(
-              onRefresh: () => vm.refreshRequests(),
-              child: Stack(
-                children: [
-                  ListView(physics: const AlwaysScrollableScrollPhysics()),
-                  const Center(
-                    child: Text('No pending requests found.\nPull down to refresh.', textAlign: TextAlign.center),
-                  ),
-                ],
+          return TabBarView(
+            controller: _tabController,
+            children: [
+              // Tab 1: Pending
+              RefreshIndicator(
+                onRefresh: () => vm.refreshRequests(),
+                child: vm.pendingRequests.isEmpty
+                    ? Stack(
+                  children: [
+                    ListView(physics: const AlwaysScrollableScrollPhysics()),
+                    const Center(
+                      child: Text('No pending requests found.\nPull down to refresh.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
+                    ),
+                  ],
+                )
+                    : ListView.builder(
+                  padding: const EdgeInsets.all(16.0),
+                  itemCount: vm.pendingRequests.length,
+                  itemBuilder: (context, index) {
+                    return RequestListCard(
+                      key: ValueKey(vm.pendingRequests[index].id),
+                      request: vm.pendingRequests[index],
+                    );
+                  },
+                ),
               ),
-            );
-          }
 
-          return RefreshIndicator(
-            onRefresh: () => vm.refreshRequests(),
-            child: ListView.builder(
-              padding: const EdgeInsets.all(16.0),
-              itemCount: vm.pendingRequests.length,
-              itemBuilder: (context, index) {
-                return RequestListCard(
-                  key: ValueKey(vm.pendingRequests[index].id),
-                  request: vm.pendingRequests[index],
-                );
-              },
-            ),
+              // Tab 2: Completed
+              RefreshIndicator(
+                onRefresh: () => vm.refreshRequests(),
+                child: vm.completedRequests.isEmpty
+                    ? Stack(
+                  children: [
+                    ListView(physics: const AlwaysScrollableScrollPhysics()),
+                    const Center(
+                      child: Text('No completed requests found.\nPull down to refresh.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
+                    ),
+                  ],
+                )
+                    : ListView.builder(
+                  padding: const EdgeInsets.all(16.0),
+                  itemCount: vm.completedRequests.length,
+                  itemBuilder: (context, index) {
+                    return RequestListCard(
+                      key: ValueKey(vm.completedRequests[index].id),
+                      request: vm.completedRequests[index],
+                    );
+                  },
+                ),
+              ),
+            ],
           );
         },
       ),

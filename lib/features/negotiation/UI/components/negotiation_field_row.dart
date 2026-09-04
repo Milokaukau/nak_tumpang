@@ -6,6 +6,7 @@ class NegotiationFieldRow extends StatelessWidget {
   final String value;
   final bool isAccepted;
   final bool isRequestedByMe;
+  final bool isReadOnly;
   final VoidCallback onAccept;
   final VoidCallback onPropose;
   final Widget? topWidget;
@@ -18,13 +19,48 @@ class NegotiationFieldRow extends StatelessWidget {
     required this.isRequestedByMe,
     required this.onAccept,
     required this.onPropose,
+    this.isReadOnly = false,
     this.topWidget,
   });
 
   @override
   Widget build(BuildContext context) {
-    // Collapsed one-line row for fields that are already settled — keeps the
-    // screen short when most terms have already been accepted.
+    if (isReadOnly) {
+      return Container(
+        width: double.infinity,
+        margin: const EdgeInsets.only(bottom: 10.0),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: AppColors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppColors.greyBorder),
+        ),
+        child: Column(
+          children: [
+            if (topWidget != null) ...[
+              topWidget!,
+              const SizedBox(height: 8),
+            ],
+            Row(
+              children: [
+                const Icon(Icons.lock, color: Colors.grey, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title, style: const TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.w600)),
+                      Text(value, style: const TextStyle(fontSize: 14, color: AppColors.black, fontWeight: FontWeight.w500)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+    }
+
     if (isAccepted) {
       return Container(
         width: double.infinity,
@@ -68,7 +104,6 @@ class NegotiationFieldRow extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Yellow Header
           Container(
             padding: const EdgeInsets.symmetric(vertical: 10),
             decoration: const BoxDecoration(
@@ -81,8 +116,6 @@ class NegotiationFieldRow extends StatelessWidget {
               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppColors.black),
             ),
           ),
-
-          // Content Body
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: Column(
@@ -95,7 +128,6 @@ class NegotiationFieldRow extends StatelessWidget {
                   const SizedBox(height: 12),
                 ],
 
-                // Conditional UI based on Negotiation State
                 if (isRequestedByMe) ...[
                   const Text('(Waiting for Acceptance)', style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 12),

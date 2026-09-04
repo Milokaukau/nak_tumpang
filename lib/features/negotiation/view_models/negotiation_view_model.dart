@@ -16,6 +16,7 @@ class NegotiationViewModel extends ChangeNotifier {
   bool isLoading = false;
   String? errorMessage;
   List<TumpangRequest> pendingRequests = [];
+  List<TumpangRequest> completedRequests = [];
 
   final Map<String, Map<String, dynamic>> _userCache = {};
 
@@ -80,6 +81,7 @@ class NegotiationViewModel extends ChangeNotifier {
 
       if (tripIds.isEmpty) {
         pendingRequests = [];
+        completedRequests = [];
         isLoading = false;
         notifyListeners();
         return;
@@ -91,9 +93,9 @@ class NegotiationViewModel extends ChangeNotifier {
           .from('tumpang_request')
           .select()
           .inFilter(tripIdColumn, tripIds)
-          .or('status.eq.pending,status.eq.negotiating');
+          .or('status.eq.pending,status.eq.negotiating,status.eq.completed');
 
-      pendingRequests = rows.map((row) {
+      final allRequests = rows.map((row) {
         try {
           return TumpangRequest.fromJson(row);
         } catch (err, stack) {
@@ -101,6 +103,9 @@ class NegotiationViewModel extends ChangeNotifier {
           rethrow;
         }
       }).toList();
+
+      pendingRequests = allRequests.where((r) => r.status != 'completed').toList();
+      completedRequests = allRequests.where((r) => r.status == 'completed').toList();
 
       errorMessage = null;
     } catch (e, stack) {
@@ -167,14 +172,6 @@ class NegotiationViewModel extends ChangeNotifier {
     });
   }
 
-  /// Atomically proposes both the Tumpang start and end date as a single
-  /// combined `.update()` call (see
-  /// NegotiationSupabaseService.proposeTumpangDates - one SQL UPDATE
-  /// statement, no RPC needed). Validates the 1-month-minimum rule via
-  /// [DateRangeRules] before it ever reaches the network.
-  ///
-  /// [startDate] / [endDate] are "YYYY-MM-DD" strings, matching what the
-  /// date picker already produces.
   Future<void> proposeTumpangDateRange({
     required String requestId,
     required String startDate,
@@ -204,7 +201,6 @@ class NegotiationViewModel extends ChangeNotifier {
     });
   }
 
-  /// Atomically accepts both the Tumpang start and end date.
   Future<void> acceptTumpangDateRange(String requestId) {
     return runNegotiationAction(() async {
       await _service.acceptTumpangDates(requestId: requestId);
@@ -213,12 +209,47 @@ class NegotiationViewModel extends ChangeNotifier {
   }
 
   Future<void> rejectEntireRequest(String requestId) {
-    return runNegotiationAction(
-          () async {
+    return runNegotiationAction(() async {
         await _service.rejectRequest(requestId);
         await refreshRequests();
       },
       fallbackMessage: "Couldn't reject the request. Please check your connection and try again.",
     );
+  }
+
+  // 1. Extend Subscription (Continue)
+  Future<void> extendSubscription({
+    required String subscriptionId,
+    required DateTime newEndDate,
+    required double monthlyFee,
+  }) async {
+    await _supabase.from('tumpang_subscription').update({
+      'subscription_end_date': newEndDate.toIso8601String().split('T').first,
+      'status': 'active',
+    }).eq('id', subscriptionId);
+
+    // Generate invoice for the new month
+    final paymentId = 'pay_${DateTime.now().millisecondsSinceEpoch}';
+    await _supabase.from('payments').insert({
+      'id': paymentId,
+      'tumpang_subscription_id': subscriptionId,
+      'month': newEndDate.month,
+      'year': newEndDate.year,
+      'due_date': DateTime.now().toIso8601String(),
+      'paid_at': null,
+      'amount': monthlyFee,
+    });
+
+    notifyListeners();
+  }
+
+  // 2. End Subscription & Mark Deposit for Refund
+  Future<void> endSubscription(String subscriptionId) async {
+    await _supabase.from('tumpang_subscription').update({
+      'status': 'completed',
+      'deposit_status': 'refunded',
+    }).eq('id', subscriptionId);
+
+    notifyListeners();
   }
 }

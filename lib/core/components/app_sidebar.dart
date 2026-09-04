@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
+import 'package:nak_tumpang/features/payout/UI/screens/driver_balance_screen.dart';
+import 'package:nak_tumpang/features/payment/UI/screens/payment_screen.dart';
+import 'package:nak_tumpang/features/negotiation/UI/screens/request_list_screen.dart';
 import 'package:nak_tumpang/features/profile/UI/screens/profile_screen.dart';
 import 'package:nak_tumpang/features/auth/UI/screens/login_screen.dart';
-import 'package:nak_tumpang/features/negotiation/UI/screens/request_list_screen.dart';
-import 'package:nak_tumpang/features/payment/UI/screens/payment_screen.dart';
 
 class HamburgerButton extends StatelessWidget {
   const HamburgerButton({super.key});
@@ -38,6 +38,8 @@ class AppSidebar extends StatelessWidget {
     this.profileImageUrl,
     this.selectedIndex = -1,
   });
+
+  bool get _isDriver => userRole.toLowerCase().trim().contains('driver');
 
   @override
   Widget build(BuildContext context) {
@@ -80,15 +82,17 @@ class AppSidebar extends StatelessWidget {
             const Divider(color: AppColors.greyBorder, thickness: 1),
             const SizedBox(height: 20),
 
-            // Navigation Items
             _buildMenuItem(context, index: 0, title: 'View Profile'),
             _buildMenuItem(context, index: 1, title: 'View Subscriptions'),
             _buildMenuItem(context, index: 2, title: 'View Requests'),
-            _buildMenuItem(context, index: 3, title: 'Payment / My Earnings'),
+            _buildMenuItem(
+              context,
+              index: 3,
+              title: _isDriver ? 'My Earnings' : 'Payment',
+            ),
 
-            const SizedBox(height: 8), // Slight extra gap before Sign Out
+            const SizedBox(height: 8),
 
-            // Sign Out Option (using the reusable component)
             _buildMenuItem(
               context,
               index: 4,
@@ -101,24 +105,17 @@ class AppSidebar extends StatelessWidget {
     );
   }
 
-  // Handle routing internally
-  void _handleItemTap(BuildContext context, int index) async { // <-- Add 'async' here
+  void _handleItemTap(BuildContext context, int index) {
     Navigator.pop(context);
 
     if (index == selectedIndex) return;
 
     if (index == 4) {
-      // 1. Actually kill the Supabase session
-      await Supabase.instance.client.auth.signOut();
-
-      // 2. Route to Login and DESTROY the navigation history
-      if (context.mounted) {
-        Navigator.pushAndRemoveUntil(
-          context,
-          MaterialPageRoute(builder: (context) => const LoginScreen()),
-              (route) => false,
-        );
-      }
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (context) => const LoginScreen()),
+            (route) => false,
+      );
       return;
     }
 
@@ -128,16 +125,13 @@ class AppSidebar extends StatelessWidget {
         nextScreen = const ProfileScreen();
         break;
       case 1:
-      // Updates routing to the "My Tumpangs" / Subscriptions List
-      // Replace MyTumpangsScreen() with whatever you named the file for Figma Page 11
-        nextScreen = const Scaffold(body: Center(child: Text('My Tumpangs Screen'))); // const MyTumpangsScreen();
+        nextScreen = const ProfileScreen();
         break;
       case 2:
-      // Updates routing to the Request List we built
         nextScreen = const RequestListScreen();
         break;
       case 3:
-        nextScreen = const PaymentScreen(); // Keep as placeholder for now
+        nextScreen = _isDriver ? const DriverBalanceScreen() : const PaymentScreen();
         break;
       default:
         return;
@@ -149,7 +143,6 @@ class AppSidebar extends StatelessWidget {
     );
   }
 
-  // Added optional textColor parameter
   Widget _buildMenuItem(BuildContext context, {required int index, required String title, Color? textColor}) {
     final isSelected = selectedIndex == index;
 
@@ -169,7 +162,6 @@ class AppSidebar extends StatelessWidget {
               style: TextStyle(
                 fontSize: 15,
                 fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                // Use the custom color if provided, otherwise default to black
                 color: textColor ?? AppColors.black,
               ),
             ),

@@ -7,20 +7,40 @@ class NegotiationSummaryCard extends StatelessWidget {
   final TumpangRequest request;
   final bool isFullyAgreed;
   final bool isDriver;
+  final bool isReadOnly;
   final VoidCallback onReject;
   final VoidCallback onProceedToSummary;
+
+  // Lifecycle Callbacks
+  final VoidCallback? onRenew;
+  final VoidCallback? onRenegotiate;
+  final VoidCallback? onCancelSubscription;
 
   const NegotiationSummaryCard({
     super.key,
     required this.request,
     required this.isFullyAgreed,
     required this.isDriver,
+    this.isReadOnly = false,
     required this.onReject,
     required this.onProceedToSummary,
+    this.onRenew,
+    this.onRenegotiate,
+    this.onCancelSubscription,
   });
 
   @override
   Widget build(BuildContext context) {
+    final endDate = DateTime.tryParse(request.subscriptionEndDate.value) ?? DateTime.now();
+    final now = DateTime.now();
+    // Normalize to midnight for accurate day difference
+    final endDateOnly = DateTime(endDate.year, endDate.month, endDate.day);
+    final nowOnly = DateTime(now.year, now.month, now.day);
+
+    final isExpired = nowOnly.isAfter(endDateOnly);
+    final daysUntilExpiry = endDateOnly.difference(nowOnly).inDays;
+    final isExpiringSoon = daysUntilExpiry >= 0 && daysUntilExpiry <= 7;
+
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
@@ -33,23 +53,91 @@ class NegotiationSummaryCard extends StatelessWidget {
         children: [
           Container(
             padding: const EdgeInsets.symmetric(vertical: 10),
-            decoration: const BoxDecoration(
-              color: AppColors.primaryYellow,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(11)),
+            decoration: BoxDecoration(
+              color: isReadOnly ? Colors.green.shade100 : AppColors.primaryYellow,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(11)),
             ),
-            child: const Text(
-              'Agreement Status',
+            child: Text(
+              isReadOnly ? 'Agreement Finalized & Paid' : 'Agreement Status',
               textAlign: TextAlign.center,
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppColors.black),
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+                color: isReadOnly ? Colors.green.shade800 : AppColors.black,
+              ),
             ),
           ),
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Button Logic Based on State
-                if (isFullyAgreed) ...[
+                if (isReadOnly) ...[
+                  if (isExpired || isExpiringSoon) ...[
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.amber.shade300),
+                      ),
+                      child: Text(
+                        isExpired
+                            ? 'This subscription cycle ended on ${request.subscriptionEndDate.value}.'
+                            : 'Subscription ends soon on ${request.subscriptionEndDate.value}.',
+                        style: TextStyle(color: Colors.amber.shade900, fontWeight: FontWeight.bold, fontSize: 13),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    ElevatedButton.icon(
+                      icon: const Icon(Icons.autorenew, color: AppColors.black),
+                      label: const Text('Continue Subscription', style: TextStyle(fontWeight: FontWeight.bold)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primaryYellow,
+                        foregroundColor: AppColors.black,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
+                        elevation: 0,
+                      ),
+                      onPressed: onRenew,
+                    ),
+                    const SizedBox(height: 10),
+
+                    OutlinedButton.icon(
+                      icon: const Icon(Icons.edit_note, color: AppColors.black),
+                      label: const Text('Edit / Propose New Terms'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.black,
+                        side: const BorderSide(color: AppColors.greyBorder),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
+                      ),
+                      onPressed: onRenegotiate,
+                    ),
+                    const SizedBox(height: 6),
+
+                    TextButton(
+                      onPressed: onCancelSubscription,
+                      style: TextButton.styleFrom(foregroundColor: Colors.red),
+                      child: const Text('Cancel & Refund Deposit', style: TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                  ] else ...[
+                    const Row(
+                      children: [
+                        Icon(Icons.verified, color: Colors.green, size: 20),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Payment complete. Route and terms are locked.',
+                            style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ] else if (isFullyAgreed) ...[
                   const Row(
                     children: [
                       Icon(Icons.check_circle, color: Colors.green, size: 20),
@@ -63,16 +151,6 @@ class NegotiationSummaryCard extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 16),
-                  // Only the passenger pays the deposit / proceeds into the
-                  // payment flow. Restored driver gate: previously this
-                  // button rendered unconditionally, which let a driver
-                  // navigate straight into TumpangSummaryScreen (the
-                  // payment screen) even though they can't be the one
-                  // paying. TumpangSummaryScreen also independently guards
-                  // against a driver reaching it (defense in depth, in
-                  // case some other navigation path leads there), so this
-                  // isn't the only thing standing between a driver and the
-                  // payment screen.
                   if (!isDriver)
                     BaseButton(
                       text: 'View Tumpang Summary',
@@ -109,8 +187,7 @@ class NegotiationSummaryCard extends StatelessWidget {
                   const SizedBox(height: 12),
                 ],
 
-                // Only the driver can reject the entire request
-                if (isDriver) ...[
+                if (isDriver && !isReadOnly) ...[
                   const SizedBox(height: 4),
                   SizedBox(
                     width: double.infinity,

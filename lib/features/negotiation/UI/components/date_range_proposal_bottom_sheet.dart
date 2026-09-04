@@ -33,13 +33,27 @@ class _DateRangeProposalBottomSheetState extends State<DateRangeProposalBottomSh
   @override
   void initState() {
     super.initState();
-    final today = DateTime.now();
+    final now = DateTime.now();
+    // Normalize today to midnight to avoid hours/minutes causing false "past date" flags
+    final today = DateTime(now.year, now.month, now.day);
+
     _startDate = DateTime.tryParse(widget.initialStartDate) ?? today;
-    if (_startDate.isBefore(today)) _startDate = today;
+    // Strip any potential time components from the parsed initial date
+    _startDate = DateTime(_startDate.year, _startDate.month, _startDate.day);
+
+    if (_startDate.isBefore(today)) {
+      _startDate = today;
+    }
 
     final parsedEnd = DateTime.tryParse(widget.initialEndDate);
     final minEnd = DateRangeRules.minEndDate(_startDate);
-    _endDate = (parsedEnd != null && !parsedEnd.isBefore(minEnd)) ? parsedEnd : minEnd;
+
+    if (parsedEnd != null) {
+      final normalizedEnd = DateTime(parsedEnd.year, parsedEnd.month, parsedEnd.day);
+      _endDate = normalizedEnd.isBefore(minEnd) ? minEnd : normalizedEnd;
+    } else {
+      _endDate = minEnd;
+    }
   }
 
   String _format(DateTime d) =>
@@ -54,11 +68,13 @@ class _DateRangeProposalBottomSheetState extends State<DateRangeProposalBottomSh
   );
 
   Future<void> _pickStartDate() async {
-    final today = DateTime.now();
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
     final picked = await showDatePicker(
       context: context,
       initialDate: _startDate.isBefore(today) ? today : _startDate,
-      firstDate: today,
+      firstDate: today, // Hard locks the calendar to prevent picking past dates
       lastDate: today.add(const Duration(days: 730)),
       builder: (context, child) => Theme(data: _yellowTheme(context), child: child!),
     );

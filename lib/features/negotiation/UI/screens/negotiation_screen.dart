@@ -198,6 +198,7 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
           if (request == null) return const Center(child: Text('Request no longer exists.'));
 
           final targetTripId = isDriver ? request.passengerTripId : request.driverTripId;
+          final bool isCompleted = request.status == 'completed';
 
           final bool isFullyAgreed = request.fee.isAccepted &&
               request.pickupTime.isAccepted &&
@@ -235,6 +236,7 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                       value: request.pickupLocation.name,
                       isAccepted: request.pickupLocation.isAccepted,
                       isRequestedByMe: request.pickupLocation.requestedBy == controller.currentUserId,
+                      isReadOnly: isCompleted,
                       topWidget: RouteMapHeader(label: request.pickupLocation.name, lat: request.pickupLocation.lat, lng: request.pickupLocation.lng),
                       onPropose: () => _openLocationPicker(context, controller, 'Pickup Location', 'pickup', request.pickupLocation.name, request.pickupLocation.lat, request.pickupLocation.lng),
                       onAccept: () => _runNegotiationAction(() => controller.acceptTerm(widget.requestId, 'pickup')),
@@ -245,6 +247,7 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                       value: request.dropoffLocation.name,
                       isAccepted: request.dropoffLocation.isAccepted,
                       isRequestedByMe: request.dropoffLocation.requestedBy == controller.currentUserId,
+                      isReadOnly: isCompleted,
                       topWidget: RouteMapHeader(label: request.dropoffLocation.name, lat: request.dropoffLocation.lat, lng: request.dropoffLocation.lng),
                       onPropose: () => _openLocationPicker(context, controller, 'Dropoff Location', 'dropoff', request.dropoffLocation.name, request.dropoffLocation.lat, request.dropoffLocation.lng),
                       onAccept: () => _runNegotiationAction(() => controller.acceptTerm(widget.requestId, 'dropoff')),
@@ -255,6 +258,7 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                       value: '${request.subscriptionStartDate.value} to ${request.subscriptionEndDate.value}',
                       isAccepted: request.subscriptionStartDate.isAccepted && request.subscriptionEndDate.isAccepted,
                       isRequestedByMe: request.subscriptionStartDate.requestedBy == controller.currentUserId,
+                      isReadOnly: isCompleted,
                       onPropose: () => _openDateRangeProposalSheet(context, controller, request.subscriptionStartDate.value, request.subscriptionEndDate.value),
                       onAccept: () => _runNegotiationAction(() => controller.acceptTumpangDateRange(widget.requestId)),
                     ),
@@ -264,6 +268,7 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                       value: _formatAmPm(request.pickupTime.value),
                       isAccepted: request.pickupTime.isAccepted,
                       isRequestedByMe: request.pickupTime.requestedBy == controller.currentUserId,
+                      isReadOnly: isCompleted,
                       onPropose: () => _openTimeProposalSheet(context, controller, request.pickupTime.value),
                       onAccept: () => _runNegotiationAction(() => controller.acceptTerm(widget.requestId, 'pickup_time')),
                     ),
@@ -273,6 +278,7 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                       value: 'RM ${request.fee.value.toStringAsFixed(2)}',
                       isAccepted: request.fee.isAccepted,
                       isRequestedByMe: request.fee.requestedBy == controller.currentUserId,
+                      isReadOnly: isCompleted,
                       topWidget: Column(
                         children: [
                           Text(
@@ -294,6 +300,7 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                       request: request,
                       isFullyAgreed: isFullyAgreed,
                       isDriver: isDriver,
+                      isReadOnly: isCompleted,
                       onReject: () => _confirmReject(context, controller),
                       onProceedToSummary: () {
                         Navigator.push(
