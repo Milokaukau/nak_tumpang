@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nak_tumpang/core/entities/tumpang_request.dart';
@@ -19,12 +20,19 @@ class NegotiationViewModel extends ChangeNotifier {
   List<TumpangRequest> completedRequests = [];
 
   final Map<String, Map<String, dynamic>> _userCache = {};
+  late final StreamSubscription<AuthState> _authSubscription;
 
   NegotiationViewModel() {
     _initSession();
-    _supabase.auth.onAuthStateChange.listen((data) {
+    _authSubscription = _supabase.auth.onAuthStateChange.listen((data) {
       _initSession();
     });
+  }
+
+  @override
+  void dispose() {
+    _authSubscription.cancel();
+    super.dispose();
   }
 
   Future<void> _initSession() async {
@@ -210,9 +218,9 @@ class NegotiationViewModel extends ChangeNotifier {
 
   Future<void> rejectEntireRequest(String requestId) {
     return runNegotiationAction(() async {
-        await _service.rejectRequest(requestId);
-        await refreshRequests();
-      },
+      await _service.rejectRequest(requestId);
+      await refreshRequests();
+    },
       fallbackMessage: "Couldn't reject the request. Please check your connection and try again.",
     );
   }

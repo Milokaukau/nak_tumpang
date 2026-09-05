@@ -20,6 +20,9 @@ class _PaymentScreenState extends State<PaymentScreen> with SingleTickerProvider
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(() {
+      if (mounted) setState(() {});
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<PaymentViewModel>().fetchAllPayments();
     });
@@ -31,7 +34,7 @@ class _PaymentScreenState extends State<PaymentScreen> with SingleTickerProvider
     super.dispose();
   }
 
-  Future<void> _handlePayment(BuildContext context, PaymentViewModel viewModel) async {
+  Future<void> _handlePayment(PaymentViewModel viewModel) async {
     final success = await viewModel.paySelectedWithStripe();
     if (!mounted) return;
 
@@ -188,7 +191,7 @@ class _PaymentScreenState extends State<PaymentScreen> with SingleTickerProvider
             totalAmount: viewModel.totalSelectedAmount,
             selectedCount: viewModel.selectedPaymentIds.length,
             isProcessing: viewModel.isProcessingPayment,
-            onPayPressed: () => _handlePayment(context, viewModel),
+            onPayPressed: () => _handlePayment(viewModel),
           );
         },
       ),

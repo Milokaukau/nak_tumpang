@@ -1,7 +1,5 @@
-import 'dart:convert';
+import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_stripe/flutter_stripe.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nak_tumpang/core/entities/payment.dart';
@@ -10,6 +8,7 @@ import 'package:nak_tumpang/features/payment/data/services/payment_supabase_serv
 class PaymentViewModel extends ChangeNotifier {
   final PaymentSupabaseService _service = PaymentSupabaseService();
   final SupabaseClient _supabase = Supabase.instance.client;
+  late final StreamSubscription<AuthState> _authSubscription;
 
   List<Payment> pendingPayments = [];
   List<Payment> paymentHistory = [];
@@ -21,9 +20,15 @@ class PaymentViewModel extends ChangeNotifier {
 
   PaymentViewModel() {
     _initSession();
-    _supabase.auth.onAuthStateChange.listen((data) {
+    _authSubscription = _supabase.auth.onAuthStateChange.listen((data) {
       _initSession();
     });
+  }
+
+  @override
+  void dispose() {
+    _authSubscription.cancel();
+    super.dispose();
   }
 
   void _initSession() {
@@ -94,37 +99,29 @@ class PaymentViewModel extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final secretKey = dotenv.env['STRIPE_SECRET_KEY'];
-      if (secretKey == null || secretKey.isEmpty || !secretKey.startsWith('sk_')) {
-        throw Exception('Invalid STRIPE_SECRET_KEY in .env file.');
-      }
-
-      final amountInCents = (totalSelectedAmount * 100).toInt();
-
-      final response = await http.post(
-        Uri.parse('https://api.stripe.com/v1/payment_intents'),
-        headers: {
-          'Authorization': 'Bearer $secretKey',
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
+      final response = await _supabase.functions.invoke(
+        'create-payment-intent',
         body: {
-          'amount': amountInCents.toString(),
+          'amount': totalSelectedAmount,
           'currency': 'myr',
-          'payment_method_types[]': 'card',
           'description': 'Nak Tumpang Invoice Settlement (${selectedPaymentIds.length} items)',
         },
       );
 
-      if (response.statusCode != 200) {
-        final err = jsonDecode(response.body);
-        throw Exception(err['error']?['message'] ?? 'Stripe PaymentIntent failure.');
+      if (response.status != 200 || response.data == null) {
+        final err = response.data is Map ? response.data['error'] : null;
+        throw Exception(err ?? 'Stripe PaymentIntent failure.');
       }
 
-      final paymentIntent = jsonDecode(response.body);
+      final paymentIntent = response.data as Map;
+      final clientSecret = paymentIntent['client_secret'];
+      if (clientSecret == null) {
+        throw Exception('No client_secret returned from server');
+      }
 
       await Stripe.instance.initPaymentSheet(
         paymentSheetParameters: SetupPaymentSheetParameters(
-          paymentIntentClientSecret: paymentIntent['client_secret'],
+          paymentIntentClientSecret: clientSecret,
           merchantDisplayName: 'Nak Tumpang',
           style: ThemeMode.light,
           billingDetails: const BillingDetails(

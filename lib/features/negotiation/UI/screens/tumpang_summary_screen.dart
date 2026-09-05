@@ -1,8 +1,5 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:http/http.dart' as http;
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_stripe/flutter_stripe.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -52,33 +49,29 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
     setState(() => _isProcessing = true);
 
     try {
-      final secretKey = dotenv.env['STRIPE_SECRET_KEY'];
-      if (secretKey == null || secretKey.isEmpty || !secretKey.startsWith('sk_')) {
-        throw Exception('Invalid STRIPE_SECRET_KEY. Must start with sk_');
-      }
-
-      final response = await http.post(
-        Uri.parse('https://api.stripe.com/v1/payment_intents'),
-        headers: {
-          'Authorization': 'Bearer $secretKey',
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
+      final response = await _supabase.functions.invoke(
+        'create-payment-intent',
         body: {
-          'amount': (depositAmount * 100).toInt().toString(),
+          'amount': depositAmount,
           'currency': 'myr',
-          'payment_method_types[]': 'card',
+          'description': 'Nak Tumpang deposit for request ${request.id}',
         },
       );
 
-      if (response.statusCode != 200) {
-        throw Exception('Stripe API Error: ${response.body}');
+      if (response.status != 200 || response.data == null) {
+        final err = response.data is Map ? response.data['error'] : null;
+        throw Exception(err ?? 'Failed to create PaymentIntent');
       }
 
-      final paymentIntent = jsonDecode(response.body);
+      final paymentIntent = response.data as Map;
+      final clientSecret = paymentIntent['client_secret'];
+      if (clientSecret == null) {
+        throw Exception('No client_secret returned from server');
+      }
 
       await Stripe.instance.initPaymentSheet(
         paymentSheetParameters: SetupPaymentSheetParameters(
-          paymentIntentClientSecret: paymentIntent['client_secret'],
+          paymentIntentClientSecret: clientSecret,
           merchantDisplayName: 'Nak Tumpang',
           style: ThemeMode.light,
           billingDetails: const BillingDetails(
