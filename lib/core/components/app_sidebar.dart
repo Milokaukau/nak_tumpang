@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/features/payout/UI/screens/driver_balance_screen.dart';
+import 'package:nak_tumpang/features/payment/UI/screens/payment_screen.dart';
+import 'package:nak_tumpang/features/negotiation/UI/screens/request_list_screen.dart';
 import 'package:nak_tumpang/features/profile/UI/screens/profile_screen.dart';
 import 'package:nak_tumpang/features/auth/UI/screens/login_screen.dart';
 
@@ -36,6 +38,8 @@ class AppSidebar extends StatelessWidget {
     this.profileImageUrl,
     this.selectedIndex = -1,
   });
+
+  bool get _isDriver => userRole.toLowerCase().trim().contains('driver');
 
   @override
   Widget build(BuildContext context) {
@@ -78,15 +82,17 @@ class AppSidebar extends StatelessWidget {
             const Divider(color: AppColors.greyBorder, thickness: 1),
             const SizedBox(height: 20),
 
-            // Navigation Items
             _buildMenuItem(context, index: 0, title: 'View Profile'),
             _buildMenuItem(context, index: 1, title: 'View Subscriptions'),
             _buildMenuItem(context, index: 2, title: 'View Requests'),
-            _buildMenuItem(context, index: 3, title: 'Payment / My Earnings'),
+            _buildMenuItem(
+              context,
+              index: 3,
+              title: _isDriver ? 'My Earnings' : 'Payment',
+            ),
 
-            const SizedBox(height: 8), // Slight extra gap before Sign Out
+            const SizedBox(height: 8),
 
-            // Sign Out Option (using the reusable component)
             _buildMenuItem(
               context,
               index: 4,
@@ -99,19 +105,12 @@ class AppSidebar extends StatelessWidget {
     );
   }
 
-  // Handle routing internally
   void _handleItemTap(BuildContext context, int index) {
-    Navigator.pop(context); // Always close the drawer first
+    Navigator.pop(context);
 
-    // Prevent routing if the user is already on this screen
     if (index == selectedIndex) return;
 
-    // Handle Sign Out Logic completely separately
     if (index == 4) {
-      // 1. TODO: Call your auth provider to clear session here
-      // e.g., await FirebaseAuth.instance.signOut();
-
-      // 2. Route to Login and DESTROY the navigation history
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(builder: (context) => const LoginScreen()),
@@ -126,13 +125,13 @@ class AppSidebar extends StatelessWidget {
         nextScreen = const ProfileScreen();
         break;
       case 1:
-        nextScreen = const ProfileScreen(); // Replace with actual screen
+        nextScreen = const ProfileScreen();
         break;
       case 2:
-        nextScreen = const ProfileScreen(); // Replace with actual screen
+        nextScreen = const RequestListScreen();
         break;
       case 3:
-        nextScreen = const DriverBalanceScreen( ); // Replace with actual screen
+        nextScreen = _isDriver ? const DriverBalanceScreen() : const PaymentScreen();
         break;
       default:
         return;
@@ -144,7 +143,6 @@ class AppSidebar extends StatelessWidget {
     );
   }
 
-  // Added optional textColor parameter
   Widget _buildMenuItem(BuildContext context, {required int index, required String title, Color? textColor}) {
     final isSelected = selectedIndex == index;
 
@@ -164,7 +162,6 @@ class AppSidebar extends StatelessWidget {
               style: TextStyle(
                 fontSize: 15,
                 fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                // Use the custom color if provided, otherwise default to black
                 color: textColor ?? AppColors.black,
               ),
             ),
