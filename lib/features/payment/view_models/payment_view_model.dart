@@ -16,7 +16,8 @@ class PaymentViewModel extends ChangeNotifier {
 
   bool isLoading = false;
   bool isProcessingPayment = false;
-  String? errorMessage;
+  String? errorMessage; // fetch/list-loading errors only
+  String? paymentErrorMessage; // payment-attempt errors only
 
   PaymentViewModel() {
     _initSession();
@@ -96,6 +97,7 @@ class PaymentViewModel extends ChangeNotifier {
     if (selectedPaymentIds.isEmpty) return false;
 
     isProcessingPayment = true;
+    paymentErrorMessage = null;
     notifyListeners();
 
     try {
@@ -147,7 +149,7 @@ class PaymentViewModel extends ChangeNotifier {
       debugPrint('Stripe payment cancelled/failed: ${e.error.localizedMessage}');
       return false;
     } catch (e) {
-      errorMessage = e.toString();
+      paymentErrorMessage = e.toString();
       debugPrint('General Payment Error: $e');
       return false;
     } finally {

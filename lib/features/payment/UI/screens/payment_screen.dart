@@ -46,10 +46,10 @@ class _PaymentScreenState extends State<PaymentScreen> with SingleTickerProvider
         ),
       );
       _tabController.animateTo(1);
-    } else if (viewModel.errorMessage != null) {
+    } else if (viewModel.paymentErrorMessage != null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Payment Failed: ${viewModel.errorMessage}'),
+          content: Text('Payment Failed: ${viewModel.paymentErrorMessage}'),
           backgroundColor: Colors.red,
         ),
       );
