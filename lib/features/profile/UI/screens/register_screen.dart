@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
+import 'package:nak_tumpang/features/auth/UI/screens/login_screen.dart';
 import 'package:nak_tumpang/features/home/UI/screens/home_screen.dart';
 import 'package:nak_tumpang/features/profile/UI/components/get_started_dialog.dart';
 import 'package:nak_tumpang/features/profile/UI/screens/post_signup_driver_screen.dart';
@@ -9,8 +10,7 @@ import 'package:nak_tumpang/features/profile/UI/screens/profile_screen.dart' sho
 import 'package:nak_tumpang/features/profile/view_models/register_view_model.dart';
 
 class RegisterScreen extends StatelessWidget {
-  /// Set from the role-selection popup shown before this screen — the
-  /// driver/passenger toggle here can still change it before submitting.
+  // role can still be changed before submitting
   final String initialRole;
 
   const RegisterScreen({super.key, this.initialRole = 'passenger'});
@@ -37,17 +37,41 @@ class _RegisterViewState extends State<_RegisterView> {
     if (!mounted || result == null) return;
 
     if (result == RegisterResult.driverNext) {
-      // A plain push (not pushReplacement) so this screen stays on the
-      // stack — the driver is required to pick their route/days/time
-      // before reaching the home page, but if they back out of that step
-      // they should land back here, not skip past it to the home page.
+      // driver press back at the set up location, time and date page, will go back to complete profile
       Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => const PostSignupDriverScreen()),
       );
       return;
     }
 
-    // Passenger: show the "Let's get started!" popup and route on their choice.
+    if (result == RegisterResult.pendingVerification) {
+      // No session yet — nothing was written to users/driver_profiles,
+      // so there's nothing to continue into. Tell them to confirm, then
+      // send them to log in once they've clicked the link.
+      await showDialog<void>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Confirm your email'),
+          content: const Text(
+            "We've sent a confirmation link to your email address. "
+                'Please confirm it, then log in to finish setting up your account.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+      );
+      return;
+    }
+
+    // show lets get started popup for passengers
     final choice = await GetStartedDialog.show(context);
     if (!mounted) return;
 

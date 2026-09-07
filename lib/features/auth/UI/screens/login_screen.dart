@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:nak_tumpang/features/home/UI/screens/home_screen.dart';
 import 'package:nak_tumpang/features/profile/UI/components/role_selection_dialog.dart';
 import 'package:nak_tumpang/features/profile/UI/screens/register_screen.dart';
+import 'package:nak_tumpang/features/profile/UI/screens/post_signup_driver_screen.dart';
 import 'package:nak_tumpang/features/auth/view_models/login_view_model.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 
@@ -29,16 +30,44 @@ class _LoginViewState extends State<_LoginView> {
   bool _isHoveringRegister = false;
 
   Future<void> _submit(LoginViewModel vm) async {
-    final success = await vm.submit();
-    if (!mounted || !success) return;
+    final result = await vm.submit();
+    if (!mounted || result == null) return;
+
+    if (result == LoginResult.needsDriverSetup) {
+      if (vm.driverLicenseNeedsReupload) {
+        await showDialog<void>(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Welcome back!'),
+            content: const Text(
+              "Let's finish setting up your route. You'll also need to "
+                  're-add your driving license from your profile — it '
+                  "wasn't saved before your email was confirmed.",
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+        if (!mounted) return;
+      }
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const PostSignupDriverScreen()),
+      );
+      return;
+    }
+
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(builder: (_) => const HomeScreen()),
     );
   }
 
   void _startRegister() async {
-    final role = await RoleSelectionDialog.show(context);
-    if (!mounted) return;
+    final role = await RoleSelectionDialog.show(context, dismissible: true);
+    if (!mounted || role == null) return; // canceled — stay on login
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => RegisterScreen(initialRole: role)),
     );
@@ -83,7 +112,7 @@ class _LoginViewState extends State<_LoginView> {
                   style: TextStyle(
                     color: AppColors.primaryYellow,
                     fontWeight: FontWeight.bold,
-                    fontSize: 22,
+                    fontSize: 30,
                   ),
                 ),
                 Text(
@@ -92,7 +121,7 @@ class _LoginViewState extends State<_LoginView> {
                   style: TextStyle(
                     color: AppColors.black,
                     fontWeight: FontWeight.bold,
-                    fontSize: 32,
+                    fontSize: 35,
                   ),
                 ),
                 const SizedBox(height: 8),

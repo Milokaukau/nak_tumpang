@@ -9,6 +9,8 @@ import 'package:nak_tumpang/core/utils/transit_utils.dart';
 class HomeViewModel extends ChangeNotifier {
   String selectedFilter = 'Direct';
   String currentUserRole = 'passenger';
+  String? currentUserId;
+  String? currentUserName;
   Map<String, dynamic>? currentPassenger;
   Map<String, dynamic>? currentPassengerTrip;
 
@@ -53,13 +55,53 @@ class HomeViewModel extends ChangeNotifier {
   // ==========================================
 
   Future<void> fetchMockDriver() async {
-    isScreenLoading = true;
     currentUserRole = 'driver';
+    await _loadDriverSubscriptions('f2256b13-901f-4cce-bf15-6afb178e0998');
+  }
+
+  Future<void> fetchMockPassenger() async {
+    currentUserRole = 'passenger';
+    await _loadPassengerData('94d34b82-eba4-4267-9524-df1841996de0');
+  }
+
+  /// Real login path: reads the actual signed-in user's role/id from
+  /// Supabase (via HomeSupabaseService.fetchCurrentUserProfile) instead of
+  /// a hardcoded mock ID, then loads their data through the same loaders
+  /// the mock fetchers use. Call this — not fetchMockDriver/fetchMockPassenger —
+  /// wherever the app needs the actual logged-in user.
+  Future<void> fetchCurrentUser() async {
+    isScreenLoading = true;
+    notifyListeners();
+
+    final profile = await _homeService.fetchCurrentUserProfile();
+
+    if (profile == null) {
+      // No session yet (e.g. provider created before login), or the
+      // users row doesn't exist yet. Nothing to load.
+      print('⚠️ fetchCurrentUser: no signed-in user profile found');
+      isScreenLoading = false;
+      notifyListeners();
+      return;
+    }
+
+    currentUserId = profile['id'] as String?;
+    currentUserName = profile['name'] as String?;
+    currentUserRole = (profile['role'] as String?) ?? 'passenger';
+
+    if (currentUserRole == 'driver') {
+      await _loadDriverSubscriptions(currentUserId!);
+    } else {
+      await _loadPassengerData(currentUserId!);
+    }
+  }
+
+  Future<void> _loadDriverSubscriptions(String driverId) async {
+    isScreenLoading = true;
     showMatchingUI = false;
     notifyListeners();
 
     try {
-      final rawSubs = await _homeService.fetchDriverActiveSubscriptions('f2256b13-901f-4cce-bf15-6afb178e0998');
+      final rawSubs = await _homeService.fetchDriverActiveSubscriptions(driverId);
       activeSubscriptions = _mapSubscriptions(rawSubs, isForPassenger: false);
     } catch (e) {
       print('⚠️ Error fetching driver data: $e');
@@ -69,19 +111,18 @@ class HomeViewModel extends ChangeNotifier {
     }
   }
 
-  Future<void> fetchMockPassenger() async {
+  Future<void> _loadPassengerData(String userId) async {
     isScreenLoading = true;
-    currentUserRole = 'passenger';
     notifyListeners();
 
     try {
-      final userId = '94d34b82-eba4-4267-9524-df1841996de0';
       final trips = await _homeService.fetchPassengerTrips(userId);
 
       if (trips.isNotEmpty) {
         availableTrips = trips;
         currentPassengerTrip = trips.first;
         currentPassenger = trips.first['users'];
+        currentUserName ??= currentPassenger?['name'] as String?;
 
         // --- Fetch ALL subscriptions globally for the user ---
         final rawSubs = await _homeService.fetchAllPassengerSubscriptions(userId);

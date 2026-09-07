@@ -1,31 +1,69 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:nak_tumpang/core/utils/validators.dart';
 import 'package:nak_tumpang/features/payout/data/services/payout_service.dart';
 
 enum PayoutMethod { bankTransfer, tngEwallet }
 
-/// A single row for the "Recent trips" list. Points = fee, per the 1
-/// pt = RM1 conversion used everywhere else in the wallet.
+extension PayoutMethodDb on PayoutMethod {
+  /// The value stored in payout_history.payment_method.
+  String get dbValue => this == PayoutMethod.bankTransfer ? 'bank_transfer' : 'tng_ewallet';
+
+  static PayoutMethod fromDb(String? value) =>
+      value == 'tng_ewallet' ? PayoutMethod.tngEwallet : PayoutMethod.bankTransfer;
+}
+
+enum PayoutView { wallet, history }
+
+class PayoutHistoryDisplay {
+  final String id;
+  final double amount;
+  final String status; // pending / processing / paid
+  final PayoutMethod paymentMethod;
+  final String? bankName;
+  final String bankAccNo;
+  final DateTime? requestedAt;
+
+  PayoutHistoryDisplay({
+    required this.id,
+    required this.amount,
+    required this.status,
+    required this.paymentMethod,
+    this.bankName,
+    required this.bankAccNo,
+    this.requestedAt,
+  });
+
+  bool get isEwallet => paymentMethod == PayoutMethod.tngEwallet;
+
+  String get destinationLabel => isEwallet ? "Touch 'n Go eWallet" : (bankName ?? 'Bank transfer');
+}
+
 class RecentTripDisplay {
+  final String tripId; // tumpang_request.id — shown as a reference on the receipt
   final String passengerName;
   final String pickupName;
   final String dropoffName;
   final double points;
   final String monthLabel; // e.g. "August"
+  final DateTime? tripDate; // full date, for the trip detail popup
 
   RecentTripDisplay({
+    required this.tripId,
     required this.passengerName,
     required this.pickupName,
     required this.dropoffName,
     required this.points,
     required this.monthLabel,
+    this.tripDate,
   });
 }
 
-/// Holds all state and logic for the driver wallet / payout flow
-/// (balance screen, method screen, confirm). Supabase calls and
-/// validation live here — screens only read state and call into it.
 class PayoutViewModel extends ChangeNotifier {
+  PayoutViewModel() {
+    ewalletPhoneFocusNode.addListener(notifyListeners);
+  }
+
   final _service = PayoutService();
 
   bool isLoading = true;
@@ -39,12 +77,21 @@ class PayoutViewModel extends ChangeNotifier {
   double thisMonthPoints = 0;
   List<RecentTripDisplay> recentTrips = [];
 
-  // --- Payout form state ---
+// tab toggle between history and wallet
+  PayoutView currentView = PayoutView.wallet;
+  bool isHistoryLoading = false;
+  String? historyError;
+  List<PayoutHistoryDisplay> payoutHistory = [];
+
+// payout form state
   PayoutMethod selectedMethod = PayoutMethod.bankTransfer;
   final amountController = TextEditingController();
-  final bankNameController = TextEditingController();
+
+// bank name is a fixed dropdown of malaysian banks
+  String? selectedBankName;
   final bankAccNoController = TextEditingController();
   final ewalletPhoneController = TextEditingController();
+  final ewalletPhoneFocusNode = FocusNode();
 
   bool isSubmitting = false;
   String? amountError;
@@ -52,13 +99,54 @@ class PayoutViewModel extends ChangeNotifier {
   String? bankAccNoError;
   String? ewalletPhoneError;
 
+  String? lastPayoutId;
+  String payoutStatus = 'pending';
+
   @override
   void dispose() {
     amountController.dispose();
-    bankNameController.dispose();
     bankAccNoController.dispose();
     ewalletPhoneController.dispose();
+    ewalletPhoneFocusNode.dispose();
     super.dispose();
+  }
+
+  void setView(PayoutView view) {
+    currentView = view;
+    notifyListeners();
+    if (view == PayoutView.history && payoutHistory.isEmpty && historyError == null) {
+      loadHistory();
+    }
+  }
+
+  Future<void> loadHistory() async {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return;
+
+    isHistoryLoading = true;
+    historyError = null;
+    notifyListeners();
+
+    try {
+      final rows = await _service.fetchPayoutHistory(userId);
+      payoutHistory = rows.map((row) {
+        final dateStr = row['requested_at'] as String?;
+        return PayoutHistoryDisplay(
+          id: row['id'] as String? ?? '-',
+          amount: (row['amount'] as num?)?.toDouble() ?? 0,
+          status: row['status'] as String? ?? 'pending',
+          paymentMethod: PayoutMethodDb.fromDb(row['payment_method'] as String?),
+          bankName: row['bank_name'] as String?,
+          bankAccNo: row['bank_acc_no'] as String? ?? '-',
+          requestedAt: dateStr != null ? DateTime.tryParse(dateStr) : null,
+        );
+      }).toList();
+    } catch (e) {
+      historyError = 'Could not load payout history. Please try again.';
+    } finally {
+      isHistoryLoading = false;
+      notifyListeners();
+    }
   }
 
   Future<void> load() async {
@@ -100,17 +188,17 @@ class PayoutViewModel extends ChangeNotifier {
           final passengerName =
               trip['passenger_trips']?['users']?['name'] as String? ?? 'Passenger';
           recentTrips.add(RecentTripDisplay(
+            tripId: trip['id']?.toString() ?? '-',
             passengerName: passengerName,
             pickupName: trip['pickup_name'] as String? ?? '-',
             dropoffName: trip['dropoff_name'] as String? ?? '-',
             points: fee,
             monthLabel: date != null ? _monthName(date.month) : '-',
+            tripDate: date,
           ));
         }
       }
 
-      // Amount field starts at the full balance, matching the mockup's
-      // default — the driver can still edit it down.
       amountController.text = availableBalance.toStringAsFixed(2);
     } catch (e) {
       errorMessage = 'Could not load wallet. Please try again.';
@@ -128,8 +216,6 @@ class PayoutViewModel extends ChangeNotifier {
     return names[month - 1];
   }
 
-  /// Call after the amount field changes so the screen rebuilds (e.g.
-  /// to clear a stale error as the driver retypes).
   void notifyUiOnly() => notifyListeners();
 
   void selectMethod(PayoutMethod method) {
@@ -137,7 +223,23 @@ class PayoutViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _runValidation() {
+  void selectBank(String? bank) {
+    selectedBankName = bank;
+    bankNameError = null;
+    notifyListeners();
+  }
+
+  void clearBankAccNoError() {
+    bankAccNoError = null;
+    notifyListeners();
+  }
+
+  void clearEwalletPhoneError() {
+    ewalletPhoneError = null;
+    notifyListeners();
+  }
+
+  bool validateAmount() {
     final amount = double.tryParse(amountController.text.trim());
     if (amount == null || amount <= 0) {
       amountError = 'Enter a valid amount';
@@ -146,27 +248,36 @@ class PayoutViewModel extends ChangeNotifier {
     } else {
       amountError = null;
     }
+    notifyListeners();
+    return amountError == null;
+  }
 
+  bool validateDetails() {
     if (selectedMethod == PayoutMethod.bankTransfer) {
-      bankNameError = bankNameController.text.trim().isEmpty ? 'Bank name is required' : null;
-      bankAccNoError =
-      bankAccNoController.text.trim().isEmpty ? 'Account number is required' : null;
+      bankNameError = Validators.bankName(selectedBankName);
+      bankAccNoError = Validators.bankAccountNumber(bankAccNoController.text);
       ewalletPhoneError = null;
     } else {
-      ewalletPhoneError =
-      ewalletPhoneController.text.trim().isEmpty ? 'Phone number is required' : null;
+      ewalletPhoneError = Validators.phoneLocal(ewalletPhoneController.text);
       bankNameError = null;
       bankAccNoError = null;
     }
+    notifyListeners();
+    return bankNameError == null && bankAccNoError == null && ewalletPhoneError == null;
   }
 
-  /// Returns true on success. On failure, check amountError/bankNameError/
-  /// bankAccNoError/ewalletPhoneError/errorMessage for what to show.
-  Future<bool> submitPayout() async {
-    _runValidation();
-    notifyListeners();
+// clears screen when driver goes back to select payment method or change amount
+  void resetDetailsFields() {
+    selectedBankName = null;
+    bankAccNoController.clear();
+    ewalletPhoneController.clear();
+    bankNameError = null;
+    bankAccNoError = null;
+    ewalletPhoneError = null;
+  }
 
-    if (amountError != null || bankNameError != null || bankAccNoError != null || ewalletPhoneError != null) {
+  Future<bool> submitPayout() async {
+    if (!validateAmount() || !validateDetails()) {
       return false;
     }
 
@@ -176,31 +287,43 @@ class PayoutViewModel extends ChangeNotifier {
     final amount = double.parse(amountController.text.trim());
     final newBalance = availableBalance - amount;
 
-    // payout_history has bank_name/bank_acc_no as its only fields for
-    // where the money goes — there's no separate e-wallet column, so a
-    // Touch 'n Go payout is logged with a fixed bank_name label and the
-    // phone number in bank_acc_no. Flag this to your team if you'd
-    // rather add a proper `method`/`ewallet_phone` column instead.
-    final bankName = selectedMethod == PayoutMethod.bankTransfer
-        ? bankNameController.text.trim()
-        : "Touch 'n Go eWallet";
+    // e-wallet payouts have no bank, bank_name goes in as null
+    final bankName = selectedMethod == PayoutMethod.bankTransfer ? selectedBankName : null;
+
     final bankAccNo = selectedMethod == PayoutMethod.bankTransfer
         ? bankAccNoController.text.trim()
-        : ewalletPhoneController.text.trim();
+        : Validators.toStoredPhone(ewalletPhoneController.text);
 
     isSubmitting = true;
     errorMessage = null;
     notifyListeners();
 
     try {
-      await _service.requestPayout(
+      final payoutId = await _service.requestPayout(
         userId: userId,
         amount: amount,
         newBalance: newBalance,
+        paymentMethod: selectedMethod.dbValue,
         bankName: bankName,
         bankAccNo: bankAccNo,
       );
       availableBalance = newBalance;
+      lastPayoutId = payoutId;
+      payoutStatus = 'pending';
+
+      payoutHistory.insert(
+        0,
+        PayoutHistoryDisplay(
+          id: payoutId,
+          amount: amount,
+          status: 'pending',
+          paymentMethod: selectedMethod,
+          bankName: bankName,
+          bankAccNo: bankAccNo,
+          requestedAt: DateTime.now(),
+        ),
+      );
+
       return true;
     } catch (e) {
       errorMessage = 'Could not process payout. Please try again.';
@@ -209,5 +332,41 @@ class PayoutViewModel extends ChangeNotifier {
       isSubmitting = false;
       notifyListeners();
     }
+  }
+
+  // fake animation for transaction processing demo
+  Future<void> runPayoutStatusAnimation() async {
+    final payoutId = lastPayoutId;
+    if (payoutId == null) return;
+
+    payoutStatus = 'pending';
+    notifyListeners();
+
+    await Future.delayed(const Duration(milliseconds: 1200));
+    payoutStatus = 'processing';
+    _syncHistoryStatus(payoutId, 'processing');
+    notifyListeners();
+    _service.updatePayoutStatus(payoutId, 'processing');
+
+    await Future.delayed(const Duration(milliseconds: 1600));
+    payoutStatus = 'paid';
+    _syncHistoryStatus(payoutId, 'paid');
+    notifyListeners();
+    _service.updatePayoutStatus(payoutId, 'paid');
+  }
+
+  void _syncHistoryStatus(String payoutId, String status) {
+    final index = payoutHistory.indexWhere((p) => p.id == payoutId);
+    if (index == -1) return;
+    final old = payoutHistory[index];
+    payoutHistory[index] = PayoutHistoryDisplay(
+      id: old.id,
+      amount: old.amount,
+      status: status,
+      paymentMethod: old.paymentMethod,
+      bankName: old.bankName,
+      bankAccNo: old.bankAccNo,
+      requestedAt: old.requestedAt,
+    );
   }
 }

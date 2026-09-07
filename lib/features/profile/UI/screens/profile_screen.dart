@@ -50,7 +50,7 @@ class _ProfileViewState extends State<_ProfileView> {
     // BuildContext.
     if (vm.isFirstTimeSetup && mounted) {
       final role = await RoleSelectionDialog.show(context);
-      if (mounted) vm.setRole(role);
+      if (mounted) vm.setRole(role ?? 'passenger');
     }
   }
 
@@ -174,6 +174,15 @@ class _ProfileViewState extends State<_ProfileView> {
                         ),
                       ),
                     ),
+                    if (vm.email != null) ...[
+                      const SizedBox(height: 10),
+                      Center(
+                        child: Text(
+                          vm.email!,
+                          style: TextStyle(color: AppColors.greyText, fontSize: 13),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 28),
 
                     // Name
@@ -253,23 +262,6 @@ class _ProfileViewState extends State<_ProfileView> {
                       ),
                     ),
                     _errorText(vm.phoneError),
-                    const SizedBox(height: 18),
-
-                    // Email — editable, but Supabase Auth only applies the
-                    // change once the confirmation link sent to the new
-                    // address is clicked.
-                    Text('Email', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
-                    const SizedBox(height: 6),
-                    TextField(
-                        controller: vm.emailController,
-                        keyboardType: TextInputType.emailAddress,
-                        decoration: _fieldDecoration(hint: 'e.g. name@example.com'),
-                        onChanged: (_) {
-                          vm.notifyUiOnly();
-                          vm.revalidateIfNeeded();
-                        }
-                    ),
-                    _errorText(vm.emailError),
                     const SizedBox(height: 18),
 
                     // Role — chosen once via the Passenger/Driver dialog right

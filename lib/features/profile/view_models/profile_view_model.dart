@@ -36,7 +36,6 @@ class ProfileViewModel extends ChangeNotifier {
   final nameController = TextEditingController();
   final phoneController = TextEditingController();
   final licenseNumberController = TextEditingController();
-  final emailController = TextEditingController();
   final currentPasswordController = TextEditingController();
   final newPasswordController = TextEditingController();
   final confirmPasswordController = TextEditingController();
@@ -62,6 +61,12 @@ class ProfileViewModel extends ChangeNotifier {
 
   String get role => _role;
 
+  /// The account's verified email. Read-only here — changing it isn't
+  /// supported from the profile screen (Supabase's email-change
+  /// confirmation flow needs its own dedicated screen), so it's just
+  /// displayed as text under the avatar instead of an editable field.
+  String? get email => _email;
+
   Uint8List? avatarBytes;
   String? avatarUrl;
   bool isUploadingAvatar = false;
@@ -85,7 +90,6 @@ class ProfileViewModel extends ChangeNotifier {
   bool _autoValidate = false;
   String? nameError;
   String? phoneError;
-  String? emailError;
   String? licenseNumberError;
   String? currentPasswordError;
   String? newPasswordError;
@@ -97,7 +101,6 @@ class ProfileViewModel extends ChangeNotifier {
     phoneController.dispose();
     phoneFocusNode.dispose();
     licenseNumberController.dispose();
-    emailController.dispose();
     currentPasswordController.dispose();
     newPasswordController.dispose();
     confirmPasswordController.dispose();
@@ -132,7 +135,6 @@ class ProfileViewModel extends ChangeNotifier {
         avatarUrl = data['avatar_url'] as String?;
       }
       _email = data?['email'] as String? ?? supabase.auth.currentUser?.email;
-      emailController.text = _email ?? '';
 
       // License number/photo live on driver_profiles, not users — only
       // drivers have a row there, so only look it up for drivers.
@@ -243,7 +245,6 @@ class ProfileViewModel extends ChangeNotifier {
   void _runValidation() {
     nameError = Validators.name(nameController.text);
     phoneError = Validators.phoneLocal(phoneController.text);
-    emailError = Validators.email(emailController.text);
     licenseNumberError = _validateLicenseNumber(licenseNumberController.text);
     currentPasswordError = _validateCurrentPassword();
     newPasswordError = Validators.password(newPasswordController.text, optional: true);
@@ -295,7 +296,6 @@ class ProfileViewModel extends ChangeNotifier {
 
     if (nameError != null ||
         phoneError != null ||
-        emailError != null ||
         licenseNumberError != null ||
         currentPasswordError != null ||
         newPasswordError != null ||
@@ -333,7 +333,7 @@ class ProfileViewModel extends ChangeNotifier {
       if (wantsPasswordChange) {
         try {
           await supabase.auth.signInWithPassword(
-            email: _email ?? emailController.text.trim(),
+            email: _email ?? supabase.auth.currentUser?.email ?? '',
             password: currentPasswordController.text,
           );
         } on AuthException {
@@ -342,15 +342,10 @@ class ProfileViewModel extends ChangeNotifier {
         }
       }
 
-      // Email/password live on the auth user, not the `users` table, so
-      // they're updated via Supabase Auth first. A changed email triggers
-      // Supabase's own confirmation flow (a link sent to the new address);
-      // the change only takes effect once that's clicked.
-      final newEmail = emailController.text.trim();
-      final emailChanged = newEmail.isNotEmpty && newEmail != (_email ?? '');
-      if (emailChanged) {
-        await supabase.auth.updateUser(UserAttributes(email: newEmail));
-      }
+      // Email is read-only here — it's shown as plain text, not an
+      // editable field. Changing the account's verified email needs its
+      // own confirmation-aware flow, so that's intentionally not wired
+      // up from this screen.
 
       if (wantsPasswordChange) {
         await supabase.auth.updateUser(UserAttributes(password: newPasswordController.text));
@@ -393,7 +388,7 @@ class ProfileViewModel extends ChangeNotifier {
         'phone': Validators.toStoredPhone(phoneController.text),
         'role': roleToSave,
         'avatar_url': avatarUrl,
-        'email': _email ?? newEmail,
+        'email': _email,
         'updated_at': DateTime.now().toIso8601String(),
       });
 
@@ -421,15 +416,7 @@ class ProfileViewModel extends ChangeNotifier {
         return ProfileSaveResult.firstTimeSetupComplete;
       }
 
-      if (wantsPasswordChange && emailChanged) {
-        successMessage = 'Password changed. Check your new email to confirm the change.';
-      } else if (wantsPasswordChange) {
-        successMessage = 'Password changed.';
-      } else if (emailChanged) {
-        successMessage = 'Profile updated. Check your new email to confirm the change.';
-      } else {
-        successMessage = 'Profile updated.';
-      }
+      successMessage = wantsPasswordChange ? 'Password changed.' : 'Profile updated.';
       return ProfileSaveResult.success;
     } on AuthException catch (e) {
       errorMessage = e.message;

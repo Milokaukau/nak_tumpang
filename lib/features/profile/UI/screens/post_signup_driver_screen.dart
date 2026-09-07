@@ -8,8 +8,7 @@ import 'package:nak_tumpang/features/profile/view_models/post_signup_driver_view
 
 const _weekdayNames = ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-/// Shown right after a driver finishes registering — captures their
-/// usual route and schedule. "Complete" goes straight to the home page.
+// compulsory for drivers to fill this in to complete creating account
 class PostSignupDriverScreen extends StatelessWidget {
   const PostSignupDriverScreen({super.key});
 

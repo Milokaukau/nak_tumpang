@@ -15,19 +15,21 @@ enum RegisterResult {
 
   /// Passenger account created — show the "Let's get started!" popup.
   passengerComplete,
+
+  /// Account created, but Supabase requires the new email to be
+  /// confirmed before a session exists. There's no `auth.uid()` yet, so
+  /// nothing has been written to `users`/`driver_profiles`/storage —
+  /// that happens on first login instead, once the account is
+  /// confirmed. The screen should tell the user to check their email.
+  pendingVerification,
 }
 
-/// Holds all state and logic for the sign-up form. The screen only reads
-/// state from here and calls [submit] — no validation or Supabase calls
-/// live in the widget itself.
 class RegisterViewModel extends ChangeNotifier {
   RegisterViewModel({String initialRole = 'passenger'}) : role = initialRole {
     // Rebuild the phone field's focus-dependent border when focus changes.
     phoneFocusNode.addListener(notifyListeners);
   }
 
-  /// 'passenger' or 'driver' — switchable from the screen's role toggle
-  /// before the account is created.
   String role;
 
   final nameController = TextEditingController();
@@ -37,7 +39,7 @@ class RegisterViewModel extends ChangeNotifier {
   final confirmPasswordController = TextEditingController();
   final phoneFocusNode = FocusNode();
 
-  // Driver-only fields.
+  // driver fields
   final licenseNumberController = TextEditingController();
   Uint8List? licenseBytes;
   bool isUploadingLicense = false;
@@ -62,13 +64,6 @@ class RegisterViewModel extends ChangeNotifier {
 
   final _supabase = Supabase.instance.client;
 
-  // Set once `submit()` has successfully created the auth account. A
-  // driver can back out of the following route/days/time page to this
-  // screen (e.g. to fix a typo) and press "Next" again — in that case
-  // the account already exists, so re-run only skips straight to
-  // updating the `users`/`driver_profiles` rows instead of calling
-  // `auth.signUp` again (which would fail with "email already
-  // registered", even though it's *their* email).
   String? _registeredUserId;
 
   void setRole(String newRole) {
@@ -136,9 +131,6 @@ class RegisterViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Attempts to register. Returns the next step on success (null on
-  /// failure); all other state (loading/errors) is exposed via this
-  /// notifier for the screen to react to.
   Future<RegisterResult?> submit() async {
     _autoValidate = true;
     _runValidation();
@@ -164,8 +156,6 @@ class RegisterViewModel extends ChangeNotifier {
       String newUserId;
 
       if (_registeredUserId != null) {
-        // Already signed up on an earlier pass (see [_registeredUserId])
-        // — just reuse that account instead of signing up again.
         newUserId = _registeredUserId!;
       } else {
         final response = await _supabase.auth.signUp(
@@ -192,6 +182,16 @@ class RegisterViewModel extends ChangeNotifier {
         }
         newUserId = createdUserId;
         _registeredUserId = newUserId;
+
+        // If "Confirm email" is on, Supabase creates the auth user but
+        // doesn't return a session until the confirmation link is
+        // clicked. Without a session there's no auth.uid(), so RLS would
+        // block writing to users/driver_profiles/storage right now —
+        // defer all of that to first login instead, once they're
+        // confirmed.
+        if (response.session == null) {
+          return RegisterResult.pendingVerification;
+        }
       }
 
       String? licenseStoragePath;
@@ -208,9 +208,6 @@ class RegisterViewModel extends ChangeNotifier {
         isUploadingLicense = false;
       }
 
-      // Don't rely solely on a DB trigger to create the `users` row — upsert
-      // it directly so name and phone are guaranteed to be there even if
-      // the trigger is missing or doesn't copy every field.
       await _supabase.from('users').upsert({
         'id': newUserId,
         'name': nameController.text.trim(),
@@ -219,20 +216,6 @@ class RegisterViewModel extends ChangeNotifier {
         'role': role,
       });
 
-      // A fresh driver needs a driver_profiles row too, so the wallet
-      // screen has something to read instead of relying purely on
-      // client-side zero defaults. This also carries the license number
-      // and photo path — driver-only data lives here, not on `users`.
-      // This is non-critical bookkeeping — by this point the auth user
-      // and `users` row already exist, so a failure here (e.g. an RLS
-      // hiccup) must NOT surface as a registration failure. That used to
-      // report an error on an account that had, in fact, already been
-      // created, and every retry after that failed with "email already
-      // exists" — because it did. If this fails, driver_profiles just
-      // stays absent until it's created lazily elsewhere (e.g. first
-      // wallet screen load) — though that does mean the license info
-      // wouldn't be saved in that rare case; the profile screen lets a
-      // driver re-upload it later if it's ever missing.
       if (role == 'driver') {
         try {
           await _supabase.from('driver_profiles').upsert({
@@ -253,8 +236,7 @@ class RegisterViewModel extends ChangeNotifier {
       errorMessage = e.message;
       return null;
     } on PostgrestException catch (e) {
-      // Surfaces the real DB error (e.g. unique constraint) instead of
-      // hiding it behind a generic message.
+      // cannot register with email already in database
       errorMessage = e.code == '23505'
           ? 'That account detail is already registered.'
           : e.message;

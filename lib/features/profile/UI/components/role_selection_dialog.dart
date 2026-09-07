@@ -1,26 +1,30 @@
 import 'package:flutter/material.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 
-/// Shown right before the registration form — asks the new user whether
-/// they'll be using Nak Tumpang as a Passenger or a Driver, so the form
-/// after this can show the right fields.
+// shown when user choose to create new account
 class RoleSelectionDialog extends StatelessWidget {
-  const RoleSelectionDialog({super.key});
+  final bool dismissible;
 
-  /// Shows the dialog and returns 'passenger' or 'driver'.
-  static Future<String> show(BuildContext context) async {
-    final role = await showDialog<String>(
+  const RoleSelectionDialog({super.key, this.dismissible = false});
+
+  /// Show the dialog and return the chosen role, or null if the user
+  /// canceled (only possible when [dismissible] is true — e.g. the
+  /// login screen's "create an account" entry point, where backing out
+  /// should return to login). Callers that can't sensibly proceed
+  /// without a role (e.g. first-time profile setup) should leave
+  /// [dismissible] false and treat the result as non-null.
+  static Future<String?> show(BuildContext context, {bool dismissible = false}) {
+    return showDialog<String>(
       context: context,
-      barrierDismissible: false,
-      builder: (_) => const RoleSelectionDialog(),
+      barrierDismissible: dismissible,
+      builder: (_) => RoleSelectionDialog(dismissible: dismissible),
     );
-    return role ?? 'passenger';
   }
 
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: false,
+      canPop: dismissible,
       child: Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: Padding(
@@ -28,6 +32,16 @@ class RoleSelectionDialog extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              if (dismissible)
+                Align(
+                  alignment: Alignment.topRight,
+                  child: IconButton(
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    icon: Icon(Icons.close, color: AppColors.greyText),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ),
               Text(
                 'How will you be using Nak Tumpang?',
                 style: TextStyle(

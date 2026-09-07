@@ -9,10 +9,8 @@ import 'package:nak_tumpang/core/services/ors_service.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/utils/geo_bounds.dart';
 
-/// Full-screen "pick a location" experience, similar to Grab/Google Maps:
-/// search for a place and pick it from a dropdown, or tap anywhere on the
-/// map to drop a pin there. Push it with [LocationPickerScreen.show] and
-/// await the [GeocodedPlace] the user confirms (or null if they back out).
+// pick a location by searching,  tapping on the map
+
 class LocationPickerScreen extends StatefulWidget {
   final String title;
   final String? initialQuery;
@@ -36,7 +34,7 @@ class LocationPickerScreen extends StatefulWidget {
 }
 
 class _LocationPickerScreenState extends State<LocationPickerScreen> {
-  // Kuala Lumpur — sensible default center until the user searches or taps.
+  // default center = KL
   static const _defaultCenter = LatLng(3.1390, 101.6869);
 
   final _ors = ORSService();
@@ -124,9 +122,8 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
     final place = await _ors.reverseGeocode(point);
     if (!mounted) return;
 
-    // A point can be well within Malaysia's bounding box and still be
-    // sea (e.g. the Strait of Malacca) — the box alone can't tell,
-    // only the geocoder's result can, so this check has to happen here.
+    // allow within malaysia
+    // dont allow in the sea
     if (place.isWater) {
       setState(() {
         _selectedPlace = null;
@@ -143,10 +140,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
     });
   }
 
-  /// "Use my location" — Grab/Google-Maps style GPS button. Requests
-  /// permission if needed, reverse-geocodes the current fix into a named
-  /// place, and centers the map on it. Rejected the same way a map tap
-  /// outside Malaysia would be.
+  // use my location, no need to search for own location
   Future<void> _useMyLocation() async {
     setState(() => _isLocatingMe = true);
     try {
@@ -263,7 +257,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
             ],
           ),
 
-          // Back button + search bar, with suggestions dropdown below it.
+          // back button + search bar, with suggestions dropdown below it.
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -344,7 +338,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
             ),
           ),
 
-          // "Use my location" FAB, floating just above the confirm card.
+          // use my location floating above confirm
           Positioned(
             right: 16,
             bottom: 190,
@@ -372,7 +366,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
             ),
           ),
 
-          // Selected place + confirm button, pinned to the bottom.
+          // selected place + confirm button = pin to bottom
           Positioned(
             left: 0,
             right: 0,

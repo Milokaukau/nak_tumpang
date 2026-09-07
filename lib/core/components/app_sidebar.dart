@@ -37,6 +37,8 @@ class AppSidebar extends StatelessWidget {
     this.selectedIndex = -1,
   });
 
+  bool get _isDriver => userRole.toLowerCase() == 'driver';
+
   @override
   Widget build(BuildContext context) {
     return Drawer(
@@ -82,7 +84,9 @@ class AppSidebar extends StatelessWidget {
             _buildMenuItem(context, index: 0, title: 'View Profile'),
             _buildMenuItem(context, index: 1, title: 'View Subscriptions'),
             _buildMenuItem(context, index: 2, title: 'View Requests'),
-            _buildMenuItem(context, index: 3, title: 'Payment / My Earnings'),
+            // Passengers pay for trips, drivers earn from them — same
+            // slot, different label/destination depending on role.
+            _buildMenuItem(context, index: 3, title: _isDriver ? 'My Earnings' : 'View Payment'),
 
             const SizedBox(height: 8), // Slight extra gap before Sign Out
 
@@ -132,7 +136,10 @@ class AppSidebar extends StatelessWidget {
         nextScreen = const ProfileScreen(); // Replace with actual screen
         break;
       case 3:
-        nextScreen = const DriverBalanceScreen( ); // Replace with actual screen
+      // Driver -> wallet/earnings. Passenger -> payment history (not
+      // built yet, so this falls back to Profile like the other
+      // placeholders above until that screen exists).
+        nextScreen = _isDriver ? const DriverBalanceScreen() : const ProfileScreen();
         break;
       default:
         return;

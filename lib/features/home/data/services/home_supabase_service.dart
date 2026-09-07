@@ -3,6 +3,28 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 class HomeSupabaseService {
   final _supabase = Supabase.instance.client;
 
+  /// Real signed-in user's profile (id/name/role), read from the current
+  /// Supabase auth session — not a hardcoded mock ID. Returns null if
+  /// nobody is signed in, or their `users` row doesn't exist yet.
+  Future<Map<String, dynamic>?> fetchCurrentUserProfile() async {
+    final authUser = _supabase.auth.currentUser;
+    if (authUser == null) return null;
+
+    try {
+      final row = await _supabase
+          .from('users')
+          .select('name, role')
+          .eq('id', authUser.id)
+          .maybeSingle();
+
+      if (row == null) return null;
+      return {'id': authUser.id, ...row};
+    } catch (e) {
+      print('⚠️ Error fetching current user profile: $e');
+      return null;
+    }
+  }
+
   Future<List<Map<String, dynamic>>> fetchPassengerTrips(String userId) async {
     try {
       final response = await _supabase

@@ -18,23 +18,33 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
 
-    // Trigger the database fetch as soon as the screen renders
+    // AuthGate rebuilds HomeScreen fresh each time a session starts, so
+    // this fires once per real login — fetching the actual signed-in
+    // user's role/data instead of a hardcoded mock ID.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<HomeViewModel>().fetchMockDriver();
+      context.read<HomeViewModel>().fetchCurrentUser();
     });
   }
 
   @override
   Widget build(BuildContext context) {
     // context.select ensures the map only rebuilds if the specific name string changes
-    final passengerName = context.select<HomeViewModel, String?>(
-            (viewModel) => viewModel.currentPassenger?['name']
+    final displayName = context.select<HomeViewModel, String?>(
+            (viewModel) => viewModel.currentUserName ?? viewModel.currentPassenger?['name']
     );
+    // Pull the real role from the view model instead of assuming 'Passenger' —
+    // currentUserRole is set to the actual signed-in user's role by fetchCurrentUser().
+    final currentUserRole = context.select<HomeViewModel, String>(
+            (viewModel) => viewModel.currentUserRole
+    );
+    final displayRole = currentUserRole.isEmpty
+        ? 'Passenger'
+        : currentUserRole[0].toUpperCase() + currentUserRole.substring(1);
 
     return Scaffold(
       endDrawer: AppSidebar(
-        userName: passengerName ?? 'Loading...',
-        userRole: 'Passenger',
+        userName: displayName ?? 'Loading...',
+        userRole: displayRole,
         selectedIndex: -1,
       ),
       body: Stack(
