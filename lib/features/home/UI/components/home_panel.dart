@@ -9,6 +9,7 @@ import 'package:nak_tumpang/features/home/UI/components/trip_selection_dropdown.
 import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
 import 'package:nak_tumpang/features/home/UI/components/active_subscription_card.dart';
 import 'package:nak_tumpang/features/trips/UI/add_edit_trip_screen.dart';
+import 'package:nak_tumpang/features/negotiation/UI/screens/negotiation_screen.dart';
 
 class HomePanel extends StatelessWidget {
   const HomePanel({super.key});
@@ -34,7 +35,6 @@ class HomePanel extends StatelessWidget {
             controller: scrollController,
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
             children: [
-              // Handle Bar
               Center(
                 child: Container(
                   margin: const EdgeInsets.only(bottom: 24),
@@ -46,15 +46,13 @@ class HomePanel extends StatelessWidget {
                   ),
                 ),
               ),
-
-              // --- ROLE-BASED ROUTING ---
               if (viewModel.currentUserRole == 'driver')
-                ..._buildDriverView(context, viewModel) // FIX: Passed context
+                ..._buildDriverView(context, viewModel)
               else ...[
                 if (viewModel.activeSubscriptions.isNotEmpty && !viewModel.showMatchingUI)
                   ..._buildPassengerSubscriptionView(viewModel)
                 else
-                  ..._buildPassengerMatchingView(context, viewModel), // FIX: Passed context
+                  ..._buildPassengerMatchingView(context, viewModel),
               ],
             ],
           ),
@@ -63,9 +61,6 @@ class HomePanel extends StatelessWidget {
     );
   }
 
-  // ==========================================
-  // VIEW MODE: DRIVER
-  // ==========================================
   List<Widget> _buildDriverView(BuildContext context, HomeViewModel viewModel) {
     if (viewModel.activeSubscriptions.isNotEmpty && !viewModel.showMatchingUI) {
       return [
@@ -85,7 +80,7 @@ class HomePanel extends StatelessWidget {
         ),
       ];
     } else {
-      return _buildDriverUnmatchedView(context, viewModel); // FIX: Passed context
+      return _buildDriverUnmatchedView(context, viewModel);
     }
   }
 
@@ -103,12 +98,10 @@ class HomePanel extends StatelessWidget {
             ),
           ),
         ),
-
       const TripSelectionDropdown(),
       const SizedBox(height: 32),
-
       if (viewModel.currentSelectedTrip == null)
-        _buildEmptyStatePrompt(context, viewModel) // FIX: Passed context
+        _buildEmptyStatePrompt(context, viewModel)
       else
         const Center(
           child: Text(
@@ -119,9 +112,6 @@ class HomePanel extends StatelessWidget {
     ];
   }
 
-  // ==========================================
-  // VIEW MODE: PASSENGER SUBSCRIPTIONS
-  // ==========================================
   List<Widget> _buildPassengerSubscriptionView(HomeViewModel viewModel) {
     return [
       const Text('My Active Subscriptions', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
@@ -141,9 +131,6 @@ class HomePanel extends StatelessWidget {
     ];
   }
 
-  // ==========================================
-  // VIEW MODE: PASSENGER MATCHING UI
-  // ==========================================
   List<Widget> _buildPassengerMatchingView(BuildContext context, HomeViewModel viewModel) {
     return [
       if (viewModel.activeSubscriptions.isNotEmpty)
@@ -158,7 +145,6 @@ class HomePanel extends StatelessWidget {
             ),
           ),
         ),
-
       const TripSelectionDropdown(),
       const SizedBox(height: 24),
       const Text('Available options', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
@@ -171,7 +157,7 @@ class HomePanel extends StatelessWidget {
       const SizedBox(height: 24),
 
       if (viewModel.currentSelectedTrip == null)
-        _buildEmptyStatePrompt(context, viewModel) // FIX: Passed context
+        _buildEmptyStatePrompt(context, viewModel)
       else if (viewModel.selectedFilter == 'Direct') ...[
         if (viewModel.isDirectLoading)
           const Center(child: CircularProgressIndicator(color: AppColors.primaryYellow))
@@ -198,6 +184,32 @@ class HomePanel extends StatelessWidget {
                   distanceKm: driver['pickup_distance_km'] ?? 0.0,
                   departTime: drivProfile['depart_time'],
                   profileImageUrl: driver['profile_image_url'],
+                  isRequested: driver['is_requested'] ?? false,
+
+                  onRequestTumpang: () async {
+                    // --- CLEANUP: Removed unused driverId parameter ---
+                    final requestId = await viewModel.requestTumpang(
+                      driverTripId: driver['trip_id'],
+                      passengerTripId: viewModel.currentSelectedTrip!['id'],
+                    );
+
+                    if (!context.mounted) return;
+
+                    if (requestId != null) {
+                      viewModel.markDriverRequestedGlobally([driver['trip_id']]);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Request sent!'), backgroundColor: Colors.green),
+                      );
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => NegotiationScreen(requestId: requestId)),
+                      );
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Failed to send request.'), backgroundColor: Colors.red),
+                      );
+                    }
+                  },
                 ),
                 if (index != viewModel.matchedDrivers.length - 1)
                   const Padding(
@@ -251,6 +263,82 @@ class HomePanel extends StatelessWidget {
                   dropoffDistanceKm: route['dropoff_distance_km'],
                   walkToDestMeters: route['walk_to_dest_meters'],
                   walkToDestMins: route['walk_to_dest_mins'],
+
+                  isRequested: route['is_requested'] ?? false,
+
+                  onRequestTumpang: () async {
+                    String? requestIdA;
+                    String? requestIdB;
+
+                    final bool attemptA = route['first_mile_type'] == 'Driver' &&
+                        route['driver_a_trip_id'] != null &&
+                        !(route['is_driver_a_requested'] ?? false);
+
+                    final bool attemptB = route['last_mile_type'] == 'Driver' &&
+                        route['driver_b_trip_id'] != null &&
+                        !(route['is_driver_b_requested'] ?? false);
+
+                    // --- CLEANUP: Removed unused driverId parameter ---
+                    if (attemptA) {
+                      requestIdA = await viewModel.requestTumpang(
+                        driverTripId: route['driver_a_trip_id'],
+                        passengerTripId: viewModel.currentSelectedTrip!['id'],
+                        overridePickupLat: viewModel.currentSelectedTrip!['pickup_lat'],
+                        overridePickupLng: viewModel.currentSelectedTrip!['pickup_lng'],
+                        overridePickupName: viewModel.currentSelectedTrip!['pickup_name'],
+                        overrideDropoffLat: route['board_station_lat'],
+                        overrideDropoffLng: route['board_station_lng'],
+                        overrideDropoffName: route['board_station'],
+                        overridePickupTime: viewModel.currentSelectedTrip!['desired_pickup_time'],
+                      );
+                    }
+
+                    if (attemptB) {
+                      requestIdB = await viewModel.requestTumpang(
+                        driverTripId: route['driver_b_trip_id'],
+                        passengerTripId: viewModel.currentSelectedTrip!['id'],
+                        overridePickupLat: route['alight_station_lat'],
+                        overridePickupLng: route['alight_station_lng'],
+                        overridePickupName: route['alight_station'],
+                        overrideDropoffLat: viewModel.currentSelectedTrip!['dropoff_lat'],
+                        overrideDropoffLng: viewModel.currentSelectedTrip!['dropoff_lng'],
+                        overrideDropoffName: viewModel.currentSelectedTrip!['dropoff_name'],
+                        overridePickupTime: route['driver_b_depart_sql'],
+                      );
+                    }
+
+                    if (!context.mounted) return;
+
+                    final bool successA = attemptA ? (requestIdA != null) : true;
+                    final bool successB = attemptB ? (requestIdB != null) : true;
+                    final bool allSuccess = successA && successB;
+
+                    if (allSuccess) {
+                      List<String> requestedIds = [];
+                      if (requestIdA != null) requestedIds.add(route['driver_a_trip_id']);
+                      if (requestIdB != null) requestedIds.add(route['driver_b_trip_id']);
+
+                      if (requestedIds.isNotEmpty) {
+                        viewModel.markDriverRequestedGlobally(requestedIds);
+                      }
+
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Mixed requests sent successfully!'), backgroundColor: Colors.green),
+                      );
+
+                      final targetId = requestIdA ?? requestIdB;
+                      if (targetId != null) {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => NegotiationScreen(requestId: targetId)),
+                        );
+                      }
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Failed to send one or more requests.'), backgroundColor: Colors.red),
+                      );
+                    }
+                  },
                 ),
                 if (index != viewModel.mixedMatchedRoutes.length - 1)
                   const Padding(
@@ -264,7 +352,6 @@ class HomePanel extends StatelessWidget {
     ];
   }
 
-  // --- REUSABLE EMPTY STATE PROMPT ---
   Widget _buildEmptyStatePrompt(BuildContext context, HomeViewModel viewModel) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 32),

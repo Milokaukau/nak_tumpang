@@ -32,6 +32,9 @@ class MixedRouteOptionCard extends StatelessWidget {
   final double walkToDestMeters;
   final int walkToDestMins;
 
+  final VoidCallback? onRequestTumpang;
+  final bool isRequested;
+
   const MixedRouteOptionCard({
     super.key,
     required this.firstMileType,
@@ -58,6 +61,8 @@ class MixedRouteOptionCard extends StatelessWidget {
     required this.walkToStationMins,
     required this.walkToDestMeters,
     required this.walkToDestMins,
+    this.onRequestTumpang,
+    this.isRequested = false,
   });
 
   String _formatStationName(String name, String lineName) {
@@ -116,9 +121,28 @@ class MixedRouteOptionCard extends StatelessWidget {
         ),
 
         const SizedBox(height: 16),
-        BaseButton(
+        isRequested
+            ? ElevatedButton(
+          onPressed: () {}, // Disabled state
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.grey.shade200,
+            foregroundColor: Colors.grey.shade500,
+            elevation: 0,
+            minimumSize: const Size(double.infinity, 50),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+          child: const Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.check_circle, size: 18),
+              SizedBox(width: 8),
+              Text('Requested Tumpang', style: TextStyle(fontWeight: FontWeight.bold)),
+            ],
+          ),
+        )
+            : BaseButton(
           text: 'Request tumpang',
-          onPressed: () => print('Requesting mixed route...'),
+          onPressed: onRequestTumpang,
         ),
       ],
     );

@@ -10,15 +10,16 @@ import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
 const _weekdayNames = ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 class AddEditTripScreen extends StatelessWidget {
-  const AddEditTripScreen({super.key});
+  final Map<String, dynamic>? existingTrip;
+
+  const AddEditTripScreen({super.key, this.existingTrip});
 
   @override
   Widget build(BuildContext context) {
-    // Read the user role from the existing MyTripsViewModel
     final role = context.read<MyTripsViewModel>().currentUserRole;
 
     return ChangeNotifierProvider(
-      create: (_) => AddEditTripViewModel(role),
+      create: (_) => AddEditTripViewModel(role, existingTrip: existingTrip),
       child: const _AddEditTripView(),
     );
   }
@@ -28,14 +29,14 @@ class _AddEditTripView extends StatelessWidget {
   const _AddEditTripView();
 
   Future<void> _complete(BuildContext context, AddEditTripViewModel vm) async {
-    final success = await vm.submit();
-    if (!context.mounted || !success) return;
+    final savedTrip = await vm.submit();
+    if (!context.mounted || savedTrip == null) return;
 
     // Refresh the My Trips list
     context.read<MyTripsViewModel>().loadMyTrips();
 
-    // --- ADD THIS LINE: Refresh the Home Dashboard dropdown ---
-    context.read<HomeViewModel>().fetchCurrentUser();
+    // --- OPTIMIZED: Update Home Dashboard locally instead of heavy API refetch ---
+    context.read<HomeViewModel>().addOrUpdateLocalTrip(savedTrip);
 
     Navigator.of(context).pop();
   }

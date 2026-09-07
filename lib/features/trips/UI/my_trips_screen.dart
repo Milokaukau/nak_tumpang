@@ -37,8 +37,8 @@ class _MyTripsScreenState extends State<MyTripsScreen> {
               if (!context.mounted) return;
 
               if (success) {
-                // Update home screen when a trip is deleted
-                context.read<HomeViewModel>().fetchCurrentUser();
+                // --- OPTIMIZED: Update home screen locally instead of heavy API refetch ---
+                context.read<HomeViewModel>().removeLocalTrip(tripId);
               }
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
@@ -147,7 +147,7 @@ class _MyTripsScreenState extends State<MyTripsScreen> {
     final startStr = startLocation ?? 'Unknown Origin';
     final endStr = endLocation ?? 'Unknown Destination';
 
-    final isLocked = status == TripStatus.active; // Only fully disable if active. (Allow edit/cancel if just negotiating, or change to status != TripStatus.none if you want both locked).
+    final isLocked = status == TripStatus.active;
 
     return Container(
       decoration: BoxDecoration(
@@ -195,8 +195,14 @@ class _MyTripsScreenState extends State<MyTripsScreen> {
               Expanded(
                 child: BaseButton(
                   text: 'Edit',
-                  // Passing null to onPressed natively disables flutter buttons
-                  onPressed: isLocked ? null : () {},
+                  onPressed: isLocked ? null : () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => AddEditTripScreen(existingTrip: trip),
+                      ),
+                    );
+                  },
                   isOutlined: true,
                   height: 40,
                   foregroundColor: isLocked ? Colors.grey[400] : AppColors.black,

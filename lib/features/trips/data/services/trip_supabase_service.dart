@@ -55,7 +55,7 @@ class TripSupabaseService {
           .from('tumpang_request')
           .select('$tripKey, $tripTable!inner(user_id)')
           .eq('$tripTable.user_id', userId)
-          .eq('status', 'pending');
+          .or('status.eq.pending,status.eq.negotiating');
 
       return (response as List)
           .map((req) => req[tripKey])
@@ -68,15 +68,19 @@ class TripSupabaseService {
     }
   }
 
-  // Throws exception to be caught and formatted by the ViewModel
   Future<void> deleteTrip(String tripId, String role) async {
     final table = role == 'driver' ? 'driver_trips' : 'passenger_trips';
     await _supabase.from(table).delete().eq('id', tripId);
   }
 
-  // Throws exception to be caught and formatted by the ViewModel
   Future<void> insertTrip(Map<String, dynamic> tripData, String role) async {
     final table = role == 'driver' ? 'driver_trips' : 'passenger_trips';
     await _supabase.from(table).insert(tripData);
+  }
+
+  // --- NEW: Handle updating existing trips ---
+  Future<void> updateTrip(String tripId, Map<String, dynamic> tripData, String role) async {
+    final table = role == 'driver' ? 'driver_trips' : 'passenger_trips';
+    await _supabase.from(table).update(tripData).eq('id', tripId);
   }
 }

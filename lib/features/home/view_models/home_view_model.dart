@@ -7,6 +7,7 @@ import 'package:nak_tumpang/features/home/data/services/home_supabase_service.da
 import 'package:nak_tumpang/core/services/gtfs_service.dart';
 import 'package:nak_tumpang/core/utils/transit_utils.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
+import 'package:uuid/uuid.dart';
 
 class HomeViewModel extends ChangeNotifier {
   String selectedFilter = 'Direct';
@@ -43,6 +44,148 @@ class HomeViewModel extends ChangeNotifier {
 
   final Map<String, List<LatLng>> _routeCache = {};
 
+  // --- CLEANED UP: Removed unused driverId parameter ---
+  Future<String?> requestTumpang({
+    required String driverTripId,
+    required String passengerTripId,
+    dynamic overridePickupLat,
+    dynamic overridePickupLng,
+    String? overridePickupName,
+    dynamic overrideDropoffLat,
+    dynamic overrideDropoffLng,
+    String? overrideDropoffName,
+    String? overridePickupTime,
+  }) async {
+    final authUser = _auth.currentUser;
+    if (authUser == null || currentSelectedTrip == null) return null;
+
+    final pickupLat = overridePickupLat ?? currentSelectedTrip!['pickup_lat'];
+    final pickupLng = overridePickupLng ?? currentSelectedTrip!['pickup_lng'];
+    final pickupName = overridePickupName ?? currentSelectedTrip!['pickup_name'];
+
+    final dropoffLat = overrideDropoffLat ?? currentSelectedTrip!['dropoff_lat'];
+    final dropoffLng = overrideDropoffLng ?? currentSelectedTrip!['dropoff_lng'];
+    final dropoffName = overrideDropoffName ?? currentSelectedTrip!['dropoff_name'];
+
+    final pickupTime = overridePickupTime ?? currentSelectedTrip!['desired_pickup_time'];
+
+    final requestId = const Uuid().v4();
+
+    final payload = {
+      'id': requestId,
+      'passenger_trip_id': passengerTripId,
+      'driver_trip_id': driverTripId,
+      'status': 'negotiating',
+
+      'pickup_lat': pickupLat,
+      'pickup_lng': pickupLng,
+      'pickup_name': pickupName,
+      'pickup_requested_by': authUser.id,
+      'pickup_is_accepted': false,
+
+      'dropoff_lat': dropoffLat,
+      'dropoff_lng': dropoffLng,
+      'dropoff_name': dropoffName,
+      'dropoff_requested_by': authUser.id,
+      'dropoff_is_accepted': false,
+
+      'pickup_time': pickupTime,
+      'pickup_time_requested_by': authUser.id,
+      'pickup_time_is_accepted': false,
+
+      'fee': 0.0,
+      'fee_requested_by': authUser.id,
+      'fee_is_accepted': false,
+
+      'sub_start_date': null,
+      'sub_start_requested_by': authUser.id,
+      'sub_start_is_accepted': false,
+
+      'sub_end_date': null,
+      'sub_end_requested_by': authUser.id,
+      'sub_end_is_accepted': false,
+    };
+
+    final success = await _homeService.createTumpangRequest(payload);
+
+    return success ? requestId : null;
+  }
+
+  void markDriverRequestedGlobally(List<String> requestedDriverTripIds) {
+    if (requestedDriverTripIds.isEmpty) return;
+
+    for (var driver in matchedDrivers) {
+      if (requestedDriverTripIds.contains(driver['trip_id'])) {
+        driver['is_requested'] = true;
+      }
+    }
+
+    for (var route in mixedMatchedRoutes) {
+      if (requestedDriverTripIds.contains(route['driver_a_trip_id'])) {
+        route['is_driver_a_requested'] = true;
+      }
+      if (requestedDriverTripIds.contains(route['driver_b_trip_id'])) {
+        route['is_driver_b_requested'] = true;
+      }
+
+      bool hasDriverA = route['first_mile_type'] == 'Driver' && route['driver_a_trip_id'] != null;
+      bool hasDriverB = route['last_mile_type'] == 'Driver' && route['driver_b_trip_id'] != null;
+      bool isReqA = route['is_driver_a_requested'] ?? false;
+      bool isReqB = route['is_driver_b_requested'] ?? false;
+
+      if (hasDriverA && hasDriverB) {
+        route['is_requested'] = isReqA && isReqB;
+      } else if (hasDriverA) {
+        route['is_requested'] = isReqA;
+      } else if (hasDriverB) {
+        route['is_requested'] = isReqB;
+      }
+    }
+    notifyListeners();
+  }
+
+  // --- NEW ZERO-API OPTIMIZATION: Seamlessly insert/update trip into memory ---
+  void addOrUpdateLocalTrip(Map<String, dynamic> trip) {
+    final index = availableTrips.indexWhere((t) => t['id'] == trip['id']);
+    if (index != -1) {
+      availableTrips[index] = trip;
+    } else {
+      availableTrips.add(trip);
+    }
+
+    if (currentSelectedTrip?['id'] == trip['id']) {
+      currentSelectedTrip = trip;
+      _hasFoundDirect = false;
+      _hasFoundMixed = false;
+      matchedDrivers.clear();
+      mixedMatchedRoutes.clear();
+      updateMapRoute();
+      if (showMatchingUI) {
+        _matchCurrentRouteType();
+      }
+    } else if (currentSelectedTrip == null && availableTrips.length == 1) {
+      changeTrip(trip['id']);
+    }
+    notifyListeners();
+  }
+
+  void removeLocalTrip(String tripId) {
+    availableTrips.removeWhere((t) => t['id'] == tripId);
+
+    if (currentSelectedTrip?['id'] == tripId) {
+      currentSelectedTrip = availableTrips.isNotEmpty ? availableTrips.first : null;
+      _hasFoundDirect = false;
+      _hasFoundMixed = false;
+      matchedDrivers.clear();
+      mixedMatchedRoutes.clear();
+      updateMapRoute();
+      if (showMatchingUI && currentSelectedTrip != null) {
+        _matchCurrentRouteType();
+      }
+    }
+    notifyListeners();
+  }
+
   Future<List<LatLng>> _getCachedRoute(LatLng start, LatLng end) async {
     final cacheKey = '${start.latitude},${start.longitude}-${end.latitude},${end.longitude}';
 
@@ -74,15 +217,10 @@ class HomeViewModel extends ChangeNotifier {
     }
   }
 
-  // ==========================================
-  // FETCH METHODS
-  // ==========================================
-
   Future<void> fetchCurrentUser() async {
     final requestId = ++_userFetchId;
     isScreenLoading = true;
 
-    // --- FIX: Cleared Cache to prevent Memory Leaks across accounts ---
     _routeCache.clear();
 
     currentUserRole = 'passenger';
@@ -103,7 +241,6 @@ class HomeViewModel extends ChangeNotifier {
 
     final authUser = _auth.currentUser;
     if (authUser == null) {
-      print('⚠️ fetchCurrentUser called with no authenticated user.');
       if (requestId == _userFetchId) {
         isScreenLoading = false;
         notifyListeners();
@@ -111,12 +248,10 @@ class HomeViewModel extends ChangeNotifier {
       return;
     }
 
-    // Fetch user profile and role directly from users table
     final profile = await _homeService.fetchUserProfile(authUser.id);
     if (requestId != _userFetchId) return;
 
     if (profile == null) {
-      print('⚠️ fetchCurrentUser: user profile not found for ${authUser.id}');
       if (requestId == _userFetchId) {
         isScreenLoading = false;
         notifyListeners();
@@ -128,7 +263,6 @@ class HomeViewModel extends ChangeNotifier {
     final role = profile['role'] as String?;
 
     if (role == null || (role != 'driver' && role != 'passenger')) {
-      print('⚠️ fetchCurrentUser: user ${authUser.id} has no valid role ($role).');
       if (requestId == _userFetchId) {
         isScreenLoading = false;
         notifyListeners();
@@ -228,10 +362,6 @@ class HomeViewModel extends ChangeNotifier {
     }
   }
 
-  // ==========================================
-  // MATCHING LOGIC
-  // ==========================================
-
   Future<void> _matchCurrentRouteType() async {
     if (selectedFilter == 'Direct' && !_hasFoundDirect) {
       await _findDirectDrivers();
@@ -253,6 +383,9 @@ class HomeViewModel extends ChangeNotifier {
     final passTime = _sqlTimeToMinutes(currentSelectedTrip!['desired_pickup_time']);
 
     final driverTrips = await _homeService.fetchDriverTrips();
+    if (_fetchId != currentFetchId) return;
+
+    final existingReqIds = await _homeService.fetchRequestedDriverTripIds(currentSelectedTrip!['id']);
     if (_fetchId != currentFetchId) return;
 
     List<Map<String, dynamic>> tempMatchedDrivers = [];
@@ -289,20 +422,21 @@ class HomeViewModel extends ChangeNotifier {
         if (MatchingUtils.isRouteMatch(passPick, passDrop, driverRoute, 800)) {
           tempMatchedDrivers.add({
             'id': driverTrip['user_id'],
+            'trip_id': driverTrip['id'],
             'name': driverName,
             'phone': driverTrip['users']?['phone'] ?? 'N/A',
             'profile_image_url': driverTrip['users']?['avatar_url'],
             'pickup_distance_km': pickDist / 1000,
+
+            'is_requested': existingReqIds.contains(driverTrip['id']),
+
             'driver_profile': {
               'depart_time': _formatSqlTimeToUI(driverTrip['depart_time']),
             },
           });
         }
       } catch (e) {
-        print('⚠️ ORS Route Error: $e');
-        if (e.toString().contains('Quota') || e.toString().contains('SocketException')) {
-          break;
-        }
+        if (e.toString().contains('Quota') || e.toString().contains('SocketException')) break;
         continue;
       }
     }
@@ -331,6 +465,9 @@ class HomeViewModel extends ChangeNotifier {
     if (_fetchId != currentFetchId) return;
 
     await GtfsService().initStations();
+    if (_fetchId != currentFetchId) return;
+
+    final existingReqIds = await _homeService.fetchRequestedDriverTripIds(currentSelectedTrip!['id']);
     if (_fetchId != currentFetchId) return;
 
     List<Map<String, dynamic>> tempMixedRoutes = [];
@@ -418,8 +555,11 @@ class HomeViewModel extends ChangeNotifier {
 
                 firstMileOptions.add({
                   'type': 'Driver',
+                  'driver_id': driverTrip['user_id'],
+                  'trip_id': driverTrip['id'],
                   'driver_name': driverName,
                   'depart_time': _formatSqlTimeToUI(driverTrip['depart_time']),
+                  'depart_time_sql': driverTrip['depart_time'],
                   'distance_km': pickDist / 1000,
                   'arrival_at_board_station': drivTime + driveMinsToStation,
                 });
@@ -442,8 +582,11 @@ class HomeViewModel extends ChangeNotifier {
               if (MatchingUtils.isRouteMatch(dropStation.location, passDrop, driverRoute, 800)) {
                 lastMileOptions.add({
                   'type': 'Driver',
+                  'driver_id': driverTrip['user_id'],
+                  'trip_id': driverTrip['id'],
                   'driver_name': driverName,
                   'depart_time': _formatSqlTimeToUI(driverTrip['depart_time']),
+                  'depart_time_sql': driverTrip['depart_time'],
                   'depart_time_mins': drivTime,
                   'distance_km': pickDistFromStation / 1000,
                 });
@@ -451,10 +594,7 @@ class HomeViewModel extends ChangeNotifier {
             }
           }
         } catch (e) {
-          print('⚠️ ORS Route Error inside mixed loop: $e');
-          if (e.toString().contains('Quota') || e.toString().contains('SocketException')) {
-            break;
-          }
+          if (e.toString().contains('Quota') || e.toString().contains('SocketException')) break;
           continue;
         }
       }
@@ -463,25 +603,47 @@ class HomeViewModel extends ChangeNotifier {
         final arrivalAtDropStation = fm['arrival_at_board_station'] + trainDuration;
 
         for (var lm in lastMileOptions) {
-          if (fm['type'] == 'Driver' && lm['type'] == 'Driver' && fm['driver_name'] == lm['driver_name']) {
-            continue;
-          }
+          if (fm['type'] == 'Driver' && lm['type'] == 'Driver' && fm['driver_name'] == lm['driver_name']) continue;
 
           if (lm['type'] == 'Driver') {
             final lmDepart = lm['depart_time_mins'];
             if ((lmDepart - arrivalAtDropStation).abs() > 45) continue;
           }
 
+          final driverAId = fm['trip_id'];
+          final driverBId = lm['trip_id'];
+          final bool isReqA = driverAId != null && existingReqIds.contains(driverAId);
+          final bool isReqB = driverBId != null && existingReqIds.contains(driverBId);
+
+          bool hasDriverA = fm['type'] == 'Driver' && driverAId != null;
+          bool hasDriverB = lm['type'] == 'Driver' && driverBId != null;
+
+          bool isRouteRequested = false;
+          if (hasDriverA && hasDriverB) {
+            isRouteRequested = isReqA && isReqB;
+          } else if (hasDriverA) {
+            isRouteRequested = isReqA;
+          } else if (hasDriverB) {
+            isRouteRequested = isReqB;
+          }
           tempMixedRoutes.add({
             'first_mile_type': fm['type'],
             'driver_a_name': fm['driver_name'],
+            'driver_a_id': fm['driver_id'],
+            'driver_a_trip_id': fm['trip_id'],
             'driver_a_depart': fm['depart_time'],
+            'driver_a_depart_sql': fm['depart_time_sql'],
             'pickup_distance_km': fm['distance_km'],
             'walk_to_station_meters': walkDistToStation,
             'walk_to_station_mins': walkDurationToStation,
 
             'board_station': pickStation.name,
+            'board_station_lat': pickStation.location.latitude,
+            'board_station_lng': pickStation.location.longitude,
+
             'alight_station': dropStation.name,
+            'alight_station_lat': dropStation.location.latitude,
+            'alight_station_lng': dropStation.location.longitude,
 
             'is_interchange': isInterchange,
             'board_line_name': pickStation.lineName,
@@ -494,13 +656,20 @@ class HomeViewModel extends ChangeNotifier {
 
             'last_mile_type': lm['type'],
             'driver_b_name': lm['driver_name'],
+            'driver_b_id': lm['driver_id'],
+            'driver_b_trip_id': lm['trip_id'],
             'driver_b_depart': lm['depart_time'],
+            'driver_b_depart_sql': lm['depart_time_sql'],
             'dropoff_distance_km': lm['distance_km'],
             'walk_to_dest_meters': walkDistToDest,
             'walk_to_dest_mins': walkDurationToDest,
 
             'pickup_name': currentSelectedTrip?['pickup_name'] ?? 'Pickup',
             'destination_name': currentSelectedTrip?['dropoff_name'] ?? 'Destination',
+
+            'is_driver_a_requested': isReqA,
+            'is_driver_b_requested': isReqB,
+            'is_requested': isRouteRequested,
           });
         }
       }
@@ -515,10 +684,6 @@ class HomeViewModel extends ChangeNotifier {
     isMixedLoading = false;
     notifyListeners();
   }
-
-  // ==========================================
-  // MAP ROUTE LOGIC
-  // ==========================================
 
   void selectSubscription(String subId) {
     if (selectedSubscriptionId == subId) return;
@@ -559,7 +724,6 @@ class HomeViewModel extends ChangeNotifier {
           end = _latLngFromMap(sub, 'dropoff_lat', 'dropoff_lng');
         }
 
-        // --- FIX: Idiomatic Safe Check ---
         if (start?.latitude == 0.0 || end?.latitude == 0.0) return _clearMap();
 
         final route = await _getCachedRoute(start!, end!);
@@ -635,14 +799,7 @@ class HomeViewModel extends ChangeNotifier {
     }
   }
 
-  // ==========================================
-  // HELPERS
-  // ==========================================
-
-  List<Map<String, dynamic>> _mapSubscriptions(
-      List<Map<String, dynamic>> rawSubs, {
-        required bool isForPassenger,
-      }) {
+  List<Map<String, dynamic>> _mapSubscriptions(List<Map<String, dynamic>> rawSubs, {required bool isForPassenger}) {
     return rawSubs.map((sub) {
       final tripKey = isForPassenger ? 'driver_trips' : 'passenger_trips';
       final defaultName = isForPassenger ? 'Unknown Driver' : 'Unknown Passenger';
@@ -684,11 +841,7 @@ class HomeViewModel extends ChangeNotifier {
     return double.tryParse(value.toString()) ?? 0.0;
   }
 
-  LatLng _latLngFromMap(
-      Map<String, dynamic> map,
-      String latKey,
-      String lngKey,
-      ) {
+  LatLng _latLngFromMap(Map<String, dynamic> map, String latKey, String lngKey) {
     return LatLng(_parseDouble(map[latKey]), _parseDouble(map[lngKey]));
   }
 

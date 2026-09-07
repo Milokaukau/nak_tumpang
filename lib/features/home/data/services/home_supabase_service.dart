@@ -30,13 +30,8 @@ class HomeSupabaseService {
     }
   }
 
-  // ==========================================
-  // PASSENGER SUBSCRIPTIONS
-  // ==========================================
   Future<List<Map<String, dynamic>>> fetchAllPassengerSubscriptions(String userId) async {
     try {
-      print('🔍 Fetching all passenger subscriptions for User ID: $userId');
-
       final response = await _supabase
           .from('tumpang_subscription')
           .select('''
@@ -48,7 +43,6 @@ class HomeSupabaseService {
             ),
             passenger_trips!inner(user_id) 
           ''')
-      // Filters for ALL trips belonging to this user
           .eq('passenger_trips.user_id', userId)
           .eq('status', 'active');
 
@@ -59,13 +53,8 @@ class HomeSupabaseService {
     }
   }
 
-  // ==========================================
-  // DRIVER SUBSCRIPTIONS
-  // ==========================================
   Future<List<Map<String, dynamic>>> fetchDriverActiveSubscriptions(String userId) async {
     try {
-      print('🔍 Fetching all driver subscriptions for User ID: $userId');
-
       final response = await _supabase
           .from('tumpang_subscription')
           .select('''
@@ -103,6 +92,32 @@ class HomeSupabaseService {
     } catch (e) {
       print('⚠️ Error fetching user profile: $e');
       return null;
+    }
+  }
+
+  Future<bool> createTumpangRequest(Map<String, dynamic> requestPayload) async {
+    try {
+      await _supabase.from('tumpang_request').insert(requestPayload);
+      return true;
+    } catch (e) {
+      print('⚠️ Error creating tumpang request: $e');
+      return false;
+    }
+  }
+
+  // --- NEW: Fetch existing requests so buttons stay disabled on reload ---
+  Future<Set<String>> fetchRequestedDriverTripIds(String passengerTripId) async {
+    try {
+      final response = await _supabase
+          .from('tumpang_request')
+          .select('driver_trip_id')
+          .eq('passenger_trip_id', passengerTripId)
+          .or('status.eq.pending,status.eq.negotiating'); // Look for active requests
+
+      return (response as List).map((row) => row['driver_trip_id'].toString()).toSet();
+    } catch (e) {
+      print('⚠️ Error fetching requested driver trips: $e');
+      return {};
     }
   }
 }
