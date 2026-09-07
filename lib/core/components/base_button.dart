@@ -3,7 +3,7 @@ import 'package:nak_tumpang/core/theme/app_colors.dart';
 
 class BaseButton extends StatelessWidget {
   final String text;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
   final bool isFullWidth;
   final TextStyle? textStyle;
   final bool isOutlined;
@@ -20,7 +20,7 @@ class BaseButton extends StatelessWidget {
   const BaseButton({
     super.key,
     required this.text,
-    required this.onPressed,
+    this.onPressed,
     this.isFullWidth = true,
     this.textStyle,
     this.isOutlined = false,

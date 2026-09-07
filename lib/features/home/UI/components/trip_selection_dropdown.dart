@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
+import 'package:nak_tumpang/features/trips/UI/add_edit_trip_screen.dart';
 
 class TripSelectionDropdown extends StatelessWidget {
   const TripSelectionDropdown({super.key});
@@ -35,8 +36,10 @@ class TripSelectionDropdown extends StatelessWidget {
           ],
           onChanged: (value) {
             if (value == 'ADD_NEW') {
-              print('Navigate to Add Trip Screen');
-              // Navigator.pushNamed(context, '/add_trip');
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const AddEditTripScreen()),
+              );
               return;
             }
             if (value != null) {

@@ -8,6 +8,7 @@ import 'package:nak_tumpang/features/home/UI/components/mixed_route_option_card.
 import 'package:nak_tumpang/features/home/UI/components/trip_selection_dropdown.dart';
 import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
 import 'package:nak_tumpang/features/home/UI/components/active_subscription_card.dart';
+import 'package:nak_tumpang/features/trips/UI/add_edit_trip_screen.dart';
 
 class HomePanel extends StatelessWidget {
   const HomePanel({super.key});
@@ -279,8 +280,10 @@ class HomePanel extends StatelessWidget {
           const SizedBox(height: 4),
           GestureDetector(
             onTap: () {
-              print('Navigate to Add Trip Screen');
-              // Navigator.pushNamed(context, '/add_trip'); // <-- Context is now safely available!
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const AddEditTripScreen()),
+              );
             },
             child: const Text(
               'Add one now.',
