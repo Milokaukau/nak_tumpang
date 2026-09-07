@@ -5,6 +5,7 @@ import 'package:nak_tumpang/features/profile/UI/screens/profile_screen.dart';
 import 'package:nak_tumpang/features/auth/UI/screens/login_screen.dart';
 import 'package:nak_tumpang/features/subscriptions/UI/screens/subscription_list_screen.dart';
 import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
+import 'package:nak_tumpang/features/rewards/UI/screens/rewards_screen.dart';
 
 class HamburgerButton extends StatelessWidget {
   const HamburgerButton({super.key});
@@ -85,6 +86,7 @@ class AppSidebar extends StatelessWidget {
             _buildMenuItem(context, index: 1, title: 'View Subscriptions'),
             _buildMenuItem(context, index: 2, title: 'View Requests'),
             _buildMenuItem(context, index: 3, title: 'Payment / My Earnings'),
+            _buildMenuItem(context, index: 5, title: 'My Rewards'),
 
             const SizedBox(height: 8), // Slight extra gap before Sign Out
 
@@ -134,12 +136,15 @@ class AppSidebar extends StatelessWidget {
           role: homeVm.currentUserRole,
         );
         break;
-        break;
       case 2:
         nextScreen = const ProfileScreen(); // Replace with actual screen
         break;
       case 3:
         nextScreen = const ProfileScreen(); // Replace with actual screen
+        break;
+      case 5:
+        final homeVm = Provider.of<HomeViewModel>(context, listen: false);
+        nextScreen = RewardsScreen(userId: homeVm.currentUserId ?? '');
         break;
       default:
         return;

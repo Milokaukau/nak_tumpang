@@ -152,39 +152,12 @@ class SubscriptionCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                flex: showPayButton ? 2 : 1,
-                child: BaseButton(
-                  text: 'View Tumpang Details',
-                  onPressed: onViewDetails,
-                ),
-              ),
-              if (showPayButton) ...[
-                const SizedBox(width: 8),
-                Expanded(
-                  flex: 1,
-                  child: ElevatedButton.icon(
-                    onPressed: onPayPressed,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      elevation: 0,
-                    ),
-                    icon: const Icon(Icons.payment, size: 16),
-                    label: const Text(
-                      'Pay',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ),
-              ],
-            ],
+          SizedBox(
+            width: double.infinity,
+            child: BaseButton(
+              text: 'View Tumpang Details',
+              onPressed: onViewDetails,
+            ),
           ),
         ],
       ),
