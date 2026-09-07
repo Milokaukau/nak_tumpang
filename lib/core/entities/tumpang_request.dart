@@ -59,6 +59,22 @@ class TumpangRequest {
   final NegotiatedField<String> subscriptionStartDate;
   final NegotiatedField<String> subscriptionEndDate;
 
+  /// Populated once this request's deposit is paid and a
+  /// tumpang_subscription row is created from it.
+  final String? subscriptionId;
+
+  /// True if this request was created as an extension of an existing
+  /// subscription, rather than a brand-new negotiation.
+  final bool isExtension;
+
+  /// The subscription this request is extending, when [isExtension] is true.
+  final String? extendsSubscriptionId;
+
+  /// 'date_only' -> only the end date changed, applied via UPDATE.
+  /// 'renegotiate' -> other terms changed too, applied via INSERT
+  /// (a fresh subscription row; the old one is preserved/superseded).
+  final String? extensionType;
+
   /// Number of days in the subscription period (inclusive of both ends).
   /// Returns 0 if either date is missing/unparseable.
   int get subscriptionDays {
@@ -73,6 +89,19 @@ class TumpangRequest {
   /// Total = daily rate * number of days in the subscription period.
   double get totalFee => fee.value * subscriptionDays;
 
+  /// For a normal request: all 6 negotiable fields must be accepted.
+  /// For a date-only extension: only the date fields matter (everything
+  /// else was pre-accepted/unchanged when the extension was created, so
+  /// checking all 6 would also be correct, but this makes the intent
+  /// explicit at call sites that care specifically about extensions).
+  bool get isFullyAgreed =>
+      fee.isAccepted &&
+          pickupTime.isAccepted &&
+          pickupLocation.isAccepted &&
+          dropoffLocation.isAccepted &&
+          subscriptionStartDate.isAccepted &&
+          subscriptionEndDate.isAccepted;
+
   TumpangRequest({
     required this.id,
     required this.passengerTripId,
@@ -84,6 +113,10 @@ class TumpangRequest {
     required this.fee,
     required this.subscriptionStartDate,
     required this.subscriptionEndDate,
+    this.subscriptionId,
+    this.isExtension = false,
+    this.extendsSubscriptionId,
+    this.extensionType,
   });
 
   // Accepts a single flat map from PostgreSQL row
@@ -120,6 +153,11 @@ class TumpangRequest {
         requestedBy: json['sub_end_requested_by']?.toString() ?? '',
         isAccepted: json['sub_end_is_accepted'] ?? false,
       ),
+
+      subscriptionId: json['subscription_id']?.toString(),
+      isExtension: json['is_extension'] == true,
+      extendsSubscriptionId: json['extends_subscription_id']?.toString(),
+      extensionType: json['extension_type']?.toString(),
     );
   }
 
@@ -158,6 +196,11 @@ class TumpangRequest {
       'sub_end_date': subscriptionEndDate.value,
       'sub_end_requested_by': subscriptionEndDate.requestedBy,
       'sub_end_is_accepted': subscriptionEndDate.isAccepted,
+
+      'subscription_id': subscriptionId,
+      'is_extension': isExtension,
+      'extends_subscription_id': extendsSubscriptionId,
+      'extension_type': extensionType,
     };
   }
 }

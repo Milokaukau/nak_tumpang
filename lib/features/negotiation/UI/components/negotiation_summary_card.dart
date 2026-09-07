@@ -38,8 +38,11 @@ class NegotiationSummaryCard extends StatelessWidget {
     final nowOnly = DateTime(now.year, now.month, now.day);
 
     final isExpired = nowOnly.isAfter(endDateOnly);
-    final daysUntilExpiry = endDateOnly.difference(nowOnly).inDays;
-    final isExpiringSoon = daysUntilExpiry >= 0 && daysUntilExpiry <= 7;
+    final daysSinceExpiry = isExpired ? nowOnly.difference(endDateOnly).inDays : 0;
+    // "no edit during sub period" - extend options only appear once the
+    // subscription has actually ended, never before.
+    // "after 1 week end can't extend any more" - hidden again past that.
+    final canStillExtend = isExpired && daysSinceExpiry <= 7;
 
     return Container(
       width: double.infinity,
@@ -73,7 +76,7 @@ class NegotiationSummaryCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 if (isReadOnly) ...[
-                  if (isExpired || isExpiringSoon) ...[
+                  if (canStillExtend) ...[
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
@@ -82,9 +85,8 @@ class NegotiationSummaryCard extends StatelessWidget {
                         border: Border.all(color: Colors.amber.shade300),
                       ),
                       child: Text(
-                        isExpired
-                            ? 'This subscription cycle ended on ${request.subscriptionEndDate.value}.'
-                            : 'Subscription ends soon on ${request.subscriptionEndDate.value}.',
+                        'This subscription ended on ${request.subscriptionEndDate.value}. '
+                            'You can extend it within 7 days of ending (${7 - daysSinceExpiry} day${(7 - daysSinceExpiry) == 1 ? '' : 's'} left).',
                         style: TextStyle(color: Colors.amber.shade900, fontWeight: FontWeight.bold, fontSize: 13),
                         textAlign: TextAlign.center,
                       ),
@@ -122,6 +124,19 @@ class NegotiationSummaryCard extends StatelessWidget {
                       onPressed: onCancelSubscription,
                       style: TextButton.styleFrom(foregroundColor: Colors.red),
                       child: const Text('Cancel & Refund Deposit', style: TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                  ] else if (isExpired) ...[
+                    const Row(
+                      children: [
+                        Icon(Icons.lock_clock, color: Colors.grey, size: 20),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'This subscription has ended and the 7-day extension window has passed.',
+                            style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ],
                     ),
                   ] else ...[
                     const Row(

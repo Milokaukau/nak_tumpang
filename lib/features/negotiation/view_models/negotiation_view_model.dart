@@ -225,39 +225,96 @@ class NegotiationViewModel extends ChangeNotifier {
     );
   }
 
-  // 1. Extend Subscription (Continue)
-  Future<void> extendSubscription({
+  /// Starts a "date only" extension: the driver just needs to accept a
+  /// new end date, nothing else changes, no new deposit is charged.
+  /// Returns the id of the new extension request.
+  Future<String> requestDateOnlyExtension({
     required String subscriptionId,
     required DateTime newEndDate,
-    required double monthlyFee,
-  }) async {
-    await _supabase.from('tumpang_subscription').update({
-      'subscription_end_date': newEndDate.toIso8601String().split('T').first,
-      'status': 'active',
-    }).eq('id', subscriptionId);
-
-    // Generate invoice for the new month
-    final paymentId = 'pay_${DateTime.now().millisecondsSinceEpoch}';
-    await _supabase.from('payments').insert({
-      'id': paymentId,
-      'tumpang_subscription_id': subscriptionId,
-      'month': newEndDate.month,
-      'year': newEndDate.year,
-      'due_date': DateTime.now().toIso8601String(),
-      'paid_at': null,
-      'amount': monthlyFee,
+  }) {
+    return runNegotiationAction(() async {
+      if (currentUserId == null) {
+        throw NegotiationException('You must be signed in to extend a subscription.');
+      }
+      final sub = await _fetchSubscriptionOrThrow(subscriptionId);
+      final newRequestId = await _service.createExtensionRequest(
+        subscription: sub,
+        requestedById: currentUserId!,
+        newEndDate: newEndDate,
+        extensionType: 'date_only',
+      );
+      await refreshRequests();
+      return newRequestId;
     });
-
-    notifyListeners();
   }
 
-  // 2. End Subscription & Mark Deposit for Refund
-  Future<void> endSubscription(String subscriptionId) async {
-    await _supabase.from('tumpang_subscription').update({
-      'status': 'completed',
-      'deposit_status': 'refunded',
-    }).eq('id', subscriptionId);
+  /// Starts an "extend + renegotiate" request. Creates the extension with
+  /// just a new end date to begin with — the passenger can then use the
+  /// normal "Edit" flow on the resulting request to change pickup,
+  /// dropoff, time, or fee, same as any other negotiation. Returns the id
+  /// of the new extension request.
+  Future<String> requestRenegotiatedExtension({
+    required String subscriptionId,
+    required DateTime newEndDate,
+  }) {
+    return runNegotiationAction(() async {
+      if (currentUserId == null) {
+        throw NegotiationException('You must be signed in to extend a subscription.');
+      }
+      final sub = await _fetchSubscriptionOrThrow(subscriptionId);
+      final newRequestId = await _service.createExtensionRequest(
+        subscription: sub,
+        requestedById: currentUserId!,
+        newEndDate: newEndDate,
+        extensionType: 'renegotiate',
+      );
+      await refreshRequests();
+      return newRequestId;
+    });
+  }
 
-    notifyListeners();
+  /// Applies an extension request's agreed terms to the real subscription,
+  /// once [TumpangRequest.isFullyAgreed] is true for it (i.e. the driver
+  /// has accepted). Call this from the extension request's own
+  /// NegotiationScreen once fully agreed, instead of routing through
+  /// TumpangSummaryScreen — no new deposit/payment is involved.
+  Future<void> finalizeExtension(String extensionRequestId) {
+    return runNegotiationAction(() async {
+      await _service.finalizeExtension(extensionRequestId);
+      await refreshRequests();
+    },
+      fallbackMessage: "Couldn't finalize the extension. Please check your connection and try again.",
+    );
+  }
+
+  Future<Map<String, dynamic>> _fetchSubscriptionOrThrow(String subscriptionId) async {
+    final sub = await _supabase
+        .from('tumpang_subscription')
+        .select()
+        .eq('id', subscriptionId)
+        .maybeSingle();
+    if (sub == null) {
+      throw NegotiationException('Subscription not found.');
+    }
+    if (sub['status'] != 'active') {
+      throw NegotiationException('This subscription is no longer active and cannot be extended.');
+    }
+    return sub;
+  }
+
+  /// Cancels an active subscription and marks its deposit for refund.
+  /// (Refund processing itself - e.g. a Stripe refund call - happens
+  /// wherever your payments/refund flow actually issues it; this just
+  /// updates the subscription's own status/flag.)
+  Future<void> cancelSubscription(String subscriptionId) {
+    return runNegotiationAction(() async {
+      await _supabase.from('tumpang_subscription').update({
+        'status': 'completed',
+        'deposit_refunded': false, // flips to true once the refund is actually issued
+      }).eq('id', subscriptionId);
+      await refreshRequests();
+    },
+      fallbackMessage: "Couldn't cancel the subscription. Please check your connection and try again.",
+    );
   }
 }

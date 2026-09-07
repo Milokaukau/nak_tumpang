@@ -38,11 +38,13 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
     }
   }
 
-  int _calculateDepositMonths(DateTime start, DateTime? end) {
-    if (end == null) return 3;
-    final diffDays = end.difference(start).inDays;
-    final months = (diffDays / 30).ceil();
-    return months < 1 ? 1 : (months > 3 ? 3 : months);
+  /// Deposit rule:
+  /// - subscription <= 60 days: deposit covers the FULL period (dailyFee * subscriptionDays)
+  /// - subscription > 60 days: deposit is capped at 60 days' worth
+  ///   (e.g. a 69-day subscription still only pays a 60-day deposit)
+  double _calculateDeposit(double dailyFee, int subscriptionDays) {
+    final depositDays = subscriptionDays > 60 ? 60 : subscriptionDays;
+    return dailyFee * depositDays;
   }
 
   Future<void> _handlePayDeposit(TumpangRequest request, double depositAmount) async {
@@ -125,6 +127,7 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
 
       await _supabase.from('tumpang_request').update({
         'status': 'completed',
+        'subscription_id': subId,
       }).eq('id', request.id);
 
       if (!mounted) return;
@@ -172,13 +175,10 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
 
           final request = snapshot.data!;
           final dailyFee = request.fee.value;
-          final monthlyFee = dailyFee * 30;
 
-          final startDate = DateTime.tryParse(request.subscriptionStartDate.value) ?? DateTime.now();
-          final endDate = DateTime.tryParse(request.subscriptionEndDate.value);
-
-          final depositMonths = _calculateDepositMonths(startDate, endDate);
-          final depositAmount = depositMonths * monthlyFee;
+          final subscriptionDays = request.subscriptionDays;
+          final depositDays = subscriptionDays > 60 ? 60 : subscriptionDays;
+          final depositAmount = _calculateDeposit(dailyFee, subscriptionDays);
 
           return SingleChildScrollView(
             padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
@@ -222,9 +222,15 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
                         _SummaryRow(label: 'Tumpang End', value: request.subscriptionEndDate.value),
                         _SummaryRow(label: 'Pickup Time', value: _formatAmPm(request.pickupTime.value)), // ADDED FORMATTING HERE
                         const SizedBox(height: 16),
-                        _SummaryRow(label: 'Tumpang Fee', value: 'RM ${dailyFee.toStringAsFixed(2)}/day\nRM ${monthlyFee.toStringAsFixed(2)}/month (approx.)\nRM ${request.totalFee.toStringAsFixed(2)} for ${request.subscriptionDays} days', isBold: true),
+                        _SummaryRow(label: 'Tumpang Fee', value: 'RM ${dailyFee.toStringAsFixed(2)} / day\nTotal: RM ${request.totalFee.toStringAsFixed(2)} for $subscriptionDays day${subscriptionDays == 1 ? '' : 's'}', isBold: true),
                         const SizedBox(height: 8),
-                        _SummaryRow(label: 'Deposit', value: 'RM ${depositAmount.toStringAsFixed(2)} ($depositMonths month${depositMonths > 1 ? 's' : ''})', isBold: true),
+                        _SummaryRow(
+                          label: 'Deposit',
+                          value: subscriptionDays > 60
+                              ? 'RM ${depositAmount.toStringAsFixed(2)} (fixed, capped at 60 days)'
+                              : 'RM ${depositAmount.toStringAsFixed(2)} ($depositDays day${depositDays == 1 ? '' : 's'})',
+                          isBold: true,
+                        ),
                         const SizedBox(height: 24),
                         SizedBox(
                           width: double.infinity,

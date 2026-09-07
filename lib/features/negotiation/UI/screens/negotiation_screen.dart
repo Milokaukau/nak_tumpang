@@ -172,6 +172,89 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
     }
   }
 
+  Future<void> _promptExtendSubscription(BuildContext context, NegotiationViewModel controller, TumpangRequest request, {required bool allowRenegotiate}) async {
+    final subscriptionId = request.subscriptionId;
+    if (subscriptionId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No linked subscription found for this request.'), backgroundColor: Colors.red),
+      );
+      return;
+    }
+
+    final currentEnd = DateTime.tryParse(request.subscriptionEndDate.value) ?? DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: currentEnd.add(const Duration(days: 30)),
+      firstDate: currentEnd.add(const Duration(days: 1)),
+      lastDate: currentEnd.add(const Duration(days: 730)),
+      builder: (context, child) => Theme(
+        data: Theme.of(context).copyWith(
+          colorScheme: const ColorScheme.light(
+            primary: AppColors.primaryYellow,
+            onPrimary: Colors.white,
+            onSurface: Colors.black,
+          ),
+        ),
+        child: child!,
+      ),
+    );
+    if (picked == null || !mounted) return;
+
+    String? newRequestId;
+    try {
+      newRequestId = allowRenegotiate
+          ? await controller.requestRenegotiatedExtension(subscriptionId: subscriptionId, newEndDate: picked)
+          : await controller.requestDateOnlyExtension(subscriptionId: subscriptionId, newEndDate: picked);
+    } on NegotiationException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message), backgroundColor: Colors.red));
+      return;
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text(kDefaultNegotiationErrorMessage), backgroundColor: Colors.red));
+      return;
+    }
+
+    if (!mounted || newRequestId == null) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => NegotiationScreen(requestId: newRequestId!)),
+    );
+  }
+
+  Future<void> _confirmCancelSubscription(BuildContext context, NegotiationViewModel controller, TumpangRequest request) async {
+    final subscriptionId = request.subscriptionId;
+    if (subscriptionId == null) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Cancel Subscription?'),
+        content: const Text('This ends the subscription and marks the deposit for refund. This action cannot be undone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Back')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Cancel Subscription'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await controller.cancelSubscription(subscriptionId);
+      if (mounted) setState(() {});
+    } on NegotiationException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message), backgroundColor: Colors.red));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text(kDefaultNegotiationErrorMessage), backgroundColor: Colors.red));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final controller = Provider.of<NegotiationViewModel>(context, listen: false);
@@ -302,14 +385,26 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                       isDriver: isDriver,
                       isReadOnly: isCompleted,
                       onReject: () => _confirmReject(context, controller),
-                      onProceedToSummary: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => TumpangSummaryScreen(requestId: request.id),
-                          ),
-                        );
+                      onProceedToSummary: () async {
+                        if (request.isExtension) {
+                          await _runNegotiationAction(() => controller.finalizeExtension(request.id));
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Extension confirmed!'), backgroundColor: Colors.green),
+                            );
+                          }
+                        } else {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => TumpangSummaryScreen(requestId: request.id),
+                            ),
+                          );
+                        }
                       },
+                      onRenew: () => _promptExtendSubscription(context, controller, request, allowRenegotiate: false),
+                      onRenegotiate: () => _promptExtendSubscription(context, controller, request, allowRenegotiate: true),
+                      onCancelSubscription: () => _confirmCancelSubscription(context, controller, request),
                     ),
                     const SizedBox(height: 40),
                   ],
