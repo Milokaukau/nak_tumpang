@@ -341,25 +341,39 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
           // use my location floating above confirm
           Positioned(
             right: 16,
-            bottom: 190,
+            bottom: 165,
             child: SafeArea(
               top: false,
               child: Material(
                 color: AppColors.white,
-                shape: const CircleBorder(),
+                borderRadius: BorderRadius.circular(24),
                 elevation: 3,
                 child: InkWell(
-                  customBorder: const CircleBorder(),
+                  borderRadius: BorderRadius.circular(24),
                   onTap: _isLocatingMe ? null : _useMyLocation,
                   child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: _isLocatingMe
-                        ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                        : Icon(Icons.my_location, color: AppColors.primaryYellow, size: 20),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _isLocatingMe
+                            ? const SizedBox(
+                          height: 18,
+                          width: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                            : Icon(Icons.my_location, color: AppColors.primaryYellow, size: 18),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Use your location',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.black,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
