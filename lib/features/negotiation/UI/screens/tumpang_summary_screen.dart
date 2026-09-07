@@ -39,12 +39,11 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
   }
 
   /// Deposit rule:
-  /// - subscription <= 60 days: deposit covers the FULL period (dailyFee * subscriptionDays)
-  /// - subscription > 60 days: deposit is capped at 60 days' worth
-  ///   (e.g. a 69-day subscription still only pays a 60-day deposit)
-  double _calculateDeposit(double dailyFee, int subscriptionDays) {
-    final depositDays = subscriptionDays > 60 ? 60 : subscriptionDays;
-    return dailyFee * depositDays;
+  /// - subscription <= 60 days -> flexible deposit: exact days * daily fee
+  /// - subscription >  60 days -> fixed deposit capped at 60 days * daily fee
+  int _calculateDepositDays(int subscriptionDays) {
+    if (subscriptionDays <= 0) return 0;
+    return subscriptionDays <= 60 ? subscriptionDays : 60;
   }
 
   Future<void> _handlePayDeposit(TumpangRequest request, double depositAmount) async {
@@ -95,6 +94,14 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
       final endDate = DateTime.tryParse(request.subscriptionEndDate.value) ?? startDate;
       final subId = 'sub_${DateTime.now().millisecondsSinceEpoch}';
 
+      final depositDays = _calculateDepositDays(request.subscriptionDays);
+      final cycleStartDateStr = startDate.toIso8601String().split('T').first;
+      final cycleEndDateStr = startDate
+          .add(Duration(days: depositDays > 0 ? depositDays - 1 : 0))
+          .toIso8601String()
+          .split('T')
+          .first;
+
       await _supabase.from('tumpang_subscription').insert({
         'id': subId,
         'passenger_trip_id': request.passengerTripId,
@@ -123,11 +130,12 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
         'due_date': DateTime.now().toIso8601String(),
         'paid_at': DateTime.now().toIso8601String(),
         'amount': depositAmount,
+        'cycle_start_date': cycleStartDateStr,
+        'cycle_end_date': cycleEndDateStr,
       });
 
       await _supabase.from('tumpang_request').update({
         'status': 'completed',
-        'subscription_id': subId,
       }).eq('id', request.id);
 
       if (!mounted) return;
@@ -139,7 +147,13 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
     } on StripeException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Payment Cancelled: ${e.error.localizedMessage ?? "User closed sheet"}'), backgroundColor: Colors.orange),
+        SnackBar(
+          content: Text(
+            'Payment Cancelled: ${e.error.localizedMessage ?? "User closed sheet"}',
+            style: const TextStyle(color: Colors.black),
+          ),
+          backgroundColor: Colors.red,
+        ),
       );
     } catch (e) {
       if (!mounted) return;
@@ -176,9 +190,9 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
           final request = snapshot.data!;
           final dailyFee = request.fee.value;
 
-          final subscriptionDays = request.subscriptionDays;
-          final depositDays = subscriptionDays > 60 ? 60 : subscriptionDays;
-          final depositAmount = _calculateDeposit(dailyFee, subscriptionDays);
+          final depositDays = _calculateDepositDays(request.subscriptionDays);
+          final depositAmount = depositDays * dailyFee;
+          final bool depositCapped = request.subscriptionDays > 60;
 
           return SingleChildScrollView(
             padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
@@ -220,15 +234,20 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
                         _SummaryRow(label: 'Dropoff Location', value: request.dropoffLocation.name),
                         _SummaryRow(label: 'Tumpang Start', value: request.subscriptionStartDate.value),
                         _SummaryRow(label: 'Tumpang End', value: request.subscriptionEndDate.value),
-                        _SummaryRow(label: 'Pickup Time', value: _formatAmPm(request.pickupTime.value)), // ADDED FORMATTING HERE
+                        _SummaryRow(label: 'Pickup Time', value: _formatAmPm(request.pickupTime.value)),
                         const SizedBox(height: 16),
-                        _SummaryRow(label: 'Tumpang Fee', value: 'RM ${dailyFee.toStringAsFixed(2)} / day\nTotal: RM ${request.totalFee.toStringAsFixed(2)} for $subscriptionDays day${subscriptionDays == 1 ? '' : 's'}', isBold: true),
+                        _SummaryRow(
+                          label: 'Tumpang Fee',
+                          value: 'RM ${dailyFee.toStringAsFixed(2)}/day\n'
+                              'RM ${request.totalFee.toStringAsFixed(2)} for ${request.subscriptionDays} day${request.subscriptionDays == 1 ? '' : 's'}',
+                          isBold: true,
+                        ),
                         const SizedBox(height: 8),
                         _SummaryRow(
                           label: 'Deposit',
-                          value: subscriptionDays > 60
-                              ? 'RM ${depositAmount.toStringAsFixed(2)} (fixed, capped at 60 days)'
-                              : 'RM ${depositAmount.toStringAsFixed(2)} ($depositDays day${depositDays == 1 ? '' : 's'})',
+                          value: 'RM ${depositAmount.toStringAsFixed(2)} '
+                              '($depositDays day${depositDays == 1 ? '' : 's'}'
+                              '${depositCapped ? ' deposit, capped at 60 days' : ' deposit'})',
                           isBold: true,
                         ),
                         const SizedBox(height: 24),

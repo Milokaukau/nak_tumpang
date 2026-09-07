@@ -101,7 +101,8 @@ class NegotiationViewModel extends ChangeNotifier {
           .from('tumpang_request')
           .select()
           .inFilter(tripIdColumn, tripIds)
-          .or('status.eq.pending,status.eq.negotiating,status.eq.completed');
+      // Updated to include 'cancelled'
+          .or('status.eq.pending,status.eq.negotiating,status.eq.completed,status.eq.rejected,status.eq.cancelled');
 
       final allRequests = rows.map((row) {
         try {
@@ -112,8 +113,14 @@ class NegotiationViewModel extends ChangeNotifier {
         }
       }).toList();
 
-      pendingRequests = allRequests.where((r) => r.status != 'completed').toList();
-      completedRequests = allRequests.where((r) => r.status == 'completed').toList();
+      pendingRequests = allRequests
+          .where((r) => r.status == 'pending' || r.status == 'negotiating')
+          .toList();
+
+      // Updated to include cancelled requests in the history tab
+      completedRequests = allRequests
+          .where((r) => r.status == 'completed' || r.status == 'rejected' || r.status == 'cancelled')
+          .toList();
 
       errorMessage = null;
     } catch (e, stack) {
@@ -225,96 +232,94 @@ class NegotiationViewModel extends ChangeNotifier {
     );
   }
 
-  /// Starts a "date only" extension: the driver just needs to accept a
-  /// new end date, nothing else changes, no new deposit is charged.
-  /// Returns the id of the new extension request.
-  Future<String> requestDateOnlyExtension({
-    required String subscriptionId,
-    required DateTime newEndDate,
-  }) {
+  // Added cancelRequest method for passengers
+  Future<void> cancelRequest(String requestId) {
     return runNegotiationAction(() async {
-      if (currentUserId == null) {
-        throw NegotiationException('You must be signed in to extend a subscription.');
-      }
-      final sub = await _fetchSubscriptionOrThrow(subscriptionId);
-      final newRequestId = await _service.createExtensionRequest(
-        subscription: sub,
-        requestedById: currentUserId!,
-        newEndDate: newEndDate,
-        extensionType: 'date_only',
-      );
-      await refreshRequests();
-      return newRequestId;
-    });
-  }
-
-  /// Starts an "extend + renegotiate" request. Creates the extension with
-  /// just a new end date to begin with — the passenger can then use the
-  /// normal "Edit" flow on the resulting request to change pickup,
-  /// dropoff, time, or fee, same as any other negotiation. Returns the id
-  /// of the new extension request.
-  Future<String> requestRenegotiatedExtension({
-    required String subscriptionId,
-    required DateTime newEndDate,
-  }) {
-    return runNegotiationAction(() async {
-      if (currentUserId == null) {
-        throw NegotiationException('You must be signed in to extend a subscription.');
-      }
-      final sub = await _fetchSubscriptionOrThrow(subscriptionId);
-      final newRequestId = await _service.createExtensionRequest(
-        subscription: sub,
-        requestedById: currentUserId!,
-        newEndDate: newEndDate,
-        extensionType: 'renegotiate',
-      );
-      await refreshRequests();
-      return newRequestId;
-    });
-  }
-
-  /// Applies an extension request's agreed terms to the real subscription,
-  /// once [TumpangRequest.isFullyAgreed] is true for it (i.e. the driver
-  /// has accepted). Call this from the extension request's own
-  /// NegotiationScreen once fully agreed, instead of routing through
-  /// TumpangSummaryScreen — no new deposit/payment is involved.
-  Future<void> finalizeExtension(String extensionRequestId) {
-    return runNegotiationAction(() async {
-      await _service.finalizeExtension(extensionRequestId);
+      await _supabase.from('tumpang_request').update({
+        'status': 'cancelled',
+      }).eq('id', requestId);
       await refreshRequests();
     },
-      fallbackMessage: "Couldn't finalize the extension. Please check your connection and try again.",
+      fallbackMessage: "Couldn't cancel the request. Please check your connection and try again.",
     );
   }
 
-  Future<Map<String, dynamic>> _fetchSubscriptionOrThrow(String subscriptionId) async {
-    final sub = await _supabase
-        .from('tumpang_subscription')
+  // 1. Extend Subscription (Continue)
+  Future<void> extendSubscription({
+    required String subscriptionId,
+    required DateTime newEndDate,
+    required double monthlyFee,
+  }) async {
+    await _supabase.from('tumpang_subscription').update({
+      'subscription_end_date': newEndDate.toIso8601String().split('T').first,
+      'status': 'active',
+    }).eq('id', subscriptionId);
+
+    // Generate invoice for the new month
+    final paymentId = 'pay_${DateTime.now().millisecondsSinceEpoch}';
+    await _supabase.from('payments').insert({
+      'id': paymentId,
+      'tumpang_subscription_id': subscriptionId,
+      'month': newEndDate.month,
+      'year': newEndDate.year,
+      'due_date': DateTime.now().toIso8601String(),
+      'paid_at': null,
+      'amount': monthlyFee,
+    });
+
+    notifyListeners();
+  }
+
+  // 2. End Subscription & Mark Deposit for Refund
+  Future<void> endSubscription(String subscriptionId) async {
+    await _supabase.from('tumpang_subscription').update({
+      'status': 'completed',
+      'deposit_status': 'refunded',
+    }).eq('id', subscriptionId);
+
+    notifyListeners();
+  }
+
+  Future<List<Map<String, dynamic>>> getOpenInvoices(String subscriptionId) async {
+    final rows = await _supabase
+        .from('payments')
         .select()
-        .eq('id', subscriptionId)
-        .maybeSingle();
-    if (sub == null) {
-      throw NegotiationException('Subscription not found.');
-    }
-    if (sub['status'] != 'active') {
-      throw NegotiationException('This subscription is no longer active and cannot be extended.');
-    }
-    return sub;
+        .eq('tumpang_subscription_id', subscriptionId)
+        .filter('paid_at', 'is', null);
+    return (rows as List).cast<Map<String, dynamic>>();
   }
 
-  /// Cancels an active subscription and marks its deposit for refund.
-  /// (Refund processing itself - e.g. a Stripe refund call - happens
-  /// wherever your payments/refund flow actually issues it; this just
-  /// updates the subscription's own status/flag.)
-  Future<void> cancelSubscription(String subscriptionId) {
-    return runNegotiationAction(() async {
-      await _supabase.from('tumpang_subscription').update({
-        'status': 'completed',
-        'deposit_refunded': false, // flips to true once the refund is actually issued
-      }).eq('id', subscriptionId);
-      await refreshRequests();
-    },
-      fallbackMessage: "Couldn't cancel the subscription. Please check your connection and try again.",
+  Future<void> reportCannotFetchDay({
+    required String subscriptionId,
+    required DateTime date,
+    String? reason,
+  }) async {
+    throw UnimplementedError(
+      'reportCannotFetchDay: requires the tumpang_missed_days table '
+          '(see doc comment) before this can be wired up.',
     );
+  }
+
+  static List<Map<String, dynamic>> calculateInvoicePeriods({
+    required int subscriptionDays,
+    required double dailyFee,
+    int depositDays = 60,
+    int invoiceCycleDays = 30,
+  }) {
+    final periods = <Map<String, dynamic>>[];
+    int remaining = subscriptionDays - depositDays;
+    int cursor = depositDays;
+    while (remaining > 0) {
+      final periodDays = remaining >= invoiceCycleDays ? invoiceCycleDays : remaining;
+      periods.add({
+        'startDay': cursor,
+        'endDay': cursor + periodDays,
+        'days': periodDays,
+        'amount': dailyFee * periodDays,
+      });
+      cursor += periodDays;
+      remaining -= periodDays;
+    }
+    return periods;
   }
 }

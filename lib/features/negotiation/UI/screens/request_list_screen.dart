@@ -49,7 +49,7 @@ class _RequestListScreenState extends State<RequestListScreen> with SingleTicker
           unselectedLabelColor: Colors.grey,
           tabs: const [
             Tab(text: 'Pending Requests'),
-            Tab(text: 'Completed'),
+            Tab(text: 'Requests History'),
           ],
         ),
       ),
@@ -110,7 +110,7 @@ class _RequestListScreenState extends State<RequestListScreen> with SingleTicker
                 ),
               ),
 
-              // Tab 2: Completed
+              // Tab 2: History
               RefreshIndicator(
                 onRefresh: () => vm.refreshRequests(),
                 child: vm.completedRequests.isEmpty
@@ -118,7 +118,7 @@ class _RequestListScreenState extends State<RequestListScreen> with SingleTicker
                   children: [
                     ListView(physics: const AlwaysScrollableScrollPhysics()),
                     const Center(
-                      child: Text('No completed requests found.\nPull down to refresh.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
+                      child: Text('No request history found.\nPull down to refresh.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
                     ),
                   ],
                 )
