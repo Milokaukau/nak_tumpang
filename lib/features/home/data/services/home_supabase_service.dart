@@ -1,102 +1,108 @@
-import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class HomeSupabaseService {
   final _supabase = Supabase.instance.client;
 
-  /// Runs [query] and normalizes both the success and failure paths so each
-  /// public method below doesn't repeat the same try/catch/log/cast
-  /// boilerplate.
-  ///
-  /// On error this logs via [debugPrint] (stripped from release builds)
-  /// and returns an empty list, matching the previous behavior. Note this
-  /// means a genuine network/server failure currently looks identical to a
-  /// legitimate "no results" to the UI (e.g. "no unmatched trips" shows
-  /// either way) -- worth returning a small Result/Either type instead if
-  /// you want the panel to distinguish "empty" from "failed to load".
-  Future<List<Map<String, dynamic>>> _runListQuery(
-      String label,
-      Future<dynamic> Function() query,
-      ) async {
+  Future<List<Map<String, dynamic>>> fetchPassengerTrips(String userId) async {
     try {
-      final response = await query();
-      return List<Map<String, dynamic>>.from(response as List);
+      final response = await _supabase
+          .from('passenger_trips')
+          .select('*, users(*)')
+          .eq('user_id', userId);
+
+      return List<Map<String, dynamic>>.from(response);
     } catch (e) {
-      debugPrint('⚠️ Error in $label: $e');
+      print("Error in fetchPassengerTrips: $e");
       return [];
     }
   }
 
-  Future<List<Map<String, dynamic>>> fetchPassengerTrips(String userId) {
-    return _runListQuery(
-      'fetchPassengerTrips',
-          () => _supabase
-          .from('passenger_trips')
-      // NOTE: '*' pulls every column on passenger_trips and every user
-      // column. Once the UI's exact field usage is confirmed, narrow
-      // this the way fetchDriverTrips already does for `users`, to cut
-      // payload size and avoid silently re-fetching new columns as the
-      // schema grows.
-          .select('*, users(*)')
-          .eq('user_id', userId),
-    );
-  }
-
-  Future<List<Map<String, dynamic>>> fetchDriverTrips() {
-    return _runListQuery(
-      'fetchDriverTrips',
-          () => _supabase
+  Future<List<Map<String, dynamic>>> fetchDriverTrips() async {
+    try {
+      final response = await _supabase
           .from('driver_trips')
-          .select('*, users(name, phone, avatar_url)'),
-    );
+          .select('*, users(name, phone, avatar_url)');
+
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      print("Error in fetchDriverTrips: $e");
+      return [];
+    }
   }
 
   // ==========================================
   // PASSENGER SUBSCRIPTIONS
   // ==========================================
-  Future<List<Map<String, dynamic>>> fetchAllPassengerSubscriptions(String userId) {
-    return _runListQuery(
-      'fetchAllPassengerSubscriptions',
-          () => _supabase
+  Future<List<Map<String, dynamic>>> fetchAllPassengerSubscriptions(String userId) async {
+    try {
+      print('🔍 Fetching all passenger subscriptions for User ID: $userId');
+
+      final response = await _supabase
           .from('tumpang_subscription')
           .select('''
             *,
             driver_trips (
               users (
-                name, phone, avatar_url
+                name, phone, avatar_url 
               )
             ),
-            passenger_trips!inner(user_id)
+            passenger_trips!inner(user_id) 
           ''')
       // Filters for ALL trips belonging to this user
           .eq('passenger_trips.user_id', userId)
-          .eq('status', 'active'),
-    );
+          .eq('status', 'active');
+
+      return (response as List).map((e) => e as Map<String, dynamic>).toList();
+    } catch (e) {
+      print('⚠️ Error fetching passenger subscriptions: $e');
+      return [];
+    }
   }
 
   // ==========================================
   // DRIVER SUBSCRIPTIONS
   // ==========================================
-  Future<List<Map<String, dynamic>>> fetchDriverActiveSubscriptions(String userId) {
-    return _runListQuery(
-      'fetchDriverActiveSubscriptions',
-          () => _supabase
+  Future<List<Map<String, dynamic>>> fetchDriverActiveSubscriptions(String userId) async {
+    try {
+      print('🔍 Fetching all driver subscriptions for User ID: $userId');
+
+      final response = await _supabase
           .from('tumpang_subscription')
           .select('''
             *,
             passenger_trips (
               users (
-                name, phone, avatar_url
+                name, phone, avatar_url 
               )
             ),
             driver_trips!inner(
               user_id,
               depart_lat, depart_lng,
               arrival_lat, arrival_lng
-            )
+            ) 
           ''')
           .eq('driver_trips.user_id', userId)
-          .eq('status', 'active'),
-    );
+          .eq('status', 'active');
+
+      return (response as List).map((e) => e as Map<String, dynamic>).toList();
+    } catch (e) {
+      print('⚠️ Error fetching driver subscriptions: $e');
+      return [];
+    }
+  }
+
+  Future<Map<String, dynamic>?> fetchUserProfile(String userId) async {
+    try {
+      final response = await _supabase
+          .from('users')
+          .select('id, name, phone, avatar_url, role')
+          .eq('id', userId)
+          .single();
+
+      return response;
+    } catch (e) {
+      print('⚠️ Error fetching user profile: $e');
+      return null;
+    }
   }
 }

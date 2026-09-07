@@ -18,22 +18,19 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final MapController _mapController = MapController();
 
-  // Lightweight signature of the currently drawn points. We only re-fit the
-  // camera when the actual route/markers change, not on every rebuild
-  // (unlike the previous List.hashCode approach, this is stable across
-  // rebuilds that produce an equal-but-not-identical list).
+  // Content signature of the last-fitted points, not the list's identity
+  // hashCode. mapRoutes is reassigned to a brand-new list on every
+  // updateMapRoute() call, even when the route content is unchanged
+  // (e.g. toggling matching-UI on/off for the same trip) — a hashCode
+  // check would treat that as "changed" and yank the camera back to a
+  // fit view, overriding a pan/zoom the user just did.
   String? _lastRouteSignature;
-
-  static const LatLng _defaultCenter = LatLng(3.1578, 101.7118);
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      // TODO(remove-before-release): seeds a mock driver for manual testing
-      // of the driver view. Replace with the real auth/user bootstrap flow
-      // before this ships -- flag if this is still needed for the demo.
-      context.read<HomeViewModel>().fetchMockPassenger();
+      context.read<HomeViewModel>().fetchCurrentUser();
     });
   }
 
@@ -41,13 +38,6 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _mapController.dispose();
     super.dispose();
-  }
-
-  List<LatLng> _collectVisiblePoints(HomeViewModel viewModel) {
-    return [
-      for (final route in viewModel.mapRoutes) ...route.points,
-      for (final marker in viewModel.mapMarkers) marker.point,
-    ];
   }
 
   void _maybeUpdateCamera(List<LatLng> points) {
@@ -58,21 +48,25 @@ class _HomeScreenState extends State<HomeScreen> {
     _lastRouteSignature = signature;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      // The screen (and this controller) may have been disposed between
+      // scheduling this callback and it firing (e.g. the user logged out
+      // right after a fetch resolved).
       if (!mounted) return;
-      if (points.length > 1) {
-        // Fit the whole route (e.g. departure -> pickup -> dropoff ->
-        // destination) instead of only centering on the first point, so a
-        // 30km trip doesn't require the user to manually zoom out.
+
+      final bounds = LatLngBounds.fromPoints(points);
+      final isDegenerate = bounds.north == bounds.south && bounds.east == bounds.west;
+
+      if (!isDegenerate) {
         _mapController.fitCamera(
           CameraFit.bounds(
-            bounds: LatLngBounds.fromPoints(points),
-            padding: const EdgeInsets.all(48.0),
+            bounds: bounds,
+            padding: const EdgeInsets.all(40.0),
           ),
         );
       } else {
-        // A single point has no meaningful bounds to fit -- just center on
-        // it, otherwise fitCamera's degenerate zero-area bounds produce an
-        // unpredictable zoom level.
+        // A single point, or duplicate start/end coordinates, has no
+        // meaningful area to fit -- just center on it instead, since
+        // fitCamera on zero-area bounds produces an unpredictable zoom.
         _mapController.move(points.first, 15.0);
       }
     });
@@ -81,12 +75,12 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final viewModel = context.watch<HomeViewModel>();
-    final userName = viewModel.currentUser?['name'] ?? 'Loading...';
+    final userName = viewModel.currentUser?['name'] ?? 'User';
 
-    final visiblePoints = _collectVisiblePoints(viewModel);
-    _maybeUpdateCamera(visiblePoints);
+    final allPoints = viewModel.mapRoutes.expand((r) => r.points).toList();
+    _maybeUpdateCamera(allPoints);
 
-    final initialCenter = visiblePoints.isNotEmpty ? visiblePoints.first : _defaultCenter;
+    final initialCenter = allPoints.firstOrNull ?? const LatLng(3.1578, 101.7118);
 
     return Scaffold(
       endDrawer: AppSidebar(
@@ -110,8 +104,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 userAgentPackageName: 'com.naktumpang.app',
               ),
-
-              // --- 1. DYNAMIC POLYLINES ---
               PolylineLayer(
                 polylines: viewModel.mapRoutes.map((routeData) {
                   return Polyline(
@@ -121,8 +113,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   );
                 }).toList(),
               ),
-
-              // --- 2. DYNAMIC MARKERS ---
               MarkerLayer(
                 markers: viewModel.mapMarkers.map((markerData) {
                   return Marker(
