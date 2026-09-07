@@ -83,6 +83,39 @@ class PayoutViewModel extends ChangeNotifier {
   String? historyError;
   List<PayoutHistoryDisplay> payoutHistory = [];
 
+  // null = "All" — no month filter applied to the History tab.
+  DateTime? selectedHistoryMonth;
+
+  /// Distinct year-month values present in [payoutHistory], newest first.
+  /// Drives the month filter chips on the History tab.
+  List<DateTime> get historyMonths {
+    final months = <DateTime>{};
+    for (final entry in payoutHistory) {
+      final date = entry.requestedAt;
+      if (date != null) months.add(DateTime(date.year, date.month));
+    }
+    final list = months.toList()..sort((a, b) => b.compareTo(a));
+    return list;
+  }
+
+  /// [payoutHistory] filtered down to [selectedHistoryMonth], or the full
+  /// list when no month is selected.
+  List<PayoutHistoryDisplay> get filteredPayoutHistory {
+    final month = selectedHistoryMonth;
+    if (month == null) return payoutHistory;
+    return payoutHistory
+        .where((entry) =>
+    entry.requestedAt != null &&
+        entry.requestedAt!.year == month.year &&
+        entry.requestedAt!.month == month.month)
+        .toList();
+  }
+
+  void selectHistoryMonth(DateTime? month) {
+    selectedHistoryMonth = month;
+    notifyListeners();
+  }
+
 // payout form state
   PayoutMethod selectedMethod = PayoutMethod.bankTransfer;
   final amountController = TextEditingController();
@@ -169,10 +202,13 @@ class PayoutViewModel extends ChangeNotifier {
       totalWithdrawn = (profile?['total_withdrawn'] as num?)?.toDouble() ?? 0;
 
       final trips = await _service.fetchCompletedTrips(userId);
-      tripsCompletedCount = trips.length;
 
       final now = DateTime.now();
       thisMonthPoints = 0;
+      // Kept in lockstep with thisMonthPoints — both describe the same
+      // current-month window, so the stat cards never show a trip count
+      // that doesn't actually back up the points figure next to it.
+      tripsCompletedCount = 0;
       recentTrips = [];
 
       for (final trip in trips) {
@@ -182,6 +218,7 @@ class PayoutViewModel extends ChangeNotifier {
 
         if (date != null && date.year == now.year && date.month == now.month) {
           thisMonthPoints += fee;
+          tripsCompletedCount++;
         }
 
         if (recentTrips.length < 10) {

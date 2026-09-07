@@ -141,7 +141,7 @@ class _WalletTab extends StatelessWidget {
               const SizedBox(width: 12),
               Expanded(
                 child: _StatBox(
-                  label: 'Trips completed',
+                  label: 'Trips this month',
                   value: '${vm.tripsCompletedCount}',
                 ),
               ),
@@ -219,19 +219,89 @@ class _HistoryTab extends StatelessWidget {
       );
     }
 
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: vm.payoutHistory.length,
-      itemBuilder: (context, index) {
-        final entry = vm.payoutHistory[index];
-        return _PayoutHistoryTile(
-          entry: entry,
-          onTap: () => showDialog(
-            context: context,
-            builder: (_) => PayoutHistoryDetailDialog(entry: entry),
+    final filtered = vm.filteredPayoutHistory;
+
+    return Column(
+      children: [
+        _MonthFilterChips(vm: vm),
+        Expanded(
+          child: filtered.isEmpty
+              ? const Center(
+            child: Text('No payouts in this month.', style: TextStyle(color: AppColors.greyText)),
+          )
+              : ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: filtered.length,
+            itemBuilder: (context, index) {
+              final entry = filtered[index];
+              return _PayoutHistoryTile(
+                entry: entry,
+                onTap: () => showDialog(
+                  context: context,
+                  builder: (_) => PayoutHistoryDetailDialog(entry: entry),
+                ),
+              );
+            },
           ),
-        );
-      },
+        ),
+      ],
+    );
+  }
+}
+
+/// Row of "All" + one chip per month that appears in the driver's payout
+/// history, newest first. Only shown when there's more than one month to
+/// choose between.
+class _MonthFilterChips extends StatelessWidget {
+  final PayoutViewModel vm;
+  const _MonthFilterChips({required this.vm});
+
+  static const _monthNames = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  ];
+
+  String _label(DateTime month) => '${_monthNames[month.month - 1]} ${month.year}';
+
+  @override
+  Widget build(BuildContext context) {
+    final months = vm.historyMonths;
+    return SizedBox(
+      height: 44,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        itemCount: months.length + 1,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, index) {
+          if (index == 0) {
+            return ChoiceChip(
+              label: const Text('All'),
+              selected: vm.selectedHistoryMonth == null,
+              onSelected: (_) => vm.selectHistoryMonth(null),
+              selectedColor: AppColors.primaryYellow,
+              labelStyle: TextStyle(
+                fontWeight: FontWeight.w600,
+                color: vm.selectedHistoryMonth == null ? AppColors.black : AppColors.greyText,
+              ),
+            );
+          }
+          final month = months[index - 1];
+          final isSelected = vm.selectedHistoryMonth != null &&
+              vm.selectedHistoryMonth!.year == month.year &&
+              vm.selectedHistoryMonth!.month == month.month;
+          return ChoiceChip(
+            label: Text(_label(month)),
+            selected: isSelected,
+            onSelected: (_) => vm.selectHistoryMonth(month),
+            selectedColor: AppColors.primaryYellow,
+            labelStyle: TextStyle(
+              fontWeight: FontWeight.w600,
+              color: isSelected ? AppColors.black : AppColors.greyText,
+            ),
+          );
+        },
+      ),
     );
   }
 }
