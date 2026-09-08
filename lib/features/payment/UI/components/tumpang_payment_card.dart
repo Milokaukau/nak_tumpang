@@ -51,7 +51,6 @@ class TumpangPaymentCard extends StatelessWidget {
                   children: [
                     Text(payment.dateRange, style: const TextStyle(fontSize: 13, color: Colors.black87)),
                     const SizedBox(height: 2),
-                    // Updated line: changed FontWeight.w500 to FontWeight.bold
                     Text('Due Date: $dueDateStr', style: const TextStyle(fontSize: 12, color: Colors.redAccent, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 4),
                     InkWell(

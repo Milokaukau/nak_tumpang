@@ -238,10 +238,10 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
 
           final targetTripId = isDriver ? request.passengerTripId : request.driverTripId;
           final bool isCompleted = request.status == 'completed';
+          final bool isCancelled = request.status == 'cancelled';
           final bool isRejected = request.status == 'rejected';
-          // Fields become locked once the request is either paid/finalized
-          // or rejected — nothing left to negotiate in either case.
-          final bool fieldsReadOnly = isCompleted || isRejected;
+          // Fields become locked once the request is paid/finalized, rejected, or cancelled.
+          final bool fieldsReadOnly = isCompleted || isRejected || isCancelled;
 
           final bool isFullyAgreed = request.fee.isAccepted &&
               request.pickupTime.isAccepted &&
