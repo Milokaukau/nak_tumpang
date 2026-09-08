@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
+import 'package:nak_tumpang/features/trips/UI/add_edit_trip_screen.dart';
 
 class TripSelectionDropdown extends StatelessWidget {
   const TripSelectionDropdown({super.key});
@@ -19,24 +20,26 @@ class TripSelectionDropdown extends StatelessWidget {
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
           isExpanded: true,
-          value: viewModel.currentPassengerTrip?['id'],
+          value: viewModel.currentSelectedTrip?['id'],
+          hint: const Text('No trip selected', style: TextStyle(color: AppColors.greyText)),
           items: [
             const DropdownMenuItem(
               value: 'ADD_NEW',
               child: Text('+ Add New Trip', style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.primaryYellow)),
             ),
-
             ...viewModel.availableTrips.map((trip) {
               return DropdownMenuItem(
                 value: trip['id'],
-                child: Text(trip['trip_name']),
+                child: Text(trip['trip_name'] ?? 'Unnamed Trip'),
               );
             }),
           ],
           onChanged: (value) {
             if (value == 'ADD_NEW') {
-              print('Navigate to Add Trip Screen');
-              // Navigator.pushNamed(context, '/add_trip');
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const AddEditTripScreen()),
+              );
               return;
             }
             if (value != null) {
