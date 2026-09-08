@@ -819,9 +819,9 @@ class HomeViewModel extends ChangeNotifier {
           end = _latLngFromMap(sub, 'dropoff_lat', 'dropoff_lng');
         }
 
-        if (start?.latitude == 0.0 || end?.latitude == 0.0) return _clearMap();
+        if (start.latitude == 0.0 || end.latitude == 0.0) return _clearMap();
 
-        final route = await _getCachedRoute(start!, end!);
+        final route = await _getCachedRoute(start, end);
         if (requestId != _routeFetchId) return;
 
         mapRoutes = [
