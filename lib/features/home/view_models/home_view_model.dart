@@ -24,6 +24,11 @@ class HomeViewModel extends ChangeNotifier {
   bool isDirectLoading = false;
   bool isMixedLoading = false;
   bool isRouteLoading = false;
+
+  // --- NEW: Separate loading states for pagination ---
+  bool isDirectLoadingMore = false;
+  bool isMixedLoadingMore = false;
+
   bool showMatchingUI = false;
   bool _hasFoundDirect = false;
   bool _hasFoundMixed = false;
@@ -31,6 +36,11 @@ class HomeViewModel extends ChangeNotifier {
   int _fetchId = 0;
   int _routeFetchId = 0;
   int _userFetchId = 0;
+
+  int currentDirectLimit = 5;
+  int currentMixedLimit = 5;
+  bool hasMoreDirect = false;
+  bool hasMoreMixed = false;
 
   final ORSService _orsService = ORSService();
   final HomeSupabaseService _homeService = HomeSupabaseService();
@@ -44,7 +54,23 @@ class HomeViewModel extends ChangeNotifier {
 
   final Map<String, List<LatLng>> _routeCache = {};
 
-  // --- CLEANED UP: Removed unused driverId parameter ---
+  // --- UPDATED: Directly call the fetcher instead of resetting the whole screen state ---
+  void loadMoreDirect() {
+    if (isDirectLoadingMore) return;
+    currentDirectLimit += 5;
+    isDirectLoadingMore = true;
+    notifyListeners();
+    _findDirectDrivers();
+  }
+
+  void loadMoreMixed() {
+    if (isMixedLoadingMore) return;
+    currentMixedLimit += 5;
+    isMixedLoadingMore = true;
+    notifyListeners();
+    _findMixedRoutes();
+  }
+
   Future<String?> requestTumpang({
     required String driverTripId,
     required String passengerTripId,
@@ -144,7 +170,6 @@ class HomeViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  // --- NEW ZERO-API OPTIMIZATION: Seamlessly insert/update trip into memory ---
   void addOrUpdateLocalTrip(Map<String, dynamic> trip) {
     final index = availableTrips.indexWhere((t) => t['id'] == trip['id']);
     if (index != -1) {
@@ -155,6 +180,12 @@ class HomeViewModel extends ChangeNotifier {
 
     if (currentSelectedTrip?['id'] == trip['id']) {
       currentSelectedTrip = trip;
+      currentDirectLimit = 5;
+      currentMixedLimit = 5;
+      isDirectLoadingMore = false;
+      isMixedLoadingMore = false;
+      hasMoreDirect = false;
+      hasMoreMixed = false;
       _hasFoundDirect = false;
       _hasFoundMixed = false;
       matchedDrivers.clear();
@@ -174,6 +205,12 @@ class HomeViewModel extends ChangeNotifier {
 
     if (currentSelectedTrip?['id'] == tripId) {
       currentSelectedTrip = availableTrips.isNotEmpty ? availableTrips.first : null;
+      currentDirectLimit = 5;
+      currentMixedLimit = 5;
+      isDirectLoadingMore = false;
+      isMixedLoadingMore = false;
+      hasMoreDirect = false;
+      hasMoreMixed = false;
       _hasFoundDirect = false;
       _hasFoundMixed = false;
       matchedDrivers.clear();
@@ -230,6 +267,13 @@ class HomeViewModel extends ChangeNotifier {
     activeSubscriptions = [];
     selectedSubscriptionId = null;
     showMatchingUI = false;
+
+    currentDirectLimit = 5;
+    currentMixedLimit = 5;
+    isDirectLoadingMore = false;
+    isMixedLoadingMore = false;
+    hasMoreDirect = false;
+    hasMoreMixed = false;
     _hasFoundDirect = false;
     _hasFoundMixed = false;
     matchedDrivers = [];
@@ -347,6 +391,12 @@ class HomeViewModel extends ChangeNotifier {
       final selected = availableTrips.firstWhere((t) => t['id'] == tripId);
       currentSelectedTrip = selected;
 
+      currentDirectLimit = 5;
+      currentMixedLimit = 5;
+      isDirectLoadingMore = false;
+      isMixedLoadingMore = false;
+      hasMoreDirect = false;
+      hasMoreMixed = false;
       _hasFoundDirect = false;
       _hasFoundMixed = false;
       matchedDrivers.clear();
@@ -374,7 +424,12 @@ class HomeViewModel extends ChangeNotifier {
     if (currentSelectedTrip == null) return;
 
     final currentFetchId = ++_fetchId;
-    isDirectLoading = true;
+
+    // --- UPDATED: Only wipe the list and show big spinner if it is a fresh load ---
+    if (!isDirectLoadingMore) {
+      isDirectLoading = true;
+      matchedDrivers.clear();
+    }
     notifyListeners();
 
     final passDays = _extractActiveDays(currentSelectedTrip!);
@@ -389,9 +444,12 @@ class HomeViewModel extends ChangeNotifier {
     if (_fetchId != currentFetchId) return;
 
     List<Map<String, dynamic>> tempMatchedDrivers = [];
+    int matchCount = 0;
+    bool moreAvailable = false;
 
-    for (var driverTrip in driverTrips) {
+    for (int i = 0; i < driverTrips.length; i++) {
       if (_fetchId != currentFetchId) return;
+      var driverTrip = driverTrips[i];
 
       final driverName = driverTrip['users']?['name'] ?? 'Unknown Driver';
       final driverDays = _extractActiveDays(driverTrip);
@@ -427,13 +485,17 @@ class HomeViewModel extends ChangeNotifier {
             'phone': driverTrip['users']?['phone'] ?? 'N/A',
             'profile_image_url': driverTrip['users']?['avatar_url'],
             'pickup_distance_km': pickDist / 1000,
-
             'is_requested': existingReqIds.contains(driverTrip['id']),
-
             'driver_profile': {
               'depart_time': _formatSqlTimeToUI(driverTrip['depart_time']),
             },
           });
+
+          matchCount++;
+          if (matchCount >= currentDirectLimit) {
+            moreAvailable = i < driverTrips.length - 1;
+            break;
+          }
         }
       } catch (e) {
         if (e.toString().contains('Quota') || e.toString().contains('SocketException')) break;
@@ -444,8 +506,10 @@ class HomeViewModel extends ChangeNotifier {
     if (_fetchId != currentFetchId) return;
 
     matchedDrivers = tempMatchedDrivers;
+    hasMoreDirect = moreAvailable;
     _hasFoundDirect = true;
     isDirectLoading = false;
+    isDirectLoadingMore = false; // Turn off bottom spinner
     notifyListeners();
   }
 
@@ -453,7 +517,12 @@ class HomeViewModel extends ChangeNotifier {
     if (currentSelectedTrip == null) return;
 
     final currentFetchId = ++_fetchId;
-    isMixedLoading = true;
+
+    // --- UPDATED: Only wipe the list and show big spinner if it is a fresh load ---
+    if (!isMixedLoadingMore) {
+      isMixedLoading = true;
+      mixedMatchedRoutes.clear();
+    }
     notifyListeners();
 
     final passDays = _extractActiveDays(currentSelectedTrip!);
@@ -471,6 +540,7 @@ class HomeViewModel extends ChangeNotifier {
     if (_fetchId != currentFetchId) return;
 
     List<Map<String, dynamic>> tempMixedRoutes = [];
+    bool moreAvailable = false;
 
     try {
       final pickStation = TransitUtils.findNearestStation(passPick);
@@ -479,6 +549,7 @@ class HomeViewModel extends ChangeNotifier {
       if (pickStation == null || dropStation == null) {
         _hasFoundMixed = true;
         isMixedLoading = false;
+        isMixedLoadingMore = false;
         notifyListeners();
         return;
       }
@@ -521,8 +592,11 @@ class HomeViewModel extends ChangeNotifier {
         lastMileOptions.add({'type': 'Walk'});
       }
 
-      for (var driverTrip in driverTrips) {
+      int validDriversFound = 0;
+
+      for (int i = 0; i < driverTrips.length; i++) {
         if (_fetchId != currentFetchId) return;
+        var driverTrip = driverTrips[i];
 
         final driverDays = _extractActiveDays(driverTrip);
         if (!MatchingUtils.hasOverlappingDays(passDays, driverDays)) continue;
@@ -533,6 +607,8 @@ class HomeViewModel extends ChangeNotifier {
         final driverName = driverTrip['users']?['name'] ?? 'Unknown Driver';
 
         if (drivStart.latitude == 0 || drivEnd.latitude == 0) continue;
+
+        bool foundAny = false;
 
         try {
           if ((drivTime - passTime).abs() <= 30) {
@@ -563,6 +639,7 @@ class HomeViewModel extends ChangeNotifier {
                   'distance_km': pickDist / 1000,
                   'arrival_at_board_station': drivTime + driveMinsToStation,
                 });
+                foundAny = true;
               }
             }
           }
@@ -590,9 +667,19 @@ class HomeViewModel extends ChangeNotifier {
                   'depart_time_mins': drivTime,
                   'distance_km': pickDistFromStation / 1000,
                 });
+                foundAny = true;
               }
             }
           }
+
+          if (foundAny) {
+            validDriversFound++;
+            if (validDriversFound >= currentMixedLimit * 2) {
+              moreAvailable = i < driverTrips.length - 1;
+              break;
+            }
+          }
+
         } catch (e) {
           if (e.toString().contains('Quota') || e.toString().contains('SocketException')) break;
           continue;
@@ -603,6 +690,10 @@ class HomeViewModel extends ChangeNotifier {
         final arrivalAtDropStation = fm['arrival_at_board_station'] + trainDuration;
 
         for (var lm in lastMileOptions) {
+          if (fm['type'] == 'Walk' && lm['type'] == 'Walk') {
+            continue;
+          }
+
           if (fm['type'] == 'Driver' && lm['type'] == 'Driver' && fm['driver_name'] == lm['driver_name']) continue;
 
           if (lm['type'] == 'Driver') {
@@ -626,6 +717,7 @@ class HomeViewModel extends ChangeNotifier {
           } else if (hasDriverB) {
             isRouteRequested = isReqB;
           }
+
           tempMixedRoutes.add({
             'first_mile_type': fm['type'],
             'driver_a_name': fm['driver_name'],
@@ -679,9 +771,12 @@ class HomeViewModel extends ChangeNotifier {
 
     if (_fetchId != currentFetchId) return;
 
-    mixedMatchedRoutes = tempMixedRoutes;
+    mixedMatchedRoutes = tempMixedRoutes.take(currentMixedLimit).toList();
+    hasMoreMixed = moreAvailable || tempMixedRoutes.length > currentMixedLimit;
+
     _hasFoundMixed = true;
     isMixedLoading = false;
+    isMixedLoadingMore = false; // Turn off bottom spinner
     notifyListeners();
   }
 
