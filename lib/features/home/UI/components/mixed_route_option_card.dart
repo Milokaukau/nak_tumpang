@@ -166,7 +166,7 @@ class MixedRouteOptionCard extends StatelessWidget {
                 const SizedBox(width: 6),
                 Flexible(
                   child: Text(
-                    boardLineShortName, // Use short name when interchange is needed
+                    boardLineShortName,
                     style: TextStyle(color: boardLineColor, fontWeight: FontWeight.w600, fontSize: 13),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -179,7 +179,7 @@ class MixedRouteOptionCard extends StatelessWidget {
                 const SizedBox(width: 6),
                 Flexible(
                   child: Text(
-                    alightLineShortName, // Use short name when interchange is needed
+                    alightLineShortName,
                     style: TextStyle(color: alightLineColor, fontWeight: FontWeight.w600, fontSize: 13),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -193,7 +193,6 @@ class MixedRouteOptionCard extends StatelessWidget {
       );
     }
 
-    // Uses full line name when no interchange is needed
     return _buildLrtInfo(boardLineName, Icons.train, boardLineColor, '~ $trainDuration mins');
   }
 
@@ -253,6 +252,7 @@ class MixedRouteOptionCard extends StatelessWidget {
     );
   }
 
+  // --- FIX APPLIED: Wrapped inner Column with Expanded and added TextOverflow.ellipsis ---
   Widget _buildDriverInfo(String name, IconData icon, String time, double? distanceKm) {
     return Row(
       children: [
@@ -263,19 +263,22 @@ class MixedRouteOptionCard extends StatelessWidget {
           child: Icon(icon, color: AppColors.greyText),
         ),
         const SizedBox(width: 12),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(name, style: const TextStyle(fontSize: 14, color: AppColors.black, fontWeight: FontWeight.w600)),
-            if (distanceKm != null)
-              Text('${distanceKm.toStringAsFixed(1)} km from your pickup', style: const TextStyle(fontSize: 12, color: AppColors.greyText)),
-            Text('Departs at $time', style: const TextStyle(fontSize: 12, color: AppColors.greyText)),
-          ],
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(name, style: const TextStyle(fontSize: 14, color: AppColors.black, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
+              if (distanceKm != null)
+                Text('${distanceKm.toStringAsFixed(1)} km from your pickup', style: const TextStyle(fontSize: 12, color: AppColors.greyText), maxLines: 1, overflow: TextOverflow.ellipsis),
+              Text('Departs at $time', style: const TextStyle(fontSize: 12, color: AppColors.greyText), maxLines: 1, overflow: TextOverflow.ellipsis),
+            ],
+          ),
         ),
       ],
     );
   }
 
+  // --- FIX APPLIED: Wrapped inner Column with Expanded and added TextOverflow.ellipsis ---
   Widget _buildWalkInfo(String actionText, {required double distanceMeters, required int durationMins}) {
     final formattedDistance = distanceMeters >= 1000
         ? '${(distanceMeters / 1000).toStringAsFixed(1)} km'
@@ -290,12 +293,14 @@ class MixedRouteOptionCard extends StatelessWidget {
           child: const Icon(Icons.directions_walk, color: Colors.green),
         ),
         const SizedBox(width: 12),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(actionText, style: const TextStyle(fontSize: 14, color: AppColors.black, fontWeight: FontWeight.w600)),
-            Text('$formattedDistance • $durationMins mins', style: const TextStyle(fontSize: 12, color: AppColors.greyText)),
-          ],
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(actionText, style: const TextStyle(fontSize: 14, color: AppColors.black, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
+              Text('$formattedDistance • $durationMins mins', style: const TextStyle(fontSize: 12, color: AppColors.greyText), maxLines: 1, overflow: TextOverflow.ellipsis),
+            ],
+          ),
         ),
       ],
     );
