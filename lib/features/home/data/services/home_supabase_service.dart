@@ -30,13 +30,8 @@ class HomeSupabaseService {
     }
   }
 
-  // ==========================================
-  // PASSENGER SUBSCRIPTIONS
-  // ==========================================
   Future<List<Map<String, dynamic>>> fetchAllPassengerSubscriptions(String userId) async {
     try {
-      print('🔍 Fetching all passenger subscriptions for User ID: $userId');
-
       final response = await _supabase
           .from('tumpang_subscription')
           .select('''
@@ -48,7 +43,6 @@ class HomeSupabaseService {
             ),
             passenger_trips!inner(user_id) 
           ''')
-      // Filters for ALL trips belonging to this user
           .eq('passenger_trips.user_id', userId)
           .eq('status', 'active');
 
@@ -59,31 +53,71 @@ class HomeSupabaseService {
     }
   }
 
-  // ==========================================
-  // DRIVER SUBSCRIPTIONS
-  // ==========================================
-  Future<List<Map<String, dynamic>>> fetchDriverActiveSubscriptions(String driverId) async {
+  Future<List<Map<String, dynamic>>> fetchDriverActiveSubscriptions(String userId) async {
     try {
-      print('🔍 Fetching driver subscriptions for Driver ID: $driverId');
       final response = await _supabase
           .from('tumpang_subscription')
           .select('''
             *,
             passenger_trips (
               users (
-                name, phone, avatar_url
+                name, phone, avatar_url 
               )
             ),
-            driver_trips!inner(user_id)
+            driver_trips!inner(
+              user_id,
+              depart_lat, depart_lng,
+              arrival_lat, arrival_lng
+            ) 
           ''')
-      // Using !inner join allows us to filter subscriptions by the driver's user ID directly
-          .eq('driver_trips.user_id', driverId)
+          .eq('driver_trips.user_id', userId)
           .eq('status', 'active');
 
       return (response as List).map((e) => e as Map<String, dynamic>).toList();
     } catch (e) {
       print('⚠️ Error fetching driver subscriptions: $e');
       return [];
+    }
+  }
+
+  Future<Map<String, dynamic>?> fetchUserProfile(String userId) async {
+    try {
+      final response = await _supabase
+          .from('users')
+          .select('id, name, phone, avatar_url, role')
+          .eq('id', userId)
+          .single();
+
+      return response;
+    } catch (e) {
+      print('⚠️ Error fetching user profile: $e');
+      return null;
+    }
+  }
+
+  Future<bool> createTumpangRequest(Map<String, dynamic> requestPayload) async {
+    try {
+      await _supabase.from('tumpang_request').insert(requestPayload);
+      return true;
+    } catch (e) {
+      print('⚠️ Error creating tumpang request: $e');
+      return false;
+    }
+  }
+
+  // --- NEW: Fetch existing requests so buttons stay disabled on reload ---
+  Future<Set<String>> fetchRequestedDriverTripIds(String passengerTripId) async {
+    try {
+      final response = await _supabase
+          .from('tumpang_request')
+          .select('driver_trip_id')
+          .eq('passenger_trip_id', passengerTripId)
+          .or('status.eq.pending,status.eq.negotiating'); // Look for active requests
+
+      return (response as List).map((row) => row['driver_trip_id'].toString()).toSet();
+    } catch (e) {
+      print('⚠️ Error fetching requested driver trips: $e');
+      return {};
     }
   }
 }

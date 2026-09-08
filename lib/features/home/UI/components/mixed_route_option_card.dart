@@ -32,6 +32,9 @@ class MixedRouteOptionCard extends StatelessWidget {
   final double walkToDestMeters;
   final int walkToDestMins;
 
+  final VoidCallback? onRequestTumpang;
+  final bool isRequested;
+
   const MixedRouteOptionCard({
     super.key,
     required this.firstMileType,
@@ -58,6 +61,8 @@ class MixedRouteOptionCard extends StatelessWidget {
     required this.walkToStationMins,
     required this.walkToDestMeters,
     required this.walkToDestMins,
+    this.onRequestTumpang,
+    this.isRequested = false,
   });
 
   String _formatStationName(String name, String lineName) {
@@ -116,9 +121,28 @@ class MixedRouteOptionCard extends StatelessWidget {
         ),
 
         const SizedBox(height: 16),
-        BaseButton(
+        isRequested
+            ? ElevatedButton(
+          onPressed: () {}, // Disabled state
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.grey.shade200,
+            foregroundColor: Colors.grey.shade500,
+            elevation: 0,
+            minimumSize: const Size(double.infinity, 50),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+          child: const Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.check_circle, size: 18),
+              SizedBox(width: 8),
+              Text('Requested Tumpang', style: TextStyle(fontWeight: FontWeight.bold)),
+            ],
+          ),
+        )
+            : BaseButton(
           text: 'Request tumpang',
-          onPressed: () => print('Requesting mixed route...'),
+          onPressed: onRequestTumpang,
         ),
       ],
     );
@@ -142,7 +166,7 @@ class MixedRouteOptionCard extends StatelessWidget {
                 const SizedBox(width: 6),
                 Flexible(
                   child: Text(
-                    boardLineShortName, // Use short name when interchange is needed
+                    boardLineShortName,
                     style: TextStyle(color: boardLineColor, fontWeight: FontWeight.w600, fontSize: 13),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -155,7 +179,7 @@ class MixedRouteOptionCard extends StatelessWidget {
                 const SizedBox(width: 6),
                 Flexible(
                   child: Text(
-                    alightLineShortName, // Use short name when interchange is needed
+                    alightLineShortName,
                     style: TextStyle(color: alightLineColor, fontWeight: FontWeight.w600, fontSize: 13),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -169,7 +193,6 @@ class MixedRouteOptionCard extends StatelessWidget {
       );
     }
 
-    // Uses full line name when no interchange is needed
     return _buildLrtInfo(boardLineName, Icons.train, boardLineColor, '~ $trainDuration mins');
   }
 
@@ -229,6 +252,7 @@ class MixedRouteOptionCard extends StatelessWidget {
     );
   }
 
+  // --- FIX APPLIED: Wrapped inner Column with Expanded and added TextOverflow.ellipsis ---
   Widget _buildDriverInfo(String name, IconData icon, String time, double? distanceKm) {
     return Row(
       children: [
@@ -239,19 +263,22 @@ class MixedRouteOptionCard extends StatelessWidget {
           child: Icon(icon, color: AppColors.greyText),
         ),
         const SizedBox(width: 12),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(name, style: const TextStyle(fontSize: 14, color: AppColors.black, fontWeight: FontWeight.w600)),
-            if (distanceKm != null)
-              Text('${distanceKm.toStringAsFixed(1)} km from your pickup', style: const TextStyle(fontSize: 12, color: AppColors.greyText)),
-            Text('Departs at $time', style: const TextStyle(fontSize: 12, color: AppColors.greyText)),
-          ],
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(name, style: const TextStyle(fontSize: 14, color: AppColors.black, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
+              if (distanceKm != null)
+                Text('${distanceKm.toStringAsFixed(1)} km from your pickup', style: const TextStyle(fontSize: 12, color: AppColors.greyText), maxLines: 1, overflow: TextOverflow.ellipsis),
+              Text('Departs at $time', style: const TextStyle(fontSize: 12, color: AppColors.greyText), maxLines: 1, overflow: TextOverflow.ellipsis),
+            ],
+          ),
         ),
       ],
     );
   }
 
+  // --- FIX APPLIED: Wrapped inner Column with Expanded and added TextOverflow.ellipsis ---
   Widget _buildWalkInfo(String actionText, {required double distanceMeters, required int durationMins}) {
     final formattedDistance = distanceMeters >= 1000
         ? '${(distanceMeters / 1000).toStringAsFixed(1)} km'
@@ -266,12 +293,14 @@ class MixedRouteOptionCard extends StatelessWidget {
           child: const Icon(Icons.directions_walk, color: Colors.green),
         ),
         const SizedBox(width: 12),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(actionText, style: const TextStyle(fontSize: 14, color: AppColors.black, fontWeight: FontWeight.w600)),
-            Text('$formattedDistance • $durationMins mins', style: const TextStyle(fontSize: 12, color: AppColors.greyText)),
-          ],
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(actionText, style: const TextStyle(fontSize: 14, color: AppColors.black, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
+              Text('$formattedDistance • $durationMins mins', style: const TextStyle(fontSize: 12, color: AppColors.greyText), maxLines: 1, overflow: TextOverflow.ellipsis),
+            ],
+          ),
         ),
       ],
     );
