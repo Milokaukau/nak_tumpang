@@ -435,6 +435,8 @@ class HomePanel extends StatelessWidget {
                 color: AppColors.primaryYellow,
                 fontWeight: FontWeight.bold,
                 decoration: TextDecoration.underline,
+                decorationColor: AppColors.primaryYellow,
+                decorationThickness: 2.0,
               ),
             ),
           ),
