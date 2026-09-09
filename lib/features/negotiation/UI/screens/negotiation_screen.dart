@@ -240,7 +240,8 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
           final bool isCompleted = request.status == 'completed';
           final bool isCancelled = request.status == 'cancelled';
           final bool isRejected = request.status == 'rejected';
-          // Fields become locked once the request is paid/finalized, rejected, or cancelled.
+
+          // Fields become locked once the request is either paid/finalized, rejected, or cancelled.
           final bool fieldsReadOnly = isCompleted || isRejected || isCancelled;
 
           final bool isFullyAgreed = request.fee.isAccepted &&
@@ -276,53 +277,85 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
 
                     NegotiationFieldRow(
                       title: 'Pickup Location',
-                      value: request.pickupLocation.name,
+                      value: request.pickupLocation.name.isEmpty ? 'Not set' : request.pickupLocation.name,
                       isAccepted: request.pickupLocation.isAccepted,
                       isRequestedByMe: request.pickupLocation.requestedBy == controller.currentUserId,
                       isReadOnly: fieldsReadOnly,
-                      topWidget: RouteMapHeader(label: request.pickupLocation.name, lat: request.pickupLocation.lat, lng: request.pickupLocation.lng),
+                      topWidget: request.pickupLocation.name.isEmpty
+                          ? null
+                          : RouteMapHeader(label: request.pickupLocation.name, lat: request.pickupLocation.lat, lng: request.pickupLocation.lng),
                       onPropose: () => _openLocationPicker(context, controller, 'Pickup Location', 'pickup', request.pickupLocation.name, request.pickupLocation.lat, request.pickupLocation.lng),
-                      onAccept: () => _runNegotiationAction(() => controller.acceptTerm(widget.requestId, 'pickup')),
+                      onAccept: () {
+                        if (request.pickupLocation.name.trim().isEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please propose a pickup location first.'), backgroundColor: Colors.red));
+                          return;
+                        }
+                        _runNegotiationAction(() => controller.acceptTerm(widget.requestId, 'pickup'));
+                      },
                     ),
 
                     NegotiationFieldRow(
                       title: 'Dropoff Location',
-                      value: request.dropoffLocation.name,
+                      value: request.dropoffLocation.name.isEmpty ? 'Not set' : request.dropoffLocation.name,
                       isAccepted: request.dropoffLocation.isAccepted,
                       isRequestedByMe: request.dropoffLocation.requestedBy == controller.currentUserId,
                       isReadOnly: fieldsReadOnly,
-                      topWidget: RouteMapHeader(label: request.dropoffLocation.name, lat: request.dropoffLocation.lat, lng: request.dropoffLocation.lng),
+                      topWidget: request.dropoffLocation.name.isEmpty
+                          ? null
+                          : RouteMapHeader(label: request.dropoffLocation.name, lat: request.dropoffLocation.lat, lng: request.dropoffLocation.lng),
                       onPropose: () => _openLocationPicker(context, controller, 'Dropoff Location', 'dropoff', request.dropoffLocation.name, request.dropoffLocation.lat, request.dropoffLocation.lng),
-                      onAccept: () => _runNegotiationAction(() => controller.acceptTerm(widget.requestId, 'dropoff')),
+                      onAccept: () {
+                        if (request.dropoffLocation.name.trim().isEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please propose a dropoff location first.'), backgroundColor: Colors.red));
+                          return;
+                        }
+                        _runNegotiationAction(() => controller.acceptTerm(widget.requestId, 'dropoff'));
+                      },
                     ),
 
                     NegotiationFieldRow(
                       title: 'Tumpang Dates',
-                      value: '${request.subscriptionStartDate.value} to ${request.subscriptionEndDate.value}',
+                      value: (request.subscriptionStartDate.value.isEmpty || request.subscriptionEndDate.value.isEmpty)
+                          ? 'Not set'
+                          : '${request.subscriptionStartDate.value} to ${request.subscriptionEndDate.value}',
                       isAccepted: request.subscriptionStartDate.isAccepted && request.subscriptionEndDate.isAccepted,
                       isRequestedByMe: request.subscriptionStartDate.requestedBy == controller.currentUserId,
                       isReadOnly: fieldsReadOnly,
                       onPropose: () => _openDateRangeProposalSheet(context, controller, request.subscriptionStartDate.value, request.subscriptionEndDate.value),
-                      onAccept: () => _runNegotiationAction(() => controller.acceptTumpangDateRange(widget.requestId)),
+                      onAccept: () {
+                        if (request.subscriptionStartDate.value.trim().isEmpty || request.subscriptionEndDate.value.trim().isEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please propose valid dates first.'), backgroundColor: Colors.red));
+                          return;
+                        }
+                        _runNegotiationAction(() => controller.acceptTumpangDateRange(widget.requestId));
+                      },
                     ),
 
                     NegotiationFieldRow(
                       title: 'Pickup Time',
-                      value: _formatAmPm(request.pickupTime.value),
+                      value: request.pickupTime.value.isEmpty ? 'Not set' : _formatAmPm(request.pickupTime.value),
                       isAccepted: request.pickupTime.isAccepted,
                       isRequestedByMe: request.pickupTime.requestedBy == controller.currentUserId,
                       isReadOnly: fieldsReadOnly,
                       onPropose: () => _openTimeProposalSheet(context, controller, request.pickupTime.value),
-                      onAccept: () => _runNegotiationAction(() => controller.acceptTerm(widget.requestId, 'pickup_time')),
+                      onAccept: () {
+                        if (request.pickupTime.value.trim().isEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please propose a pickup time first.'), backgroundColor: Colors.red));
+                          return;
+                        }
+                        _runNegotiationAction(() => controller.acceptTerm(widget.requestId, 'pickup_time'));
+                      },
                     ),
 
                     NegotiationFieldRow(
                       title: 'Tumpang Fee',
-                      value: 'RM ${request.fee.value.toStringAsFixed(2)}',
+                      value: request.fee.value <= 0 ? 'Not set' : 'RM ${request.fee.value.toStringAsFixed(2)}',
                       isAccepted: request.fee.isAccepted,
                       isRequestedByMe: request.fee.requestedBy == controller.currentUserId,
                       isReadOnly: fieldsReadOnly,
-                      topWidget: Column(
+                      topWidget: request.fee.value <= 0
+                          ? null
+                          : Column(
                         children: [
                           Text(
                             'RM ${request.fee.value.toStringAsFixed(2)}/day  x  ${request.subscriptionDays} day${request.subscriptionDays == 1 ? '' : 's'}',
@@ -336,15 +369,21 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                         ],
                       ),
                       onPropose: () => _openProposalSheet(context, controller, 'Fee (per day)', request.fee.value.toStringAsFixed(2), 'fee'),
-                      onAccept: () => _runNegotiationAction(() => controller.acceptTerm(widget.requestId, 'fee')),
+                      onAccept: () {
+                        if (request.fee.value <= 0) {
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please propose a valid fee first.'), backgroundColor: Colors.red));
+                          return;
+                        }
+                        _runNegotiationAction(() => controller.acceptTerm(widget.requestId, 'fee'));
+                      },
                     ),
 
                     NegotiationSummaryCard(
                       request: request,
                       isFullyAgreed: isFullyAgreed,
                       isDriver: isDriver,
-                      isReadOnly: isCompleted,
-                      isRejected: isRejected,
+                      isReadOnly: fieldsReadOnly,
+                      isRejected: isRejected || isCancelled,
                       onReject: () => _confirmReject(context, controller),
                       onCancelRequest: () => _confirmCancel(context, controller),
                       onProceedToSummary: () {
