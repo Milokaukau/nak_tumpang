@@ -142,8 +142,14 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
 
       if (!mounted) return;
 
-      // --- FIX: Force the Home module to fetch the new subscription and hide the matching UI ---
-      context.read<HomeViewModel>().fetchCurrentUser();
+      // --- FIX: Await the refresh before navigating back ---
+      try {
+        await context.read<HomeViewModel>().fetchCurrentUser();
+      } catch (e) {
+        debugPrint('⚠️ Error refreshing HomeViewModel: $e');
+      }
+
+      if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Payment Successful!'), backgroundColor: Colors.green),

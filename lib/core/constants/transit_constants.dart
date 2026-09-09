@@ -22,14 +22,18 @@ class TransitConstants {
 
   // Helper method to format raw station names from GTFS data
   static String formatStationName(String name, String shortName) {
-    String cleanName = name.toLowerCase()
-        .replaceAll(RegExp(r'\b(lrt|mrt|mrl|monorail|brt|station)\b'), '')
+    // Case-insensitive removal of redundant transit keywords
+    String cleanName = name
+        .replaceAll(RegExp(r'\b(lrt|mrt|mrl|monorail|brt|station)\b', caseSensitive: false), '')
         .replaceAll(RegExp(r'\s+'), ' ')
         .trim();
 
     final formattedName = cleanName.split(' ').map((word) {
       if (word.isEmpty) return '';
-      return word[0].toUpperCase() + word.substring(1);
+      // Preserve all-caps acronyms (e.g. KL, KLCC, TRX, USJ)
+      if (word == word.toUpperCase()) return word;
+      // Capitalize normal words
+      return word[0].toUpperCase() + word.substring(1).toLowerCase();
     }).join(' ');
 
     final prefix = linePrefixes[shortName.toUpperCase()];
