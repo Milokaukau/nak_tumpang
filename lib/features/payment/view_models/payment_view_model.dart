@@ -16,8 +16,8 @@ class PaymentViewModel extends ChangeNotifier {
 
   bool isLoading = false;
   bool isProcessingPayment = false;
-  String? errorMessage; // fetch/list-loading errors only
-  String? paymentErrorMessage; // payment-attempt errors only
+  String? errorMessage;
+  String? paymentErrorMessage;
 
   PaymentViewModel() {
     _initSession();
@@ -63,6 +63,9 @@ class PaymentViewModel extends ChangeNotifier {
         notifyListeners();
         return;
       }
+
+      // Force invoice generation for any newly reached billing cycles
+      await _service.generateDueInvoicesForUser(userId);
 
       pendingPayments = await _service.fetchPendingPayments(userId);
       paymentHistory = await _service.fetchPaymentHistory(userId);

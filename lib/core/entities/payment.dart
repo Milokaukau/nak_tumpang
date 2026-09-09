@@ -8,6 +8,8 @@ class Payment {
   final String dateRange;
   final int month;
   final int year;
+  final DateTime? cycleStartDate;
+  final DateTime? cycleEndDate;
 
   Payment({
     required this.id,
@@ -19,6 +21,8 @@ class Payment {
     required this.dateRange,
     required this.month,
     required this.year,
+    this.cycleStartDate,
+    this.cycleEndDate,
   });
 
   bool get isPaid => paidAt != null;
@@ -54,6 +58,12 @@ class Payment {
       dateRange: json['date_range']?.toString() ?? '$monthLabel $y Billing',
       month: m,
       year: y,
+      cycleStartDate: json['cycle_start_date'] != null
+          ? DateTime.parse(json['cycle_start_date'].toString())
+          : null,
+      cycleEndDate: json['cycle_end_date'] != null
+          ? DateTime.parse(json['cycle_end_date'].toString())
+          : null,
     );
   }
 
@@ -66,6 +76,8 @@ class Payment {
       'paid_at': paidAt?.toIso8601String(),
       'month': month,
       'year': year,
+      'cycle_start_date': cycleStartDate?.toIso8601String(),
+      'cycle_end_date': cycleEndDate?.toIso8601String(),
     };
   }
 }

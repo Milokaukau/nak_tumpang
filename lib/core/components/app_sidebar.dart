@@ -9,6 +9,7 @@ import 'package:nak_tumpang/features/auth/UI/screens/login_screen.dart';
 import 'package:nak_tumpang/features/subscriptions/UI/screens/subscription_list_screen.dart';
 import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
 import 'package:nak_tumpang/features/rewards/UI/screens/rewards_screen.dart';
+import 'package:nak_tumpang/features/trips/UI/my_trips_screen.dart'; // NEW IMPORT
 
 class HamburgerButton extends StatelessWidget {
   const HamburgerButton({super.key});
@@ -37,7 +38,7 @@ class AppSidebar extends StatelessWidget {
 
   const AppSidebar({
     super.key,
-    this.userName = 'John Cena',
+    this.userName = 'User',
     this.userRole = 'Driver',
     this.profileImageUrl,
     this.selectedIndex = -1,
@@ -86,13 +87,13 @@ class AppSidebar extends StatelessWidget {
             const Divider(color: AppColors.greyBorder, thickness: 1),
             const SizedBox(height: 20),
 
-            // Navigation Items
             _buildMenuItem(context, index: 0, title: 'View Profile'),
-            _buildMenuItem(context, index: 1, title: 'View Subscriptions'),
-            _buildMenuItem(context, index: 2, title: 'View Requests'),
+            _buildMenuItem(context, index: 1, title: 'My Trips'), // NEW ITEM
+            _buildMenuItem(context, index: 2, title: 'View Subscriptions'),
+            _buildMenuItem(context, index: 3, title: 'View Requests'),
             _buildMenuItem(
               context,
-              index: 3,
+              index: 4,
               title: _isDriver ? 'My Earnings' : 'Payment',
             ),
             _buildMenuItem(context, index: 5, title: 'My Rewards'),
@@ -102,7 +103,7 @@ class AppSidebar extends StatelessWidget {
             // Sign Out Option (using the reusable component)
             _buildMenuItem(
               context,
-              index: 4,
+              index: 5, // SHIFTED DOWN
               title: 'Sign Out',
               textColor: const Color(0xFFEF4444),
             ),
@@ -117,7 +118,7 @@ class AppSidebar extends StatelessWidget {
 
     if (index == selectedIndex) return;
 
-    if (index == 4) {
+    if (index == 5) { // SHIFTED DOWN
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(builder: (context) => const LoginScreen()),
@@ -131,13 +132,16 @@ class AppSidebar extends StatelessWidget {
       case 0:
         nextScreen = const ProfileScreen();
         break;
-      case 1:
-        nextScreen = const ProfileScreen();
+      case 1: // NEW ROUTE
+        nextScreen = const MyTripsScreen();
         break;
       case 2:
-        nextScreen = const RequestListScreen();
+        nextScreen = const ProfileScreen(); // Currently points to Profile in your code
         break;
       case 3:
+        nextScreen = const RequestListScreen();
+        break;
+      case 4:
         nextScreen = _isDriver ? const DriverBalanceScreen() : const PaymentScreen();
         break;
       case 5:
@@ -154,7 +158,6 @@ class AppSidebar extends StatelessWidget {
     );
   }
 
-  // Added optional textColor parameter
   Widget _buildMenuItem(BuildContext context, {required int index, required String title, Color? textColor}) {
     final isSelected = selectedIndex == index;
 
@@ -174,7 +177,6 @@ class AppSidebar extends StatelessWidget {
               style: TextStyle(
                 fontSize: 15,
                 fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                // Use the custom color if provided, otherwise default to black
                 color: textColor ?? AppColors.black,
               ),
             ),

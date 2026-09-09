@@ -10,6 +10,8 @@ class DirectRouteOptionCard extends StatelessWidget {
   final String? phoneNumber;
   final String? profileImageUrl;
   final bool isConfirmed;
+  final VoidCallback? onRequestTumpang;
+  final bool isRequested;
 
   const DirectRouteOptionCard({
     super.key,
@@ -19,6 +21,8 @@ class DirectRouteOptionCard extends StatelessWidget {
     this.phoneNumber,
     this.profileImageUrl,
     this.isConfirmed = false,
+    this.onRequestTumpang,
+    this.isRequested = false,
   });
 
   @override
@@ -88,9 +92,28 @@ class DirectRouteOptionCard extends StatelessWidget {
           ),
         ],
       )
+      : isRequested
+          ? ElevatedButton(
+        onPressed: () {}, // Disabled state
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.grey.shade200,
+          foregroundColor: Colors.grey.shade500,
+          elevation: 0,
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+        child: const Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.check_circle, size: 18),
+            SizedBox(width: 8),
+            Text('Requested Tumpang', style: TextStyle(fontWeight: FontWeight.bold)),
+          ],
+        ),
+      )
           : BaseButton(
         text: 'Request tumpang',
-        onPressed: () => print('Requesting tumpang with $driverName...'),
+        onPressed: onRequestTumpang,
       ),
     );
   }
