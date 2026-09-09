@@ -7,6 +7,8 @@ import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/entities/tumpang_request.dart';
 import 'package:nak_tumpang/features/negotiation/view_models/negotiation_view_model.dart';
 import 'package:nak_tumpang/features/negotiation/UI/components/summary_route_map.dart';
+// --- FIX: Import the HomeViewModel so we can trigger a refresh ---
+import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
 
 class TumpangSummaryScreen extends StatefulWidget {
   final String requestId;
@@ -139,6 +141,10 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
       }).eq('id', request.id);
 
       if (!mounted) return;
+
+      // --- FIX: Force the Home module to fetch the new subscription and hide the matching UI ---
+      context.read<HomeViewModel>().fetchCurrentUser();
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Payment Successful!'), backgroundColor: Colors.green),
       );

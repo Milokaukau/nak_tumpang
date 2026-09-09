@@ -41,8 +41,8 @@ class HomeSupabaseService {
                 name, phone, avatar_url 
               )
             ),
-            passenger_trips!inner(user_id) 
-          ''')
+            passenger_trips!inner(user_id, trip_name) 
+          ''') // Added trip_name
           .eq('passenger_trips.user_id', userId)
           .eq('status', 'active');
 
@@ -66,10 +66,11 @@ class HomeSupabaseService {
             ),
             driver_trips!inner(
               user_id,
+              trip_name, 
               depart_lat, depart_lng,
               arrival_lat, arrival_lng
             ) 
-          ''')
+          ''') // Added trip_name
           .eq('driver_trips.user_id', userId)
           .eq('status', 'active');
 

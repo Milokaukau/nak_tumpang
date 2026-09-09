@@ -85,19 +85,37 @@ class HomePanel extends StatelessWidget {
   }
 
   List<Widget> _buildDriverUnmatchedView(BuildContext context, HomeViewModel viewModel) {
-    return [
-      if (viewModel.activeSubscriptions.isNotEmpty)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 16),
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: () => viewModel.toggleMatchingUI(false),
-              icon: const Icon(Icons.arrow_back, color: AppColors.black),
-              label: const Text('Back to Subscriptions', style: TextStyle(color: AppColors.black, fontWeight: FontWeight.bold)),
-            ),
+    // If they have no trips created yet at all
+    if (viewModel.availableTrips.isEmpty && viewModel.activeSubscriptions.isEmpty) {
+      return [_buildEmptyStatePrompt(context, viewModel)];
+    }
+
+    // --- FIX: Show text and hide dropdown if no subscriptions exist ---
+    if (viewModel.activeSubscriptions.isEmpty) {
+      return [
+        const SizedBox(height: 32),
+        const Center(
+          child: Text(
+            'No passenger to fetch today!',
+            style: TextStyle(color: AppColors.greyText, fontSize: 16),
           ),
         ),
+      ];
+    }
+
+    // Otherwise, they clicked "View Unmatched Trips" from the subscription list
+    return [
+      Padding(
+        padding: const EdgeInsets.only(bottom: 16),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () => viewModel.toggleMatchingUI(false),
+            icon: const Icon(Icons.arrow_back, color: AppColors.black),
+            label: const Text('Back to Subscriptions', style: TextStyle(color: AppColors.black, fontWeight: FontWeight.bold)),
+          ),
+        ),
+      ),
       const TripSelectionDropdown(),
       const SizedBox(height: 32),
       if (viewModel.currentSelectedTrip == null)
@@ -430,6 +448,7 @@ class HomePanel extends StatelessWidget {
       return Column(
         children: [
           ActiveSubscriptionCard(
+            tripName: sub['trip_name'], // Added
             name: sub['name'],
             phone: sub['phone'],
             imageUrl: sub['imageUrl'],
