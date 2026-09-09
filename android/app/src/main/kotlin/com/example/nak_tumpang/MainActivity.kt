@@ -1,5 +1,7 @@
-package com.example.nak_tumpang
+package com.example.nak_tumpang // Keep your existing package name
 
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity // Add this import
 
-class MainActivity : FlutterActivity()
+// Change FlutterActivity() to FlutterFragmentActivity()
+class MainActivity: FlutterFragmentActivity() {
+}

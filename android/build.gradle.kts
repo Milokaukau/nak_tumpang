@@ -22,3 +22,13 @@ subprojects {
 tasks.register<Delete>("clean") {
     delete(rootProject.layout.buildDirectory)
 }
+
+// Enforce JVM Target 17 across all subprojects/plugins (Stripe, etc.)
+// Enforce JVM Target 17 across all subprojects/plugins using modern DSL
+subprojects {
+    tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        }
+    }
+}

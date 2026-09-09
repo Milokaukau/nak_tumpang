@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
+import 'package:nak_tumpang/features/payout/UI/screens/driver_balance_screen.dart';
+import 'package:nak_tumpang/features/payment/UI/screens/payment_screen.dart';
+import 'package:nak_tumpang/features/negotiation/UI/screens/request_list_screen.dart';
 import 'package:nak_tumpang/features/profile/UI/screens/profile_screen.dart';
 import 'package:nak_tumpang/features/auth/UI/screens/login_screen.dart';
 import 'package:nak_tumpang/features/subscriptions/UI/screens/subscription_list_screen.dart';
@@ -39,6 +42,8 @@ class AppSidebar extends StatelessWidget {
     this.profileImageUrl,
     this.selectedIndex = -1,
   });
+
+  bool get _isDriver => userRole.toLowerCase().trim().contains('driver');
 
   @override
   Widget build(BuildContext context) {
@@ -85,10 +90,14 @@ class AppSidebar extends StatelessWidget {
             _buildMenuItem(context, index: 0, title: 'View Profile'),
             _buildMenuItem(context, index: 1, title: 'View Subscriptions'),
             _buildMenuItem(context, index: 2, title: 'View Requests'),
-            _buildMenuItem(context, index: 3, title: 'Payment / My Earnings'),
+            _buildMenuItem(
+              context,
+              index: 3,
+              title: _isDriver ? 'My Earnings' : 'Payment',
+            ),
             _buildMenuItem(context, index: 5, title: 'My Rewards'),
 
-            const SizedBox(height: 8), // Slight extra gap before Sign Out
+            const SizedBox(height: 8),
 
             // Sign Out Option (using the reusable component)
             _buildMenuItem(
@@ -103,19 +112,12 @@ class AppSidebar extends StatelessWidget {
     );
   }
 
-  // Handle routing internally
   void _handleItemTap(BuildContext context, int index) {
-    Navigator.pop(context); // Always close the drawer first
+    Navigator.pop(context);
 
-    // Prevent routing if the user is already on this screen
     if (index == selectedIndex) return;
 
-    // Handle Sign Out Logic completely separately
     if (index == 4) {
-      // 1. TODO: Call your auth provider to clear session here
-      // e.g., await FirebaseAuth.instance.signOut();
-
-      // 2. Route to Login and DESTROY the navigation history
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(builder: (context) => const LoginScreen()),
@@ -130,17 +132,13 @@ class AppSidebar extends StatelessWidget {
         nextScreen = const ProfileScreen();
         break;
       case 1:
-        final homeVm = Provider.of<HomeViewModel>(context, listen: false);
-        nextScreen = SubscriptionListScreen(
-          userId: homeVm.currentUserId ?? '',
-          role: homeVm.currentUserRole,
-        );
+        nextScreen = const ProfileScreen();
         break;
       case 2:
-        nextScreen = const ProfileScreen(); // Replace with actual screen
+        nextScreen = const RequestListScreen();
         break;
       case 3:
-        nextScreen = const ProfileScreen(); // Replace with actual screen
+        nextScreen = _isDriver ? const DriverBalanceScreen() : const PaymentScreen();
         break;
       case 5:
         final homeVm = Provider.of<HomeViewModel>(context, listen: false);
