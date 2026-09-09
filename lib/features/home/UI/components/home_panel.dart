@@ -10,6 +10,7 @@ import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
 import 'package:nak_tumpang/features/home/UI/components/active_subscription_card.dart';
 import 'package:nak_tumpang/features/trips/UI/add_edit_trip_screen.dart';
 import 'package:nak_tumpang/features/negotiation/UI/screens/negotiation_screen.dart';
+import 'package:nak_tumpang/core/utils/url_utils.dart';
 
 class HomePanel extends StatelessWidget {
   const HomePanel({super.key});
@@ -448,7 +449,7 @@ class HomePanel extends StatelessWidget {
       return Column(
         children: [
           ActiveSubscriptionCard(
-            tripName: sub['trip_name'], // Added
+            tripName: sub['trip_name'],
             name: sub['name'],
             phone: sub['phone'],
             imageUrl: sub['imageUrl'],
@@ -458,7 +459,8 @@ class HomePanel extends StatelessWidget {
             exceptionButtonText: isDriver ? "Can't fetch at..." : 'No need tumpang at...',
             isSelected: viewModel.selectedSubscriptionId == sub['id'],
             onTap: () => viewModel.selectSubscription(sub['id']),
-            onCallPressed: () => print('Calling...'),
+            // Trigger the native dialer
+            onCallPressed: () => UrlUtils.makePhoneCall(sub['phone']),
             onDetailsPressed: () => print('Opening details...'),
             onExceptionPressed: () => print('Filing exception...'),
           ),
