@@ -117,7 +117,7 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Subscription cancelled successfully.')),
         );
-        context.read<HomeViewModel>().refreshCurrentUserData();
+        context.read<HomeViewModel>().fetchCurrentUser();
         Navigator.of(context).pop(true);
       }
     }

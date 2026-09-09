@@ -22,6 +22,7 @@ class _RewardsScreenState extends State<RewardsScreen> {
   @override
   void initState() {
     super.initState();
+    // This correctly fetches the fresh data when the screen opens
     Future.microtask(() => context.read<RewardsViewModel>().loadAll(widget.userId));
   }
 

@@ -49,16 +49,8 @@ class HomePanel extends StatelessWidget {
                   ),
                 ),
               ),
-              if (viewModel.currentUserRole == 'driver')
-                ..._buildDriverView(context, viewModel)
-              else ...[
-                if (viewModel.activeSubscriptions.isNotEmpty && !viewModel.showMatchingUI)
-                  ..._buildPassengerSubscriptionView(viewModel)
-                else
-                  ..._buildPassengerMatchingView(context, viewModel),
-              ],
 
-              // --- PANEL MODE ROUTING ---
+              // --- PANEL MODE ROUTING (single source of truth — no duplicate block above this) ---
               if (viewModel.panelMode == HomePanelMode.cantFetch && viewModel.selectedSubscription != null)
                 CantFetchPanel(
                   tumpangSubscriptionId: viewModel.selectedSubscription!['id'] ?? '',
@@ -85,14 +77,13 @@ class HomePanel extends StatelessWidget {
                   minDate: DateTime.tryParse(viewModel.selectedSubscription!['subscription_start_date'] ?? ''),
                   maxDate: DateTime.tryParse(viewModel.selectedSubscription!['subscription_end_date'] ?? ''),
                 )
-              // --- ROLE-BASED ROUTING ---
               else if (viewModel.currentUserRole == 'driver')
                   ..._buildDriverView(context, viewModel)
                 else ...[
                     if (viewModel.activeSubscriptions.isNotEmpty && !viewModel.showMatchingUI)
                       ..._buildPassengerSubscriptionView(context, viewModel)
                     else
-                      ..._buildPassengerMatchingView(viewModel),
+                      ..._buildPassengerMatchingView(context, viewModel),
                   ],
             ],
           ),
@@ -106,7 +97,10 @@ class HomePanel extends StatelessWidget {
       return [
         const Text('My Active Subscriptions', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
         const SizedBox(height: 16),
-        ..._buildSubscriptionList(viewModel, isDriver: true),
+        // TODO: pass `context` + `isDriver: true` here once `active_subscription_card.dart`
+        // is confirmed, so real onDetailsPressed / onExceptionPressed / Complete Trip
+        // wiring can be restored (currently these are print() stubs in _buildSubscriptionList).
+        ..._buildSubscriptionList(context, viewModel, isDriver: true),
         const SizedBox(height: 24),
         const Divider(height: 1, thickness: 1, color: AppColors.greyBorder),
         const SizedBox(height: 16),
@@ -152,11 +146,12 @@ class HomePanel extends StatelessWidget {
     ];
   }
 
-  List<Widget> _buildPassengerSubscriptionView(HomeViewModel viewModel) {
+  List<Widget> _buildPassengerSubscriptionView(BuildContext context, HomeViewModel viewModel) {
     return [
       const Text('My Active Subscriptions', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
       const SizedBox(height: 16),
-      ..._buildSubscriptionList(viewModel, isDriver: false),
+      // Use the unified list builder with context
+      ..._buildSubscriptionList(context, viewModel, isDriver: false),
       const SizedBox(height: 24),
       const Divider(height: 1, thickness: 1, color: AppColors.greyBorder),
       const SizedBox(height: 16),
@@ -170,7 +165,6 @@ class HomePanel extends StatelessWidget {
       ),
     ];
   }
-
   List<Widget> _buildPassengerMatchingView(BuildContext context, HomeViewModel viewModel) {
     return [
       if (viewModel.activeSubscriptions.isNotEmpty)
@@ -225,15 +219,12 @@ class HomePanel extends StatelessWidget {
                     departTime: drivProfile['depart_time'],
                     profileImageUrl: driver['profile_image_url'],
                     isRequested: driver['is_requested'] ?? false,
-
                     onRequestTumpang: () async {
                       final requestId = await viewModel.requestTumpang(
                         driverTripId: driver['trip_id'],
                         passengerTripId: viewModel.currentSelectedTrip!['id'],
                       );
-
                       if (!context.mounted) return;
-
                       if (requestId != null) {
                         viewModel.markDriverRequestedGlobally([driver['trip_id']]);
                         ScaffoldMessenger.of(context).showSnackBar(
@@ -258,8 +249,6 @@ class HomePanel extends StatelessWidget {
                 ],
               );
             }),
-
-            // --- UPDATED: Show mini spinner below the list during pagination ---
             if (viewModel.isDirectLoadingMore)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 24),
@@ -322,21 +311,16 @@ class HomePanel extends StatelessWidget {
                     dropoffDistanceKm: route['dropoff_distance_km'],
                     walkToDestMeters: route['walk_to_dest_meters'],
                     walkToDestMins: route['walk_to_dest_mins'],
-
                     isRequested: route['is_requested'] ?? false,
-
                     onRequestTumpang: () async {
                       String? requestIdA;
                       String? requestIdB;
-
                       final bool attemptA = route['first_mile_type'] == 'Driver' &&
                           route['driver_a_trip_id'] != null &&
                           !(route['is_driver_a_requested'] ?? false);
-
                       final bool attemptB = route['last_mile_type'] == 'Driver' &&
                           route['driver_b_trip_id'] != null &&
                           !(route['is_driver_b_requested'] ?? false);
-
                       if (attemptA) {
                         requestIdA = await viewModel.requestTumpang(
                           driverTripId: route['driver_a_trip_id'],
@@ -350,7 +334,6 @@ class HomePanel extends StatelessWidget {
                           overridePickupTime: viewModel.currentSelectedTrip!['desired_pickup_time'],
                         );
                       }
-
                       if (attemptB) {
                         requestIdB = await viewModel.requestTumpang(
                           driverTripId: route['driver_b_trip_id'],
@@ -364,26 +347,20 @@ class HomePanel extends StatelessWidget {
                           overridePickupTime: route['driver_b_depart_sql'],
                         );
                       }
-
                       if (!context.mounted) return;
-
                       final bool successA = attemptA ? (requestIdA != null) : true;
                       final bool successB = attemptB ? (requestIdB != null) : true;
                       final bool allSuccess = successA && successB;
-
                       if (allSuccess) {
                         List<String> requestedIds = [];
                         if (requestIdA != null) requestedIds.add(route['driver_a_trip_id']);
                         if (requestIdB != null) requestedIds.add(route['driver_b_trip_id']);
-
                         if (requestedIds.isNotEmpty) {
                           viewModel.markDriverRequestedGlobally(requestedIds);
                         }
-
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(content: Text('Mixed requests sent successfully!'), backgroundColor: Colors.green),
                         );
-
                         final targetId = requestIdA ?? requestIdB;
                         if (targetId != null) {
                           Navigator.push(
@@ -406,8 +383,6 @@ class HomePanel extends StatelessWidget {
                 ],
               );
             }),
-
-            // --- UPDATED: Show mini spinner below the list during pagination ---
             if (viewModel.isMixedLoadingMore)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 24),
@@ -464,9 +439,13 @@ class HomePanel extends StatelessWidget {
     );
   }
 
-  List<Widget> _buildSubscriptionList(HomeViewModel viewModel, {required bool isDriver}) {
+  // UNCHANGED FROM MERGE — still has print() stubs, needs active_subscription_card.dart
+  // to restore real navigation + add Complete Trip. See TODOs above.
+  List<Widget> _buildSubscriptionList(BuildContext context, HomeViewModel viewModel, {required bool isDriver}) {
     return List.generate(viewModel.activeSubscriptions.length, (index) {
       final sub = viewModel.activeSubscriptions[index];
+      final bool isCompletedToday = sub['is_completed_today'] ?? false;
+
       return Column(
         children: [
           ActiveSubscriptionCard(
@@ -479,9 +458,63 @@ class HomePanel extends StatelessWidget {
             exceptionButtonText: isDriver ? "Can't fetch at..." : 'No need tumpang at...',
             isSelected: viewModel.selectedSubscriptionId == sub['id'],
             onTap: () => viewModel.selectSubscription(sub['id']),
-            onCallPressed: () => print('Calling...'),
-            onDetailsPressed: () => print('Opening details...'),
-            onExceptionPressed: () => print('Filing exception...'),
+            onCallPressed: () {
+              print('Calling ${sub['phone']}...');
+            },
+            onDetailsPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => SubscriptionDetailScreen(
+                    currentUserId: viewModel.currentUserId ?? '',
+                    role: viewModel.currentUserRole,
+                    subscription: sub,
+                  ),
+                ),
+              );
+            },
+            onExceptionPressed: () {
+              if (isDriver) {
+                viewModel.openCantFetchPanel(sub);
+              } else {
+                viewModel.openNoNeedFetchPanel(sub);
+              }
+            },
+            isCompletedToday: isCompletedToday,
+            // PREVENT MULTIPLE COMPLETIONS: If already completed today, pass null to disable the button
+            onCompleteTripPressed: (isDriver && !isCompletedToday) ? () async {
+              final confirmed = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: const Text('Complete Trip?'),
+                  content: const Text(
+                    'Mark today\'s tumpang as completed? Both you and the passenger will earn reward points.',
+                  ),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                    TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Confirm')),
+                  ],
+                ),
+              );
+              if (confirmed == true) {
+                // CORRECT WAY TO CALL IT:
+                final success = await viewModel.completeTrip(
+                  subscriptionId: sub['id'],
+                  driverId: sub['driver_id'],
+                  passengerId: sub['passenger_id'],
+                  pickupLat: sub['pickup_lat'] ?? 0.0,
+                  pickupLng: sub['pickup_lng'] ?? 0.0,
+                  dropoffLat: sub['dropoff_lat'] ?? 0.0,
+                  dropoffLng: sub['dropoff_lng'] ?? 0.0,
+                );
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(success ? 'Trip completed! Points awarded.' : 'Failed to complete trip.')),
+                  );
+                }
+                await viewModel.fetchCurrentUser();
+              }
+            } : null,
           ),
           if (index != viewModel.activeSubscriptions.length - 1)
             const SizedBox(height: 16),

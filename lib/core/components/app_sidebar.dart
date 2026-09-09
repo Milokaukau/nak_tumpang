@@ -9,7 +9,7 @@ import 'package:nak_tumpang/features/auth/UI/screens/login_screen.dart';
 import 'package:nak_tumpang/features/subscriptions/UI/screens/subscription_list_screen.dart';
 import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
 import 'package:nak_tumpang/features/rewards/UI/screens/rewards_screen.dart';
-import 'package:nak_tumpang/features/trips/UI/my_trips_screen.dart'; // NEW IMPORT
+import 'package:nak_tumpang/features/trips/UI/my_trips_screen.dart';
 
 class HamburgerButton extends StatelessWidget {
   const HamburgerButton({super.key});
@@ -88,7 +88,7 @@ class AppSidebar extends StatelessWidget {
             const SizedBox(height: 20),
 
             _buildMenuItem(context, index: 0, title: 'View Profile'),
-            _buildMenuItem(context, index: 1, title: 'My Trips'), // NEW ITEM
+            _buildMenuItem(context, index: 1, title: 'My Trips'),
             _buildMenuItem(context, index: 2, title: 'View Subscriptions'),
             _buildMenuItem(context, index: 3, title: 'View Requests'),
             _buildMenuItem(
@@ -100,10 +100,10 @@ class AppSidebar extends StatelessWidget {
 
             const SizedBox(height: 8),
 
-            // Sign Out Option (using the reusable component)
+            // Sign Out Option
             _buildMenuItem(
               context,
-              index: 5, // SHIFTED DOWN
+              index: 6, // FIXED — was colliding with 'My Rewards' at index 5
               title: 'Sign Out',
               textColor: const Color(0xFFEF4444),
             ),
@@ -118,7 +118,7 @@ class AppSidebar extends StatelessWidget {
 
     if (index == selectedIndex) return;
 
-    if (index == 5) { // SHIFTED DOWN
+    if (index == 6) { // FIXED — matches the corrected Sign Out index
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(builder: (context) => const LoginScreen()),
@@ -132,11 +132,15 @@ class AppSidebar extends StatelessWidget {
       case 0:
         nextScreen = const ProfileScreen();
         break;
-      case 1: // NEW ROUTE
+      case 1:
         nextScreen = const MyTripsScreen();
         break;
       case 2:
-        nextScreen = const ProfileScreen(); // Currently points to Profile in your code
+        final homeVm = Provider.of<HomeViewModel>(context, listen: false);
+        nextScreen = SubscriptionListScreen(
+          userId: homeVm.currentUserId ?? '',
+          role: homeVm.currentUserRole,
+        );
         break;
       case 3:
         nextScreen = const RequestListScreen();

@@ -15,6 +15,7 @@ class HomeViewModel extends ChangeNotifier {
   String selectedFilter = 'Direct';
   String currentUserRole = 'passenger';
   String? selectedSubscriptionId;
+  String? get currentUserId => _auth.currentUser?.id;
 
   Map<String, dynamic>? currentUser;
   Map<String, dynamic>? currentSelectedTrip;
@@ -26,6 +27,8 @@ class HomeViewModel extends ChangeNotifier {
   bool isDirectLoading = false;
   bool isMixedLoading = false;
   bool isRouteLoading = false;
+  bool _isCompletingTrip = false;
+  bool get isCompletingTrip => _isCompletingTrip;
 
   // --- NEW: Separate loading states for pagination ---
   bool isDirectLoadingMore = false;
@@ -636,6 +639,39 @@ class HomeViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<bool> completeTrip({
+    required String subscriptionId,
+    required String driverId,
+    required String passengerId,
+    required double pickupLat,
+    required double pickupLng,
+    required double dropoffLat,
+    required double dropoffLng,
+  }) async {
+    // Prevent duplicate concurrent requests
+    if (_isCompletingTrip) return false;
+
+    _isCompletingTrip = true;
+    notifyListeners(); // Disables UI immediately
+
+    try {
+      final success = await _homeService.completeTrip(
+        subscriptionId: subscriptionId,
+        driverId: driverId,
+        passengerId: passengerId,
+        pickupLat: pickupLat,
+        pickupLng: pickupLng,
+        dropoffLat: dropoffLat,
+        dropoffLng: dropoffLng,
+      );
+      return success;
+    } finally {
+      _isCompletingTrip = false;
+      notifyListeners();
+    }
+  }
+
+
   Future<void> _findMixedRoutes() async {
     if (currentSelectedTrip == null) return;
 
@@ -1025,11 +1061,16 @@ class HomeViewModel extends ChangeNotifier {
       final trip = sub[tripKey] ?? {};
       final user = trip['users'] ?? {};
       final driverTrip = isForPassenger ? trip : (sub['driver_trips'] ?? {});
+      final driverId = isForPassenger ? (user['id'] ?? '') : (currentUserId ?? '');
+      final passengerId = isForPassenger ? (currentUserId ?? '') : (user['id'] ?? '');
 
 
 
       return {
         'id': sub['id'],
+        'driver_id': driverId,
+        'passenger_id': passengerId,
+        'other_party_id': user['id'],
         'passenger_trip_id': sub['passenger_trip_id'],
         'driver_trip_id': sub['driver_trip_id'],
         'pickup_lat': sub['pickup_lat'],
@@ -1052,6 +1093,7 @@ class HomeViewModel extends ChangeNotifier {
         'subscription_end_date': sub['subscription_end_date'],
         'fee': sub['fee'],
         'status': sub['status'] ?? 'active',
+        'is_completed_today': sub['is_completed_today'] ?? false,
         'deposit': sub['deposit'],
         'deposit_refunded': sub['deposit_refunded'],
         'ended_by': sub['ended_by'],
