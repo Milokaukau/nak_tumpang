@@ -8,7 +8,9 @@ class NegotiationSummaryCard extends StatelessWidget {
   final bool isFullyAgreed;
   final bool isDriver;
   final bool isReadOnly;
+  final bool isRejected;
   final VoidCallback onReject;
+  final VoidCallback? onCancelRequest; // Add this callback
   final VoidCallback onProceedToSummary;
 
   // Lifecycle Callbacks
@@ -22,7 +24,9 @@ class NegotiationSummaryCard extends StatelessWidget {
     required this.isFullyAgreed,
     required this.isDriver,
     this.isReadOnly = false,
+    this.isRejected = false,
     required this.onReject,
+    this.onCancelRequest, // Add this
     required this.onProceedToSummary,
     this.onRenew,
     this.onRenegotiate,
@@ -33,13 +37,12 @@ class NegotiationSummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final endDate = DateTime.tryParse(request.subscriptionEndDate.value) ?? DateTime.now();
     final now = DateTime.now();
-    // Normalize to midnight for accurate day difference
     final endDateOnly = DateTime(endDate.year, endDate.month, endDate.day);
     final nowOnly = DateTime(now.year, now.month, now.day);
 
     final isExpired = nowOnly.isAfter(endDateOnly);
-    final daysUntilExpiry = endDateOnly.difference(nowOnly).inDays;
-    final isExpiringSoon = daysUntilExpiry >= 0 && daysUntilExpiry <= 7;
+    final daysSinceExpiry = isExpired ? nowOnly.difference(endDateOnly).inDays : 0;
+    final canStillExtend = isExpired && daysSinceExpiry <= 7;
 
     return Container(
       width: double.infinity,
@@ -54,16 +57,22 @@ class NegotiationSummaryCard extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(vertical: 10),
             decoration: BoxDecoration(
-              color: isReadOnly ? Colors.green.shade100 : AppColors.primaryYellow,
+              color: isRejected
+                  ? Colors.red.shade100
+                  : (isReadOnly ? Colors.green.shade100 : AppColors.primaryYellow),
               borderRadius: const BorderRadius.vertical(top: Radius.circular(11)),
             ),
             child: Text(
-              isReadOnly ? 'Agreement Finalized & Paid' : 'Agreement Status',
+              isRejected
+                  ? 'Request Rejected / Cancelled'
+                  : (isReadOnly ? 'Agreement Finalized & Paid' : 'Agreement Status'),
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 fontSize: 16,
-                color: isReadOnly ? Colors.green.shade800 : AppColors.black,
+                color: isRejected
+                    ? Colors.red.shade800
+                    : (isReadOnly ? Colors.green.shade800 : AppColors.black),
               ),
             ),
           ),
@@ -72,8 +81,21 @@ class NegotiationSummaryCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (isReadOnly) ...[
-                  if (isExpired || isExpiringSoon) ...[
+                if (isRejected) ...[
+                  const Row(
+                    children: [
+                      Icon(Icons.cancel, color: Colors.red, size: 20),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'This request was rejected or cancelled. No further changes can be made.',
+                          style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ],
+                  ),
+                ] else if (isReadOnly) ...[
+                  if (canStillExtend) ...[
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
@@ -82,9 +104,8 @@ class NegotiationSummaryCard extends StatelessWidget {
                         border: Border.all(color: Colors.amber.shade300),
                       ),
                       child: Text(
-                        isExpired
-                            ? 'This subscription cycle ended on ${request.subscriptionEndDate.value}.'
-                            : 'Subscription ends soon on ${request.subscriptionEndDate.value}.',
+                        'This subscription ended on ${request.subscriptionEndDate.value}. '
+                            'You can extend it within 7 days of ending (${7 - daysSinceExpiry} day${(7 - daysSinceExpiry) == 1 ? '' : 's'} left).',
                         style: TextStyle(color: Colors.amber.shade900, fontWeight: FontWeight.bold, fontSize: 13),
                         textAlign: TextAlign.center,
                       ),
@@ -122,6 +143,19 @@ class NegotiationSummaryCard extends StatelessWidget {
                       onPressed: onCancelSubscription,
                       style: TextButton.styleFrom(foregroundColor: Colors.red),
                       child: const Text('Cancel & Refund Deposit', style: TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                  ] else if (isExpired) ...[
+                    const Row(
+                      children: [
+                        Icon(Icons.lock_clock, color: Colors.grey, size: 20),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'This subscription has ended and the 7-day extension window has passed.',
+                            style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ],
                     ),
                   ] else ...[
                     const Row(
@@ -187,8 +221,9 @@ class NegotiationSummaryCard extends StatelessWidget {
                   const SizedBox(height: 12),
                 ],
 
-                if (isDriver && !isReadOnly) ...[
-                  const SizedBox(height: 4),
+                // Universally render Cancel/Reject button before payment is finalized
+                if (!isReadOnly && !isRejected) ...[
+                  const SizedBox(height: 12),
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton(
@@ -198,8 +233,11 @@ class NegotiationSummaryCard extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
                       ),
-                      onPressed: onReject,
-                      child: const Text('Reject Request', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                      onPressed: isDriver ? onReject : onCancelRequest,
+                      child: Text(
+                          isDriver ? 'Reject Request' : 'Cancel Request',
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)
+                      ),
                     ),
                   ),
                 ],

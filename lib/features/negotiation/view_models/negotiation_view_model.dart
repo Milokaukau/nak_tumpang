@@ -101,7 +101,8 @@ class NegotiationViewModel extends ChangeNotifier {
           .from('tumpang_request')
           .select()
           .inFilter(tripIdColumn, tripIds)
-          .or('status.eq.pending,status.eq.negotiating,status.eq.completed');
+      // Updated to include 'cancelled'
+          .or('status.eq.pending,status.eq.negotiating,status.eq.completed,status.eq.rejected,status.eq.cancelled');
 
       final allRequests = rows.map((row) {
         try {
@@ -112,8 +113,14 @@ class NegotiationViewModel extends ChangeNotifier {
         }
       }).toList();
 
-      pendingRequests = allRequests.where((r) => r.status != 'completed').toList();
-      completedRequests = allRequests.where((r) => r.status == 'completed').toList();
+      pendingRequests = allRequests
+          .where((r) => r.status == 'pending' || r.status == 'negotiating')
+          .toList();
+
+      // Updated to include cancelled requests in the history tab
+      completedRequests = allRequests
+          .where((r) => r.status == 'completed' || r.status == 'rejected' || r.status == 'cancelled')
+          .toList();
 
       errorMessage = null;
     } catch (e, stack) {
@@ -225,6 +232,18 @@ class NegotiationViewModel extends ChangeNotifier {
     );
   }
 
+  // Added cancelRequest method for passengers
+  Future<void> cancelRequest(String requestId) {
+    return runNegotiationAction(() async {
+      await _supabase.from('tumpang_request').update({
+        'status': 'cancelled',
+      }).eq('id', requestId);
+      await refreshRequests();
+    },
+      fallbackMessage: "Couldn't cancel the request. Please check your connection and try again.",
+    );
+  }
+
   // 1. Extend Subscription (Continue)
   Future<void> extendSubscription({
     required String subscriptionId,
@@ -259,5 +278,48 @@ class NegotiationViewModel extends ChangeNotifier {
     }).eq('id', subscriptionId);
 
     notifyListeners();
+  }
+
+  Future<List<Map<String, dynamic>>> getOpenInvoices(String subscriptionId) async {
+    final rows = await _supabase
+        .from('payments')
+        .select()
+        .eq('tumpang_subscription_id', subscriptionId)
+        .filter('paid_at', 'is', null);
+    return (rows as List).cast<Map<String, dynamic>>();
+  }
+
+  Future<void> reportCannotFetchDay({
+    required String subscriptionId,
+    required DateTime date,
+    String? reason,
+  }) async {
+    throw UnimplementedError(
+      'reportCannotFetchDay: requires the tumpang_missed_days table '
+          '(see doc comment) before this can be wired up.',
+    );
+  }
+
+  static List<Map<String, dynamic>> calculateInvoicePeriods({
+    required int subscriptionDays,
+    required double dailyFee,
+    int depositDays = 60,
+    int invoiceCycleDays = 30,
+  }) {
+    final periods = <Map<String, dynamic>>[];
+    int remaining = subscriptionDays - depositDays;
+    int cursor = depositDays;
+    while (remaining > 0) {
+      final periodDays = remaining >= invoiceCycleDays ? invoiceCycleDays : remaining;
+      periods.add({
+        'startDay': cursor,
+        'endDay': cursor + periodDays,
+        'days': periodDays,
+        'amount': dailyFee * periodDays,
+      });
+      cursor += periodDays;
+      remaining -= periodDays;
+    }
+    return periods;
   }
 }

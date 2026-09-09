@@ -172,6 +172,45 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
     }
   }
 
+  Future<void> _confirmCancel(BuildContext context, NegotiationViewModel controller) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Cancel Request?'),
+        content: const Text('Are you sure you want to cancel this Tumpang request? This action cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('No, keep it'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Yes, Cancel'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      // Call cancelRequest instead of rejectEntireRequest
+      await controller.cancelRequest(widget.requestId);
+      if (mounted) Navigator.pop(context);
+    } on NegotiationException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: Colors.red),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text(kDefaultNegotiationErrorMessage), backgroundColor: Colors.red),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final controller = Provider.of<NegotiationViewModel>(context, listen: false);
@@ -199,6 +238,10 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
 
           final targetTripId = isDriver ? request.passengerTripId : request.driverTripId;
           final bool isCompleted = request.status == 'completed';
+          final bool isCancelled = request.status == 'cancelled';
+          final bool isRejected = request.status == 'rejected';
+          // Fields become locked once the request is paid/finalized, rejected, or cancelled.
+          final bool fieldsReadOnly = isCompleted || isRejected || isCancelled;
 
           final bool isFullyAgreed = request.fee.isAccepted &&
               request.pickupTime.isAccepted &&
@@ -236,7 +279,7 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                       value: request.pickupLocation.name,
                       isAccepted: request.pickupLocation.isAccepted,
                       isRequestedByMe: request.pickupLocation.requestedBy == controller.currentUserId,
-                      isReadOnly: isCompleted,
+                      isReadOnly: fieldsReadOnly,
                       topWidget: RouteMapHeader(label: request.pickupLocation.name, lat: request.pickupLocation.lat, lng: request.pickupLocation.lng),
                       onPropose: () => _openLocationPicker(context, controller, 'Pickup Location', 'pickup', request.pickupLocation.name, request.pickupLocation.lat, request.pickupLocation.lng),
                       onAccept: () => _runNegotiationAction(() => controller.acceptTerm(widget.requestId, 'pickup')),
@@ -247,7 +290,7 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                       value: request.dropoffLocation.name,
                       isAccepted: request.dropoffLocation.isAccepted,
                       isRequestedByMe: request.dropoffLocation.requestedBy == controller.currentUserId,
-                      isReadOnly: isCompleted,
+                      isReadOnly: fieldsReadOnly,
                       topWidget: RouteMapHeader(label: request.dropoffLocation.name, lat: request.dropoffLocation.lat, lng: request.dropoffLocation.lng),
                       onPropose: () => _openLocationPicker(context, controller, 'Dropoff Location', 'dropoff', request.dropoffLocation.name, request.dropoffLocation.lat, request.dropoffLocation.lng),
                       onAccept: () => _runNegotiationAction(() => controller.acceptTerm(widget.requestId, 'dropoff')),
@@ -258,7 +301,7 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                       value: '${request.subscriptionStartDate.value} to ${request.subscriptionEndDate.value}',
                       isAccepted: request.subscriptionStartDate.isAccepted && request.subscriptionEndDate.isAccepted,
                       isRequestedByMe: request.subscriptionStartDate.requestedBy == controller.currentUserId,
-                      isReadOnly: isCompleted,
+                      isReadOnly: fieldsReadOnly,
                       onPropose: () => _openDateRangeProposalSheet(context, controller, request.subscriptionStartDate.value, request.subscriptionEndDate.value),
                       onAccept: () => _runNegotiationAction(() => controller.acceptTumpangDateRange(widget.requestId)),
                     ),
@@ -268,7 +311,7 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                       value: _formatAmPm(request.pickupTime.value),
                       isAccepted: request.pickupTime.isAccepted,
                       isRequestedByMe: request.pickupTime.requestedBy == controller.currentUserId,
-                      isReadOnly: isCompleted,
+                      isReadOnly: fieldsReadOnly,
                       onPropose: () => _openTimeProposalSheet(context, controller, request.pickupTime.value),
                       onAccept: () => _runNegotiationAction(() => controller.acceptTerm(widget.requestId, 'pickup_time')),
                     ),
@@ -278,7 +321,7 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                       value: 'RM ${request.fee.value.toStringAsFixed(2)}',
                       isAccepted: request.fee.isAccepted,
                       isRequestedByMe: request.fee.requestedBy == controller.currentUserId,
-                      isReadOnly: isCompleted,
+                      isReadOnly: fieldsReadOnly,
                       topWidget: Column(
                         children: [
                           Text(
@@ -301,7 +344,9 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                       isFullyAgreed: isFullyAgreed,
                       isDriver: isDriver,
                       isReadOnly: isCompleted,
+                      isRejected: isRejected,
                       onReject: () => _confirmReject(context, controller),
+                      onCancelRequest: () => _confirmCancel(context, controller),
                       onProceedToSummary: () {
                         Navigator.push(
                           context,

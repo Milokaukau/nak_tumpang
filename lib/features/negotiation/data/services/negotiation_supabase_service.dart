@@ -102,4 +102,175 @@ class NegotiationSupabaseService {
         .update({'status': 'rejected'})
         .eq('id', requestId);
   }
+
+  /// Creates a new tumpang_request representing an extension of an
+  /// existing subscription. All fields are copied from the current
+  /// subscription and marked already-accepted, EXCEPT the end date (and,
+  /// for a 'renegotiate' extension, whichever other fields the caller
+  /// passes as overrides) — those go in unaccepted, so they flow through
+  /// the normal negotiation UI and require the driver's acceptance.
+  ///
+  /// This never touches tumpang_subscription directly - see
+  /// [finalizeExtension] for what happens once this request is agreed.
+  Future<String> createExtensionRequest({
+    required Map<String, dynamic> subscription, // a tumpang_subscription row
+    required String requestedById,
+    required DateTime newEndDate,
+    required String extensionType, // 'date_only' | 'renegotiate'
+    String? overridePickupName,
+    double? overridePickupLat,
+    double? overridePickupLng,
+    String? overrideDropoffName,
+    double? overrideDropoffLat,
+    double? overrideDropoffLng,
+    String? overridePickupTime,
+    double? overrideFee,
+  }) async {
+    final subscriptionId = subscription['id'] as String;
+    final requestId = 'ext_${DateTime.now().millisecondsSinceEpoch}';
+    final newEndDateStr = newEndDate.toIso8601String().split('T').first;
+
+    final bool pickupChanged = overridePickupName != null;
+    final bool dropoffChanged = overrideDropoffName != null;
+    final bool timeChanged = overridePickupTime != null;
+    final bool feeChanged = overrideFee != null;
+
+    await _supabase.from(_table).insert({
+      'id': requestId,
+      'passenger_trip_id': subscription['passenger_trip_id'],
+      'driver_trip_id': subscription['driver_trip_id'],
+      'status': 'negotiating',
+
+      'pickup_name': overridePickupName ?? subscription['pickup_location'],
+      'pickup_lat': overridePickupLat ?? subscription['pickup_lat'],
+      'pickup_lng': overridePickupLng ?? subscription['pickup_lng'],
+      'pickup_requested_by': requestedById,
+      'pickup_is_accepted': !pickupChanged,
+
+      'dropoff_name': overrideDropoffName ?? subscription['dropoff_location'],
+      'dropoff_lat': overrideDropoffLat ?? subscription['dropoff_lat'],
+      'dropoff_lng': overrideDropoffLng ?? subscription['dropoff_lng'],
+      'dropoff_requested_by': requestedById,
+      'dropoff_is_accepted': !dropoffChanged,
+
+      'pickup_time': overridePickupTime ?? subscription['pickup_time'],
+      'pickup_time_requested_by': requestedById,
+      'pickup_time_is_accepted': !timeChanged,
+
+      'fee': overrideFee ?? subscription['fee'],
+      'fee_requested_by': requestedById,
+      'fee_is_accepted': !feeChanged,
+
+      // Start date carries over unchanged (the subscription's original
+      // start) and is pre-accepted; only the end date is actually new.
+      'sub_start_date': subscription['subscription_start_date'],
+      'sub_start_requested_by': requestedById,
+      'sub_start_is_accepted': true,
+
+      'sub_end_date': newEndDateStr,
+      'sub_end_requested_by': requestedById,
+      'sub_end_is_accepted': false,
+
+      'is_extension': true,
+      'extends_subscription_id': subscriptionId,
+      'extension_type': extensionType,
+    });
+
+    return requestId;
+  }
+
+  /// Called once an extension request's [TumpangRequest.isFullyAgreed] is
+  /// true (i.e. the driver has accepted). Applies the agreed terms to
+  /// tumpang_subscription, then marks the extension request completed.
+  ///
+  /// - 'date_only': UPDATEs the existing subscription's end date directly.
+  ///   No new subscription row, no new deposit - your existing invoice
+  ///   generator naturally continues billing into the extended period
+  ///   once subscription_end_date moves.
+  /// - 'renegotiate': INSERTs a brand-new subscription row with the
+  ///   agreed terms, and marks the OLD subscription row 'superseded'
+  ///   rather than updating/deleting it — old data is preserved.
+  ///
+  /// Returns the id of the subscription now in effect (the same id for
+  /// 'date_only', a new id for 'renegotiate').
+  Future<String> finalizeExtension(String extensionRequestId) async {
+    final request = await fetchSingleRequest(extensionRequestId);
+    if (request == null) {
+      throw StateError('Extension request $extensionRequestId not found.');
+    }
+    if (!request.isExtension || request.extendsSubscriptionId == null) {
+      throw StateError('Request $extensionRequestId is not an extension.');
+    }
+    if (!request.isFullyAgreed) {
+      throw StateError('Extension request $extensionRequestId is not fully agreed yet.');
+    }
+
+    final oldSubscriptionId = request.extendsSubscriptionId!;
+
+    if (request.extensionType == 'renegotiate') {
+      final oldSub = await _supabase
+          .from('tumpang_subscription')
+          .select()
+          .eq('id', oldSubscriptionId)
+          .maybeSingle();
+      if (oldSub == null) {
+        throw StateError('Original subscription $oldSubscriptionId not found.');
+      }
+
+      final newSubscriptionId = 'sub_${DateTime.now().millisecondsSinceEpoch}';
+      await _supabase.from('tumpang_subscription').insert({
+        'id': newSubscriptionId,
+        'passenger_trip_id': oldSub['passenger_trip_id'],
+        'driver_trip_id': oldSub['driver_trip_id'],
+        'pickup_lat': request.pickupLocation.lat,
+        'pickup_lng': request.pickupLocation.lng,
+        'pickup_location': request.pickupLocation.name,
+        'dropoff_lat': request.dropoffLocation.lat,
+        'dropoff_lng': request.dropoffLocation.lng,
+        'dropoff_location': request.dropoffLocation.name,
+        'pickup_time': request.pickupTime.value,
+        'fee': request.fee.value,
+        'deposit': oldSub['deposit'], // no new deposit charged for an extension
+        'deposit_refunded': false,
+        'subscription_start_date': request.subscriptionStartDate.value,
+        'subscription_end_date': request.subscriptionEndDate.value,
+        'status': 'active',
+      });
+
+      // Old data is preserved, not overwritten - just marked superseded.
+      await _supabase
+          .from('tumpang_subscription')
+          .update({'status': 'superseded'})
+          .eq('id', oldSubscriptionId);
+
+      await _supabase.from(_table).update({
+        'status': 'completed',
+        'subscription_id': newSubscriptionId,
+      }).eq('id', extensionRequestId);
+
+      return newSubscriptionId;
+    } else {
+      // date_only
+      await _supabase.from('tumpang_subscription').update({
+        'subscription_end_date': request.subscriptionEndDate.value,
+      }).eq('id', oldSubscriptionId);
+
+      // Keep the ORIGINAL completed request's own displayed end date in
+      // sync too, since NegotiationSummaryCard's "can still extend?" check
+      // reads a request's own subscriptionEndDate — without this it would
+      // keep offering "extend" forever using the pre-extension date.
+      await _supabase
+          .from(_table)
+          .update({'sub_end_date': request.subscriptionEndDate.value})
+          .eq('subscription_id', oldSubscriptionId)
+          .neq('id', extensionRequestId);
+
+      await _supabase.from(_table).update({
+        'status': 'completed',
+        'subscription_id': oldSubscriptionId,
+      }).eq('id', extensionRequestId);
+
+      return oldSubscriptionId;
+    }
+  }
 }
