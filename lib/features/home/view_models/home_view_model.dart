@@ -825,7 +825,8 @@ class HomeViewModel extends ChangeNotifier {
         if (requestId != _routeFetchId) return;
 
         mapRoutes = [
-          (points: [start, ...route, end], color: Colors.blueAccent),
+          // Changed from blueAccent to indigo
+          (points: [start, ...route, end], color: Colors.indigo),
         ];
         mapMarkers = [
           (point: start, color: Colors.green),
@@ -844,11 +845,12 @@ class HomeViewModel extends ChangeNotifier {
           if (requestId != _routeFetchId) return;
 
           mapRoutes = [
-            (points: [depart, ...route, arrival], color: Colors.blueAccent),
+            // Changed from blueAccent to indigo
+            (points: [depart, ...route, arrival], color: Colors.indigo),
           ];
           mapMarkers = [
-            (point: depart, color: Colors.blue), // --- FIX: Blue for driver start ---
-            (point: arrival, color: Colors.orange), // --- FIX: Orange for driver end ---
+            (point: depart, color: Colors.blue),
+            (point: arrival, color: Colors.orange),
           ];
         } else {
           if (selectedSubscriptionId == null || activeSubscriptions.isEmpty) return _clearMap();
@@ -872,15 +874,16 @@ class HomeViewModel extends ChangeNotifier {
 
           mapRoutes = [
             if (validDepart) (points: [depart, ...segments[0], pickup], color: AppColors.primaryYellow),
-            (points: [pickup, ...segments[1], dropoff], color: Colors.blueAccent),
+            // Changed from blueAccent to indigo
+            (points: [pickup, ...segments[1], dropoff], color: Colors.indigo),
             if (validArrival) (points: [dropoff, ...segments[2], arrival], color: AppColors.primaryYellow),
           ];
 
           mapMarkers = [
-            if (validDepart) (point: depart, color: Colors.blue), // --- FIX: Blue for driver start ---
+            if (validDepart) (point: depart, color: Colors.blue),
             (point: pickup, color: Colors.green),
             (point: dropoff, color: Colors.red),
-            if (validArrival) (point: arrival, color: Colors.orange), // --- FIX: Orange for driver end ---
+            if (validArrival) (point: arrival, color: Colors.orange),
           ];
         }
       }
