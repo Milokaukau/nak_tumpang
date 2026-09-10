@@ -12,6 +12,7 @@ import 'package:nak_tumpang/features/negotiation/UI/components/negotiation_summa
 import 'package:nak_tumpang/features/negotiation/UI/components/route_map_header.dart';
 import 'package:nak_tumpang/features/negotiation/UI/screens/tumpang_summary_screen.dart';
 import 'package:nak_tumpang/features/negotiation/utils/negotiation_error.dart';
+import 'package:nak_tumpang/features/negotiation/utils/date_range_rules.dart';
 
 class NegotiationScreen extends StatefulWidget {
   final String requestId;
@@ -69,8 +70,8 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
           currentValue: currentValue,
           onSubmit: (newValue) async {
             final parsedFee = double.tryParse(newValue);
-            if (fieldPrefix == 'fee' && parsedFee == null) {
-              throw NegotiationException('Please enter a valid fee amount.');
+            if (fieldPrefix == 'fee' && (parsedFee == null || !parsedFee.isFinite || parsedFee <= 0)) {
+              throw NegotiationException('Please enter a valid, positive fee amount.');
             }
             final dynamic valueToSubmit = fieldPrefix == 'fee' ? parsedFee! : newValue;
             await controller.proposeNewTerm(requestId: widget.requestId, fieldPrefix: fieldPrefix, value: valueToSubmit);
@@ -195,7 +196,6 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
     if (confirmed != true) return;
 
     try {
-      // Call cancelRequest instead of rejectEntireRequest
       await controller.cancelRequest(widget.requestId);
       if (mounted) Navigator.pop(context);
     } on NegotiationException catch (e) {
@@ -323,10 +323,28 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                       isReadOnly: fieldsReadOnly,
                       onPropose: () => _openDateRangeProposalSheet(context, controller, request.subscriptionStartDate.value, request.subscriptionEndDate.value),
                       onAccept: () {
-                        if (request.subscriptionStartDate.value.trim().isEmpty || request.subscriptionEndDate.value.trim().isEmpty) {
+                        final sVal = request.subscriptionStartDate.value.trim();
+                        final eVal = request.subscriptionEndDate.value.trim();
+
+                        if (sVal.isEmpty || eVal.isEmpty) {
                           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please propose valid dates first.'), backgroundColor: Colors.red));
                           return;
                         }
+
+                        // Validate the date range before acceptance to block sub-14-day requests
+                        final sDate = DateTime.tryParse(sVal);
+                        final eDate = DateTime.tryParse(eVal);
+                        if (sDate != null && eDate != null) {
+                          final error = DateRangeRules.validate(sDate, eDate);
+                          if (error != null) {
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error), backgroundColor: Colors.red));
+                            return;
+                          }
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Invalid date format.'), backgroundColor: Colors.red));
+                          return;
+                        }
+
                         _runNegotiationAction(() => controller.acceptTumpangDateRange(widget.requestId));
                       },
                     ),
@@ -349,11 +367,11 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
 
                     NegotiationFieldRow(
                       title: 'Tumpang Fee',
-                      value: request.fee.value <= 0 ? 'Not set' : 'RM ${request.fee.value.toStringAsFixed(2)}',
+                      value: (!request.fee.value.isFinite || request.fee.value <= 0) ? 'Not set' : 'RM ${request.fee.value.toStringAsFixed(2)}',
                       isAccepted: request.fee.isAccepted,
                       isRequestedByMe: request.fee.requestedBy == controller.currentUserId,
                       isReadOnly: fieldsReadOnly,
-                      topWidget: request.fee.value <= 0
+                      topWidget: (!request.fee.value.isFinite || request.fee.value <= 0)
                           ? null
                           : Column(
                         children: [
@@ -370,7 +388,7 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                       ),
                       onPropose: () => _openProposalSheet(context, controller, 'Fee (per day)', request.fee.value.toStringAsFixed(2), 'fee'),
                       onAccept: () {
-                        if (request.fee.value <= 0) {
+                        if (!request.fee.value.isFinite || request.fee.value <= 0) {
                           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please propose a valid fee first.'), backgroundColor: Colors.red));
                           return;
                         }

@@ -42,10 +42,7 @@ class _DateRangeProposalBottomSheetState extends State<DateRangeProposalBottomSh
       final normalizedEnd = DateTime(parsedEnd.year, parsedEnd.month, parsedEnd.day);
       final daysDiff = normalizedEnd.difference(_startDate).inDays;
 
-      // CLEANUP FOR OLD TEST DATA:
-      // If the database loads an old 1-month gap (28 to 31 days) or an invalid date,
-      // aggressively reset it to the new 2-week auto-fill default.
-      if (normalizedEnd.isBefore(twoWeeksLater) || (daysDiff >= 28 && daysDiff <= 31)) {
+      if (normalizedEnd.isBefore(twoWeeksLater)) {
         _endDate = twoWeeksLater;
       } else {
         _endDate = normalizedEnd;
