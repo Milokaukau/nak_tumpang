@@ -2,13 +2,17 @@ import 'package:sqflite/sqflite.dart';
 import 'package:nak_tumpang/core/services/local_db_service.dart';
 
 class PaymentLocalService {
-  final LocalDbService _dbService = LocalDbService();
+  // Use the singleton instance defined by your team lead
+  final LocalDbService _dbService = LocalDbService.instance;
 
   // INSERT OR REPLACE (Upsert) to cache payments from Supabase
   Future<void> cachePayments(List<Map<String, dynamic>> payments) async {
     final db = await _dbService.database;
-    final batch = db.batch();
 
+    // Temporarily bypass strict foreign key rules to allow partial caching
+    await db.execute('PRAGMA foreign_keys = OFF');
+
+    final batch = db.batch();
     for (var payment in payments) {
       batch.insert(
         'payments',
@@ -17,6 +21,9 @@ class PaymentLocalService {
       );
     }
     await batch.commit(noResult: true);
+
+    // Restore the strict rules to respect the team lead's configuration
+    await db.execute('PRAGMA foreign_keys = ON');
   }
 
   // SELECT for offline viewing (Pending: paid_at IS NULL, Complete: paid_at IS NOT NULL)

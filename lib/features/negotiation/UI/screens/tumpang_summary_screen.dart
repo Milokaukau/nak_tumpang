@@ -7,7 +7,6 @@ import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/entities/tumpang_request.dart';
 import 'package:nak_tumpang/features/negotiation/view_models/negotiation_view_model.dart';
 import 'package:nak_tumpang/features/negotiation/UI/components/summary_route_map.dart';
-// --- FIX: Import the HomeViewModel so we can trigger a refresh ---
 import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
 
 class TumpangSummaryScreen extends StatefulWidget {
@@ -123,14 +122,18 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
         'status': 'active',
       });
 
+      // --- NEW BILLING LOGIC: Snap to 1st of next month ---
+      final now = DateTime.now();
+      final firstOfNextMonth = DateTime(now.year, now.month + 1, 1);
+
       final paymentId = 'pay_${DateTime.now().millisecondsSinceEpoch}';
       await _supabase.from('payments').insert({
         'id': paymentId,
         'tumpang_subscription_id': subId,
-        'month': DateTime.now().month,
-        'year': DateTime.now().year,
-        'due_date': DateTime.now().toIso8601String(),
-        'paid_at': DateTime.now().toIso8601String(),
+        'month': now.month,
+        'year': now.year,
+        'due_date': firstOfNextMonth.toIso8601String(),
+        'paid_at': now.toIso8601String(), // It's paid immediately during deposit
         'amount': depositAmount,
         'cycle_start_date': cycleStartDateStr,
         'cycle_end_date': cycleEndDateStr,
@@ -142,7 +145,6 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
 
       if (!mounted) return;
 
-      // --- FIX: Await the refresh before navigating back ---
       try {
         await context.read<HomeViewModel>().fetchCurrentUser();
       } catch (e) {

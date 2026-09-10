@@ -4,10 +4,13 @@ import 'package:flutter_stripe/flutter_stripe.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nak_tumpang/core/entities/payment.dart';
 import 'package:nak_tumpang/features/payment/data/services/payment_supabase_service.dart';
+import 'package:nak_tumpang/core/services/network_service.dart';
+import 'package:nak_tumpang/features/payment/data/services/payment_local_service.dart';
 
 class PaymentViewModel extends ChangeNotifier {
   final PaymentSupabaseService _service = PaymentSupabaseService();
   final SupabaseClient _supabase = Supabase.instance.client;
+  final PaymentLocalService _localService = PaymentLocalService();
   late final StreamSubscription<AuthState> _authSubscription;
 
   List<Payment> pendingPayments = [];
@@ -18,6 +21,8 @@ class PaymentViewModel extends ChangeNotifier {
   bool isProcessingPayment = false;
   String? errorMessage;
   String? paymentErrorMessage;
+
+  bool get isOffline => NetworkService.isOfflineNotifier.value;
 
   PaymentViewModel() {
     _initSession();
@@ -64,11 +69,28 @@ class PaymentViewModel extends ChangeNotifier {
         return;
       }
 
-      // Force invoice generation for any newly reached billing cycles
-      await _service.generateDueInvoicesForUser(userId);
+      if (isOffline) {
+        // Read from SQLite
+        final pRows = await _localService.getOfflinePayments(isCompleted: false);
+        final cRows = await _localService.getOfflinePayments(isCompleted: true);
 
-      pendingPayments = await _service.fetchPendingPayments(userId);
-      paymentHistory = await _service.fetchPaymentHistory(userId);
+        pendingPayments = pRows.map((r) => Payment.fromJson(r)).toList();
+        paymentHistory = cRows.map((r) => Payment.fromJson(r)).toList();
+      } else {
+        // Fetch from Supabase
+        await _service.generateDueInvoicesForUser(userId);
+        pendingPayments = await _service.fetchPendingPayments(userId);
+        paymentHistory = await _service.fetchPaymentHistory(userId);
+
+        // Safely cache to SQLite without crashing UI on foreign key violations
+        try {
+          final allPayments = [...pendingPayments, ...paymentHistory].map((p) => p.toJson()).toList();
+          await _localService.cachePayments(allPayments);
+        } catch (e) {
+          debugPrint('Could not cache payments offline due to strict foreign keys: $e');
+        }
+      }
+
       selectedPaymentIds.removeWhere((id) => !pendingPayments.any((p) => p.id == id));
     } catch (e) {
       errorMessage = 'Failed to load payments: $e';
@@ -97,6 +119,10 @@ class PaymentViewModel extends ChangeNotifier {
   }
 
   Future<bool> paySelectedWithStripe() async {
+    if (isOffline) {
+      paymentErrorMessage = 'Payment cannot be processed offline.';
+      return false;
+    }
     if (selectedPaymentIds.isEmpty) return false;
 
     isProcessingPayment = true;

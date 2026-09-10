@@ -32,7 +32,7 @@ class PaymentSupabaseService {
   /// - Invoice amount = dailyFee * (days in cycle - days covered by a
   ///   tumpang_exception row, from either driver or passenger, within
   ///   that cycle).
-  /// - Due date = cycle end date + 7 days.
+  /// - Due date = Snaps to the 1st of the following month.
   Future<void> generateDueInvoicesForSubscription(String subscriptionId) async {
     final sub = await _supabase
         .from('tumpang_subscription')
@@ -105,7 +105,9 @@ class PaymentSupabaseService {
           final billableDays = (cycleDays - missedDays).clamp(0, cycleDays);
           final amount = dailyFee * billableDays;
 
-          final dueDate = cycleEnd.add(const Duration(days: 7));
+          // --- NEW BILLING LOGIC: Snap to 1st of next month ---
+          final dueDate = DateTime(cycleEnd.year, cycleEnd.month + 1, 1);
+
           final paymentId = 'pay_${DateTime.now().millisecondsSinceEpoch}_${cycleStartStr.replaceAll('-', '')}';
 
           await _supabase.from(_table).insert({

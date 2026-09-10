@@ -5,10 +5,13 @@ import 'package:nak_tumpang/core/entities/tumpang_request.dart';
 import 'package:nak_tumpang/features/negotiation/data/services/negotiation_supabase_service.dart';
 import 'package:nak_tumpang/features/negotiation/utils/date_range_rules.dart';
 import 'package:nak_tumpang/features/negotiation/utils/negotiation_error.dart';
+import 'package:nak_tumpang/core/services/network_service.dart';
+import 'package:nak_tumpang/features/negotiation/data/services/negotiation_local_service.dart';
 
 class NegotiationViewModel extends ChangeNotifier {
   final NegotiationSupabaseService _service = NegotiationSupabaseService();
   final SupabaseClient _supabase = Supabase.instance.client;
+  final NegotiationLocalService _localService = NegotiationLocalService();
 
   String? currentUserId;
   String? currentUserRole;
@@ -21,6 +24,8 @@ class NegotiationViewModel extends ChangeNotifier {
 
   final Map<String, Map<String, dynamic>> _userCache = {};
   late final StreamSubscription<AuthState> _authSubscription;
+
+  bool get isOffline => NetworkService.isOfflineNotifier.value;
 
   NegotiationViewModel() {
     _initSession();
@@ -80,29 +85,53 @@ class NegotiationViewModel extends ChangeNotifier {
       final tripTable = isDriver ? 'driver_trips' : 'passenger_trips';
       final tripIdColumn = isDriver ? 'driver_trip_id' : 'passenger_trip_id';
 
-      final List<dynamic> trips = await _supabase
-          .from(tripTable)
-          .select('id')
-          .eq('user_id', currentUserId!);
+      List<dynamic> rows;
 
-      final tripIds = trips.map((t) => t['id'] as String).toList();
+      if (isOffline) {
+        // Read from SQLite Cache
+        final p = await _localService.getOfflineRequests('pending');
+        final n = await _localService.getOfflineRequests('negotiating');
+        final c = await _localService.getOfflineRequests('completed');
+        final r = await _localService.getOfflineRequests('rejected');
+        final x = await _localService.getOfflineRequests('cancelled');
+        rows = [...p, ...n, ...c, ...r, ...x];
 
-      if (tripIds.isEmpty) {
-        pendingRequests = [];
-        completedRequests = [];
-        isLoading = false;
-        notifyListeners();
-        return;
-      }
+        // Mock a tripId so the UI doesn't break
+        if (rows.isNotEmpty) {
+          currentTripId = isDriver ? rows.first['driver_trip_id'] : rows.first['passenger_trip_id'];
+        }
+      } else {
+        // Fetch from Supabase
+        final List<dynamic> trips = await _supabase
+            .from(tripTable)
+            .select('id')
+            .eq('user_id', currentUserId!);
 
-      currentTripId = tripIds.first;
+        final tripIds = trips.map((t) => t['id'] as String).toList();
 
-      final List<dynamic> rows = await _supabase
-          .from('tumpang_request')
-          .select()
-          .inFilter(tripIdColumn, tripIds)
-      // Updated to include 'cancelled'
-          .or('status.eq.pending,status.eq.negotiating,status.eq.completed,status.eq.rejected,status.eq.cancelled');
+        if (tripIds.isEmpty) {
+          pendingRequests = [];
+          completedRequests = [];
+          isLoading = false;
+          notifyListeners();
+          return;
+        }
+
+        currentTripId = tripIds.first;
+
+        rows = await _supabase
+            .from('tumpang_request')
+            .select()
+            .inFilter(tripIdColumn, tripIds)
+            .or('status.eq.pending,status.eq.negotiating,status.eq.completed,status.eq.rejected,status.eq.cancelled');
+
+        // Safely attempt to cache without crashing the UI
+        try {
+          await _localService.cacheTumpangRequests(rows.cast<Map<String, dynamic>>());
+        } catch (e) {
+          debugPrint('Could not cache request offline due to strict foreign keys: $e');
+        }
+      } // <-- The missing bracket has been restored here!
 
       final allRequests = rows.map((row) {
         try {
@@ -117,7 +146,6 @@ class NegotiationViewModel extends ChangeNotifier {
           .where((r) => r.status == 'pending' || r.status == 'negotiating')
           .toList();
 
-      // Updated to include cancelled requests in the history tab
       completedRequests = allRequests
           .where((r) => r.status == 'completed' || r.status == 'rejected' || r.status == 'cancelled')
           .toList();
@@ -137,11 +165,16 @@ class NegotiationViewModel extends ChangeNotifier {
   }
 
   Future<TumpangRequest?> getSingleRequest(String requestId) async {
+    if (isOffline) {
+      final all = [...pendingRequests, ...completedRequests];
+      return all.firstWhere((r) => r.id == requestId);
+    }
     return _service.fetchSingleRequest(requestId);
   }
 
   Future<Map<String, dynamic>?> getUserProfileByTripId(String tripId, {required bool isDriverTrip}) async {
     if (_userCache.containsKey(tripId)) return _userCache[tripId];
+    if (isOffline) return null; // Can't fetch new profiles offline
 
     final tableName = isDriverTrip ? 'driver_trips' : 'passenger_trips';
     try {
@@ -158,6 +191,7 @@ class NegotiationViewModel extends ChangeNotifier {
   }
 
   Future<void> acceptTerm(String requestId, String fieldPrefix) {
+    if (isOffline) throw NegotiationException('You cannot accept terms while offline.');
     return runNegotiationAction(() async {
       await _service.acceptNegotiationField(requestId: requestId, fieldPrefix: fieldPrefix);
       await refreshRequests();
@@ -171,6 +205,7 @@ class NegotiationViewModel extends ChangeNotifier {
     double? lat,
     double? lng,
   }) {
+    if (isOffline) throw NegotiationException('You cannot propose terms while offline.');
     if (currentUserId == null) return Future.value();
 
     return runNegotiationAction(() async {
@@ -192,6 +227,7 @@ class NegotiationViewModel extends ChangeNotifier {
     required String startDate,
     required String endDate,
   }) {
+    if (isOffline) throw NegotiationException('You cannot propose terms while offline.');
     if (currentUserId == null) return Future.value();
 
     return runNegotiationAction(() async {
@@ -217,6 +253,7 @@ class NegotiationViewModel extends ChangeNotifier {
   }
 
   Future<void> acceptTumpangDateRange(String requestId) {
+    if (isOffline) throw NegotiationException('You cannot accept dates while offline.');
     return runNegotiationAction(() async {
       await _service.acceptTumpangDates(requestId: requestId);
       await refreshRequests();
@@ -224,6 +261,7 @@ class NegotiationViewModel extends ChangeNotifier {
   }
 
   Future<void> rejectEntireRequest(String requestId) {
+    if (isOffline) throw NegotiationException('You cannot reject requests while offline.');
     return runNegotiationAction(() async {
       await _service.rejectRequest(requestId);
       await refreshRequests();
@@ -232,8 +270,8 @@ class NegotiationViewModel extends ChangeNotifier {
     );
   }
 
-  // Added cancelRequest method for passengers
   Future<void> cancelRequest(String requestId) {
+    if (isOffline) throw NegotiationException('You cannot cancel requests while offline.');
     return runNegotiationAction(() async {
       await _supabase.from('tumpang_request').update({
         'status': 'cancelled',
@@ -244,18 +282,17 @@ class NegotiationViewModel extends ChangeNotifier {
     );
   }
 
-  // 1. Extend Subscription (Continue)
   Future<void> extendSubscription({
     required String subscriptionId,
     required DateTime newEndDate,
     required double monthlyFee,
   }) async {
+    if (isOffline) throw NegotiationException('You cannot extend subscriptions while offline.');
     await _supabase.from('tumpang_subscription').update({
       'subscription_end_date': newEndDate.toIso8601String().split('T').first,
       'status': 'active',
     }).eq('id', subscriptionId);
 
-    // Generate invoice for the new month
     final paymentId = 'pay_${DateTime.now().millisecondsSinceEpoch}';
     await _supabase.from('payments').insert({
       'id': paymentId,
@@ -270,8 +307,8 @@ class NegotiationViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  // 2. End Subscription & Mark Deposit for Refund
   Future<void> endSubscription(String subscriptionId) async {
+    if (isOffline) throw NegotiationException('You cannot end subscriptions while offline.');
     await _supabase.from('tumpang_subscription').update({
       'status': 'completed',
       'deposit_status': 'refunded',
@@ -281,6 +318,7 @@ class NegotiationViewModel extends ChangeNotifier {
   }
 
   Future<List<Map<String, dynamic>>> getOpenInvoices(String subscriptionId) async {
+    if (isOffline) return [];
     final rows = await _supabase
         .from('payments')
         .select()
@@ -294,10 +332,7 @@ class NegotiationViewModel extends ChangeNotifier {
     required DateTime date,
     String? reason,
   }) async {
-    throw UnimplementedError(
-      'reportCannotFetchDay: requires the tumpang_missed_days table '
-          '(see doc comment) before this can be wired up.',
-    );
+    throw UnimplementedError();
   }
 
   static List<Map<String, dynamic>> calculateInvoicePeriods({

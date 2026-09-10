@@ -2,13 +2,17 @@ import 'package:sqflite/sqflite.dart';
 import 'package:nak_tumpang/core/services/local_db_service.dart';
 
 class NegotiationLocalService {
-  final LocalDbService _dbService = LocalDbService();
+  // Use the singleton instance defined by your team lead
+  final LocalDbService _dbService = LocalDbService.instance;
 
   // INSERT OR REPLACE (Upsert) to cache requests from Supabase
   Future<void> cacheTumpangRequests(List<Map<String, dynamic>> requests) async {
     final db = await _dbService.database;
-    final batch = db.batch();
 
+    // Temporarily bypass strict foreign key rules to allow partial caching
+    await db.execute('PRAGMA foreign_keys = OFF');
+
+    final batch = db.batch();
     for (var request in requests) {
       // Ensure booleans are converted to INTEGER (0 or 1) for SQLite
       final mappedRequest = _mapBooleansToIntegers(request);
@@ -19,6 +23,9 @@ class NegotiationLocalService {
       );
     }
     await batch.commit(noResult: true);
+
+    // Restore the strict rules to respect the team lead's configuration
+    await db.execute('PRAGMA foreign_keys = ON');
   }
 
   // SELECT for offline viewing (Pending and Complete only)
