@@ -38,7 +38,7 @@ void main() async {
 
   await LocalDbService.instance.testConnection();
 
-  NetworkService.initialize();
+  await NetworkService.initialize();
 
   runApp(
     MultiProvider(

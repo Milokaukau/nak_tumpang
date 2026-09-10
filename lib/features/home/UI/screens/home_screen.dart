@@ -3,6 +3,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:nak_tumpang/core/components/map_pin.dart';
+import 'package:nak_tumpang/core/services/network_service.dart';
 import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/components/app_sidebar.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
@@ -169,6 +170,11 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             children: [
+              if (!NetworkService.isOfflineNotifier.value)
+                TileLayer(
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  userAgentPackageName: 'com.naktumpang.app',
+                ),
               TileLayer(
                 urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 userAgentPackageName: 'com.naktumpang.app',
