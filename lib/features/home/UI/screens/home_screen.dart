@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:geolocator/geolocator.dart'; // Added
+import 'package:geolocator/geolocator.dart';
 import 'package:nak_tumpang/core/components/map_pin.dart';
 import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/components/app_sidebar.dart';
@@ -73,7 +73,12 @@ class _HomeScreenState extends State<HomeScreen> {
       if (lastKnown != null && mounted) {
         final lastLatLng = LatLng(lastKnown.latitude, lastKnown.longitude);
         setState(() => _userLocation = lastLatLng);
-        if (centerMap) _mapController.move(lastLatLng, 15.0);
+
+        // --- FIX: Center camera if asked OR if there is no active route ---
+        final hasRoute = context.read<HomeViewModel>().mapRoutes.isNotEmpty;
+        if (centerMap || !hasRoute) {
+          _mapController.move(lastLatLng, 15.0);
+        }
       }
 
       // 2. Fetch fresh position with a 5-second limit
@@ -89,11 +94,22 @@ class _HomeScreenState extends State<HomeScreen> {
       final currentLatLng = LatLng(position.latitude, position.longitude);
       setState(() => _userLocation = currentLatLng);
 
-      if (centerMap) {
+      // --- FIX: Center camera if asked OR if there is no active route ---
+      final hasRoute = context.read<HomeViewModel>().mapRoutes.isNotEmpty;
+      if (centerMap || !hasRoute) {
         _mapController.move(currentLatLng, 15.0);
       }
+
     } catch (e) {
       debugPrint('Location fetch notice: $e');
+      // --- FIX: Show SnackBar if the user tapped the button and it timed out/failed ---
+      if (centerMap && mounted) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            const SnackBar(content: Text('Could not get your location. Please try again.')),
+          );
+      }
     } finally {
       if (mounted) setState(() => _isLocating = false);
     }
@@ -163,14 +179,13 @@ class _HomeScreenState extends State<HomeScreen> {
                     points: routeData.points,
                     strokeWidth: 5.0,
                     color: routeData.color,
-                    strokeJoin: StrokeJoin.round, // <-- Adds smooth corners, removes scattered pixels
-                    strokeCap: StrokeCap.round,   // <-- Adds smooth ends
+                    strokeJoin: StrokeJoin.round,
+                    strokeCap: StrokeCap.round,
                   );
                 }).toList(),
               ),
               MarkerLayer(
                 markers: [
-                  // Draw regular route markers
                   ...viewModel.mapMarkers.map((markerData) {
                     return Marker(
                       point: markerData.point,
@@ -180,7 +195,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       child: MapPin(color: markerData.color),
                     );
                   }),
-                  // Draw user location circle if available
                   if (_userLocation != null)
                     Marker(
                       point: _userLocation!,
@@ -221,7 +235,6 @@ class _HomeScreenState extends State<HomeScreen> {
             child: HamburgerButton(),
           ),
 
-          // Added "Locate Me" button below hamburger
           Positioned(
             top: 110,
             right: 16,
