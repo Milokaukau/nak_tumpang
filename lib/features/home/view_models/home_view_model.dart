@@ -306,16 +306,12 @@ class HomeViewModel extends ChangeNotifier {
     notifyListeners();
 
     final authUser = _auth.currentUser;
-    if (authUser == null) {
-      if (requestId == _userFetchId) {
-        isScreenLoading = false;
-        notifyListeners();
-      }
-      return;
-    }
+    if (authUser == null) return;
 
-    // Attempt to fetch profile. (If offline, this will fail. For a full offline app,
-    // you would also cache the user profile, but this gets us to the Home screen for now).
+    // Point 4 Fix: Grab the local role BEFORE trying to fetch online
+    final localRole = await HomeLocalService().getUserRole(authUser.id);
+    currentUserRole = localRole ?? 'passenger';
+
     try {
       final profile = await _homeService.fetchUserProfile(authUser.id);
       if (requestId != _userFetchId) return;
@@ -328,8 +324,7 @@ class HomeViewModel extends ChangeNotifier {
         }
       }
     } catch (e) {
-      print('⚠️ Profile fetch failed, proceeding with last known role: $e');
-      // If offline, we default to passenger or use a cached role if you add one later.
+      print('⚠️ Profile fetch failed, proceeding with local role ($currentUserRole): $e');
     }
 
     if (currentUserRole == 'driver') {
@@ -348,7 +343,6 @@ class HomeViewModel extends ChangeNotifier {
     List<Map<String, dynamic>> rawSubs = [];
     List<Map<String, dynamic>> allDriverTrips = [];
 
-    // --- ADD THIS CHECK ---
     if (NetworkService.isOfflineNotifier.value) {
       allDriverTrips = await HomeLocalService().getCachedUserTrips(userId, isForPassenger: false);
       rawSubs = await HomeLocalService().getCachedSubscriptions(userId, isForPassenger: false);
@@ -357,23 +351,11 @@ class HomeViewModel extends ChangeNotifier {
         rawSubs = await _homeService.fetchDriverActiveSubscriptions(userId);
         allDriverTrips = await _homeService.fetchDriverTrips();
 
-        if (allDriverTrips.isNotEmpty) {
-          await HomeLocalService().cacheUserTrips(allDriverTrips, isForPassenger: false, currentUserId: userId);
-        } else {
-          allDriverTrips = await HomeLocalService().getCachedUserTrips(userId, isForPassenger: false);
-        }
+        // Point 5 Fix: Cache unconditionally. Removed empty fallbacks.
+        await HomeLocalService().cacheUserTrips(allDriverTrips, isForPassenger: false, currentUserId: userId);
+        await HomeLocalService().cacheActiveSubscriptions(rawSubs, isForPassenger: false, currentUserId: userId);
 
-        if (rawSubs.isNotEmpty) {
-          await HomeLocalService().cacheActiveSubscriptions(
-            rawSubs,
-            isForPassenger: false,
-            currentUserId: userId,
-          );
-        } else {
-          rawSubs = await HomeLocalService().getCachedSubscriptions(userId, isForPassenger: false);
-        }
       } catch (e) {
-        print('⚠️ Network error, falling back to SQLite cache (Driver): $e');
         allDriverTrips = await HomeLocalService().getCachedUserTrips(userId, isForPassenger: false);
         rawSubs = await HomeLocalService().getCachedSubscriptions(userId, isForPassenger: false);
       }
@@ -410,19 +392,11 @@ class HomeViewModel extends ChangeNotifier {
         trips = await _homeService.fetchPassengerTrips(userId);
         rawSubs = await _homeService.fetchAllPassengerSubscriptions(userId);
 
-        if (trips.isNotEmpty) {
-          await HomeLocalService().cacheUserTrips(trips, isForPassenger: true, currentUserId: userId);
-        } else {
-          trips = await HomeLocalService().getCachedUserTrips(userId, isForPassenger: true);
-        }
+        // Point 5 Fix: Cache unconditionally. Removed empty fallbacks.
+        await HomeLocalService().cacheUserTrips(trips, isForPassenger: true, currentUserId: userId);
+        await HomeLocalService().cacheActiveSubscriptions(rawSubs, isForPassenger: true, currentUserId: userId);
 
-        if (rawSubs.isNotEmpty) {
-          await HomeLocalService().cacheActiveSubscriptions(rawSubs, isForPassenger: true, currentUserId: userId);
-        } else {
-          rawSubs = await HomeLocalService().getCachedSubscriptions(userId, isForPassenger: true);
-        }
       } catch (e) {
-        print('⚠️ Network error, falling back to SQLite cache (Passenger): $e');
         trips = await HomeLocalService().getCachedUserTrips(userId, isForPassenger: true);
         rawSubs = await HomeLocalService().getCachedSubscriptions(userId, isForPassenger: true);
       }

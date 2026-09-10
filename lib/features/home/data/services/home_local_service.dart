@@ -4,6 +4,13 @@ import 'package:nak_tumpang/core/services/local_db_service.dart';
 class HomeLocalService {
   final LocalDbService _dbService = LocalDbService.instance;
 
+  Future<String?> getUserRole(String userId) async {
+    final db = await _dbService.database;
+    final results = await db.query('users', columns: ['role'], where: 'id = ?', whereArgs: [userId]);
+    if (results.isNotEmpty) return results.first['role'] as String;
+    return null;
+  }
+
   // --- 1. Cache Trips ---
   Future<void> cacheUserTrips(
       List<Map<String, dynamic>> trips, {
@@ -14,7 +21,9 @@ class HomeLocalService {
     final batch = db.batch();
     final table = isForPassenger ? 'passenger_trips' : 'driver_trips';
 
-    // Added a placeholder email to satisfy the NOT NULL UNIQUE constraint
+    // Clear old cache to prevent zombie data
+    batch.delete(table, where: 'user_id = ?', whereArgs: [currentUserId]);
+
     batch.insert('users', {
       'id': currentUserId,
       'name': 'User',
@@ -24,35 +33,35 @@ class HomeLocalService {
     }, conflictAlgorithm: ConflictAlgorithm.ignore);
 
     for (final t in trips) {
-      if (isForPassenger) {
-        batch.insert(table, {
-          'id': t['id'],
-          'user_id': t['user_id'] ?? currentUserId,
-          'trip_name': t['trip_name'] ?? 'My Trip',
-          'desired_pickup_time': t['desired_pickup_time'] ?? '00:00:00',
-          'desired_dropoff_time': t['desired_dropoff_time'] ?? '00:00:00',
-          'pickup_lat': t['pickup_lat'] ?? 0.0,
-          'pickup_lng': t['pickup_lng'] ?? 0.0,
-          'pickup_name': t['pickup_name'] ?? '',
-          'dropoff_lat': t['dropoff_lat'] ?? 0.0,
-          'dropoff_lng': t['dropoff_lng'] ?? 0.0,
-          'dropoff_name': t['dropoff_name'] ?? '',
-        }, conflictAlgorithm: ConflictAlgorithm.replace);
-      } else {
-        batch.insert(table, {
-          'id': t['id'],
-          'user_id': t['user_id'] ?? currentUserId,
-          'trip_name': t['trip_name'] ?? 'My Trip',
-          'depart_time': t['depart_time'] ?? '00:00:00',
-          'arrival_time': t['arrival_time'] ?? '00:00:00',
-          'depart_lat': t['depart_lat'] ?? 0.0,
-          'depart_lng': t['depart_lng'] ?? 0.0,
-          'depart_name': t['depart_name'] ?? '',
-          'arrival_lat': t['arrival_lat'] ?? 0.0,
-          'arrival_lng': t['arrival_lng'] ?? 0.0,
-          'arrival_name': t['arrival_name'] ?? '',
-        }, conflictAlgorithm: ConflictAlgorithm.replace);
-      }
+      batch.insert(table, {
+        'id': t['id'],
+        'user_id': t['user_id'] ?? currentUserId,
+        'trip_name': t['trip_name'] ?? 'My Trip',
+        'depart_time': t['depart_time'] ?? '00:00:00',
+        'arrival_time': t['arrival_time'] ?? '00:00:00',
+        'desired_pickup_time': t['desired_pickup_time'] ?? '00:00:00',
+        'desired_dropoff_time': t['desired_dropoff_time'] ?? '00:00:00',
+        'depart_lat': t['depart_lat'] ?? 0.0,
+        'depart_lng': t['depart_lng'] ?? 0.0,
+        'depart_name': t['depart_name'] ?? '',
+        'arrival_lat': t['arrival_lat'] ?? 0.0,
+        'arrival_lng': t['arrival_lng'] ?? 0.0,
+        'arrival_name': t['arrival_name'] ?? '',
+        'pickup_lat': t['pickup_lat'] ?? 0.0,
+        'pickup_lng': t['pickup_lng'] ?? 0.0,
+        'pickup_name': t['pickup_name'] ?? '',
+        'dropoff_lat': t['dropoff_lat'] ?? 0.0,
+        'dropoff_lng': t['dropoff_lng'] ?? 0.0,
+        'dropoff_name': t['dropoff_name'] ?? '',
+        // Point 1 Fix: Add recurrence flags
+        'active_monday': t['active_monday'] == true ? 1 : 0,
+        'active_tuesday': t['active_tuesday'] == true ? 1 : 0,
+        'active_wednesday': t['active_wednesday'] == true ? 1 : 0,
+        'active_thursday': t['active_thursday'] == true ? 1 : 0,
+        'active_friday': t['active_friday'] == true ? 1 : 0,
+        'active_saturday': t['active_saturday'] == true ? 1 : 0,
+        'active_sunday': t['active_sunday'] == true ? 1 : 0,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
     }
     await batch.commit(noResult: true);
   }
@@ -66,7 +75,6 @@ class HomeLocalService {
     final db = await _dbService.database;
     final batch = db.batch();
 
-    // Added a placeholder email to satisfy the NOT NULL UNIQUE constraint
     batch.insert('users', {
       'id': currentUserId,
       'name': 'Me',
@@ -87,7 +95,7 @@ class HomeLocalService {
       final partnerUserId = partnerTrip['user_id'] ?? partnerUser['id'] ?? 'unknown_partner_${sub['id']}';
       final myTripUserId = myTrip['user_id'] ?? currentUserId;
 
-      // Fallback email for partner user
+      // Point 2 Fix: Changed to ignore to prevent CASCADE delete
       batch.insert('users', {
         'id': partnerUserId,
         'name': partnerUser['name'] ?? 'User',
@@ -96,49 +104,49 @@ class HomeLocalService {
         'role': isForPassenger ? 'driver' : 'passenger',
         'avatar_url': partnerUser['avatar_url'],
         'status': 'active',
-      }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
 
-      // Insert Driver Trip
-      final dTrip = isForPassenger ? partnerTrip : myTrip;
+      // Update mutable user fields directly instead of REPLACE
+      batch.update('users', {
+        'name': partnerUser['name'] ?? 'User',
+        'phone': partnerUser['phone'] ?? 'N/A',
+        'avatar_url': partnerUser['avatar_url'],
+      }, where: 'id = ?', whereArgs: [partnerUserId]);
+
       final dTripUserId = isForPassenger ? partnerUserId : myTripUserId;
-
       if (sub['driver_trip_id'] != null) {
         batch.insert('driver_trips', {
           'id': sub['driver_trip_id'],
           'user_id': dTripUserId,
-          'trip_name': dTrip['trip_name'] ?? 'Driver Trip',
-          'depart_time': dTrip['depart_time'] ?? '00:00:00',
-          'arrival_time': dTrip['arrival_time'] ?? '00:00:00',
-          'depart_lat': dTrip['depart_lat'] ?? 0.0,
-          'depart_lng': dTrip['depart_lng'] ?? 0.0,
-          'depart_name': dTrip['depart_name'] ?? '',
-          'arrival_lat': dTrip['arrival_lat'] ?? 0.0,
-          'arrival_lng': dTrip['arrival_lng'] ?? 0.0,
-          'arrival_name': dTrip['arrival_name'] ?? '',
-        }, conflictAlgorithm: ConflictAlgorithm.replace);
+          'trip_name': partnerTrip['trip_name'] ?? myTrip['trip_name'] ?? 'Driver Trip',
+          'depart_time': partnerTrip['depart_time'] ?? myTrip['depart_time'] ?? '00:00:00',
+          'arrival_time': partnerTrip['arrival_time'] ?? myTrip['arrival_time'] ?? '00:00:00',
+          'depart_lat': partnerTrip['depart_lat'] ?? myTrip['depart_lat'] ?? 0.0,
+          'depart_lng': partnerTrip['depart_lng'] ?? myTrip['depart_lng'] ?? 0.0,
+          'depart_name': partnerTrip['depart_name'] ?? myTrip['depart_name'] ?? '',
+          'arrival_lat': partnerTrip['arrival_lat'] ?? myTrip['arrival_lat'] ?? 0.0,
+          'arrival_lng': partnerTrip['arrival_lng'] ?? myTrip['arrival_lng'] ?? 0.0,
+          'arrival_name': partnerTrip['arrival_name'] ?? myTrip['arrival_name'] ?? '',
+        }, conflictAlgorithm: ConflictAlgorithm.ignore); // Point 2 Fix
       }
 
-      // Insert Passenger Trip
-      final pTrip = isForPassenger ? myTrip : partnerTrip;
       final pTripUserId = isForPassenger ? myTripUserId : partnerUserId;
-
       if (sub['passenger_trip_id'] != null) {
         batch.insert('passenger_trips', {
           'id': sub['passenger_trip_id'],
           'user_id': pTripUserId,
-          'trip_name': pTrip['trip_name'] ?? 'Passenger Trip',
-          'desired_pickup_time': pTrip['desired_pickup_time'] ?? '00:00:00',
-          'desired_dropoff_time': pTrip['desired_dropoff_time'] ?? '00:00:00',
-          'pickup_lat': pTrip['pickup_lat'] ?? 0.0,
-          'pickup_lng': pTrip['pickup_lng'] ?? 0.0,
-          'pickup_name': pTrip['pickup_name'] ?? '',
-          'dropoff_lat': pTrip['dropoff_lat'] ?? 0.0,
-          'dropoff_lng': pTrip['dropoff_lng'] ?? 0.0,
-          'dropoff_name': pTrip['dropoff_name'] ?? '',
-        }, conflictAlgorithm: ConflictAlgorithm.replace);
+          'trip_name': partnerTrip['trip_name'] ?? myTrip['trip_name'] ?? 'Passenger Trip',
+          'desired_pickup_time': partnerTrip['desired_pickup_time'] ?? myTrip['desired_pickup_time'] ?? '00:00:00',
+          'desired_dropoff_time': partnerTrip['desired_dropoff_time'] ?? myTrip['desired_dropoff_time'] ?? '00:00:00',
+          'pickup_lat': partnerTrip['pickup_lat'] ?? myTrip['pickup_lat'] ?? 0.0,
+          'pickup_lng': partnerTrip['pickup_lng'] ?? myTrip['pickup_lng'] ?? 0.0,
+          'pickup_name': partnerTrip['pickup_name'] ?? myTrip['pickup_name'] ?? '',
+          'dropoff_lat': partnerTrip['dropoff_lat'] ?? myTrip['dropoff_lat'] ?? 0.0,
+          'dropoff_lng': partnerTrip['dropoff_lng'] ?? myTrip['dropoff_lng'] ?? 0.0,
+          'dropoff_name': partnerTrip['dropoff_name'] ?? myTrip['dropoff_name'] ?? '',
+        }, conflictAlgorithm: ConflictAlgorithm.ignore); // Point 2 Fix
       }
 
-      // Insert Subscription
       batch.insert('tumpang_subscription', {
         'id': sub['id'],
         'passenger_trip_id': sub['passenger_trip_id'],

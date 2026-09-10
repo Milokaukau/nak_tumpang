@@ -175,10 +175,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                   userAgentPackageName: 'com.naktumpang.app',
                 ),
-              TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.naktumpang.app',
-              ),
               PolylineLayer(
                 polylines: viewModel.mapRoutes.map((routeData) {
                   return Polyline(

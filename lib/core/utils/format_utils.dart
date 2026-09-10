@@ -33,14 +33,17 @@ class FormatUtils {
   }
 
   static Map<String, bool> extractActiveDays(Map<String, dynamic> row) {
+    // Treat true, 1, or '1' as active
+    bool isTrue(dynamic val) => val == true || val == 1 || val == '1';
+
     return {
-      'monday': row['active_monday'] ?? false,
-      'tuesday': row['active_tuesday'] ?? false,
-      'wednesday': row['active_wednesday'] ?? false,
-      'thursday': row['active_thursday'] ?? false,
-      'friday': row['active_friday'] ?? false,
-      'saturday': row['active_saturday'] ?? false,
-      'sunday': row['active_sunday'] ?? false,
+      'monday': isTrue(row['active_monday']),
+      'tuesday': isTrue(row['active_tuesday']),
+      'wednesday': isTrue(row['active_wednesday']),
+      'thursday': isTrue(row['active_thursday']),
+      'friday': isTrue(row['active_friday']),
+      'saturday': isTrue(row['active_saturday']),
+      'sunday': isTrue(row['active_sunday']),
     };
   }
 }
