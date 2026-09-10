@@ -331,17 +331,27 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                           return;
                         }
 
-                        // Validate the date range before acceptance to block sub-14-day requests
                         final sDate = DateTime.tryParse(sVal);
                         final eDate = DateTime.tryParse(eVal);
-                        if (sDate != null && eDate != null) {
-                          final error = DateRangeRules.validate(sDate, eDate);
+
+                        // Ensure canonical yyyy-MM-dd format and prevent date overflow
+                        bool isValidStrictDate(String dateStr, DateTime? parsedDate) {
+                          if (parsedDate == null) return false;
+                          final parts = dateStr.split('-');
+                          if (parts.length != 3) return false;
+                          return int.tryParse(parts[0]) == parsedDate.year &&
+                              int.tryParse(parts[1]) == parsedDate.month &&
+                              int.tryParse(parts[2]) == parsedDate.day;
+                        }
+
+                        if (isValidStrictDate(sVal, sDate) && isValidStrictDate(eVal, eDate)) {
+                          final error = DateRangeRules.validate(sDate!, eDate!);
                           if (error != null) {
                             ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error), backgroundColor: Colors.red));
                             return;
                           }
                         } else {
-                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Invalid date format.'), backgroundColor: Colors.red));
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Invalid date format. Expected yyyy-MM-dd.'), backgroundColor: Colors.red));
                           return;
                         }
 
