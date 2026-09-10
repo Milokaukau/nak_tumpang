@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
+import 'package:geolocator/geolocator.dart'; // Added geolocator
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 
 /// Full-screen map, in two modes:
@@ -48,6 +49,8 @@ class _MapScreenState extends State<MapScreen> {
   Timer? _debounce;
   int _searchToken = 0;
 
+  bool _isLocating = false; // Added to track GPS fetch state
+
   @override
   void initState() {
     super.initState();
@@ -90,6 +93,52 @@ class _MapScreenState extends State<MapScreen> {
       debugPrint('Reverse geocode failed: $e');
     } finally {
       if (mounted) setState(() => _isLookingUp = false);
+    }
+  }
+
+  // Handle fetching current location via Geolocator
+  Future<void> _getCurrentLocation() async {
+    setState(() => _isLocating = true);
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        throw Exception('Location services are disabled. Please enable GPS.');
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          throw Exception('Location permissions are denied.');
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        throw Exception('Location permissions are permanently denied.');
+      }
+
+      final position = await Geolocator.getCurrentPosition();
+      final point = LatLng(position.latitude, position.longitude);
+
+      if (!mounted) return;
+      setState(() {
+        _picked = point;
+        _searchResults = [];
+        _searchController.clear();
+      });
+
+      _mapController.move(point, 16.0);
+      await _reverseGeocode(point);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString().replaceAll('Exception: ', '')),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isLocating = false);
     }
   }
 
@@ -335,6 +384,24 @@ class _MapScreenState extends State<MapScreen> {
                         ),
                       ),
                   ],
+                ),
+              ),
+              // Floating Action Button for 'Current Location'
+              Positioned(
+                bottom: 16,
+                right: 16,
+                child: FloatingActionButton.small(
+                  heroTag: 'my_location_btn',
+                  backgroundColor: Colors.white,
+                  foregroundColor: AppColors.black,
+                  onPressed: _isLocating ? null : _getCurrentLocation,
+                  child: _isLocating
+                      ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                      : const Icon(Icons.my_location),
                 ),
               ),
             ],
