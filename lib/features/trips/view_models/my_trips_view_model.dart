@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nak_tumpang/features/trips/data/services/trip_supabase_service.dart';
+import 'package:nak_tumpang/core/services/network_service.dart';
+import 'package:nak_tumpang/features/home/data/services/home_local_service.dart';
 
 enum TripStatus { active, negotiating, none }
 
@@ -34,7 +36,13 @@ class MyTripsViewModel extends ChangeNotifier {
       return;
     }
 
-    final role = await _tripService.getUserRole(user.id);
+    String? role;
+    if (NetworkService.isOfflineNotifier.value) {
+      role = await HomeLocalService().getUserRole(user.id);
+    } else {
+      role = await _tripService.getUserRole(user.id);
+    }
+
     if (requestId != _loadId) return;
 
     if (role == null) {
@@ -45,17 +53,35 @@ class MyTripsViewModel extends ChangeNotifier {
 
     currentUserRole = role;
 
-    final results = await Future.wait([
-      _tripService.fetchMyTrips(user.id, role),
-      _tripService.fetchActiveSubbedTripIds(user.id, role),
-      _tripService.fetchNegotiatingTripIds(user.id, role),
-    ]);
+    if (NetworkService.isOfflineNotifier.value) {
+      try {
+        final isPassenger = role == 'passenger';
+        myTrips = await HomeLocalService().getCachedUserTrips(user.id, isForPassenger: isPassenger);
+        final localSubs = await HomeLocalService().getCachedSubscriptions(user.id, isForPassenger: isPassenger);
+
+        activeSubbedTripIds = localSubs.map((s) => (isPassenger ? s['passenger_trip_id'] : s['driver_trip_id']).toString()).toSet();
+        negotiatingTripIds = {}; // Cannot fetch negotiations offline
+      } catch (e) {
+        debugPrint('⚠️ SQLite MyTrips fetch error: $e');
+      }
+    } else {
+      try {
+        final results = await Future.wait([
+          _tripService.fetchMyTrips(user.id, role),
+          _tripService.fetchActiveSubbedTripIds(user.id, role),
+          _tripService.fetchNegotiatingTripIds(user.id, role),
+        ]);
+        if (requestId != _loadId) return;
+
+        myTrips = results[0] as List<Map<String, dynamic>>;
+        activeSubbedTripIds = results[1] as Set<String>;
+        negotiatingTripIds = results[2] as Set<String>;
+      } catch (e) {
+        debugPrint('⚠️ Supabase MyTrips fetch error: $e');
+      }
+    }
+
     if (requestId != _loadId) return;
-
-    myTrips = results[0] as List<Map<String, dynamic>>;
-    activeSubbedTripIds = results[1] as Set<String>;
-    negotiatingTripIds = results[2] as Set<String>;
-
     isLoading = false;
     notifyListeners();
   }
@@ -67,14 +93,15 @@ class MyTripsViewModel extends ChangeNotifier {
   }
 
   Future<bool> removeTrip(String tripId) async {
+    if (NetworkService.isOfflineNotifier.value) return false;
+
     try {
       await _tripService.deleteTrip(tripId, currentUserRole);
-      // Remove locally to save an API call
       myTrips.removeWhere((trip) => trip['id'] == tripId);
       notifyListeners();
       return true;
     } catch (e) {
-      print('⚠️ Error deleting trip: $e');
+      debugPrint('⚠️ Error deleting trip: $e');
       return false;
     }
   }
