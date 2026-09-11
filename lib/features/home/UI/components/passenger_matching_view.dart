@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/components/base_filter_options.dart';
+import 'package:nak_tumpang/core/services/network_service.dart';
 import 'package:nak_tumpang/features/home/UI/components/back_to_subscriptions_button.dart';
 import 'package:nak_tumpang/features/home/UI/components/direct_route_option_card.dart';
 import 'package:nak_tumpang/features/home/UI/components/empty_state_message.dart';
@@ -36,16 +37,23 @@ class PassengerMatchingView extends StatelessWidget {
           BackToSubscriptionsButton(onPressed: () => viewModel.toggleMatchingUI(false)),
 
         const TripSelectionDropdown(),
-        const SizedBox(height: 16), // Scaled down spacing
-        const Text('Available options', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)), // Scaled font
+        const SizedBox(height: 16),
+        const Text('Available options', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
         const SizedBox(height: 12),
         BaseFilterOptions(
           options: const ['Direct', 'Mixed'],
           selectedOption: viewModel.selectedFilter,
           onSelectionChanged: (option) => viewModel.setFilter(option),
         ),
-        const SizedBox(height: 16), // Scaled down spacing
-        if (viewModel.selectedFilter == 'Direct')
+        const SizedBox(height: 16),
+
+        // --- NEW: Immediately show offline message instead of searching ---
+        if (NetworkService.isOfflineNotifier.value)
+          const EmptyStateMessage(
+            message: 'Connect to the internet to find drivers.',
+            topSpacing: 24,
+          )
+        else if (viewModel.selectedFilter == 'Direct')
           _DirectResults(viewModel: viewModel)
         else
           _MixedResults(viewModel: viewModel),
@@ -66,12 +74,12 @@ class _DirectResults extends StatelessWidget {
     final drivers = viewModel.matchedDrivers;
     if (drivers.isEmpty) {
       return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 24), // Scaled down spacing
+        padding: EdgeInsets.symmetric(vertical: 24),
         child: Center(
           child: Text(
             'No direct drivers found for this route.\nTry selecting "Mixed".',
             textAlign: TextAlign.center,
-            style: TextStyle(color: AppColors.greyText, height: 1.4, fontSize: 13), // Scaled font
+            style: TextStyle(color: AppColors.greyText, height: 1.4, fontSize: 13),
           ),
         ),
       );
@@ -94,7 +102,7 @@ class _DirectResults extends StatelessWidget {
           }),
           if (index != drivers.length - 1)
             const Padding(
-              padding: EdgeInsets.symmetric(vertical: 16), // Scaled down list divider gap
+              padding: EdgeInsets.symmetric(vertical: 16),
               child: Divider(height: 1, thickness: 1, color: AppColors.greyBorder),
             ),
         ],
@@ -115,12 +123,12 @@ class _MixedResults extends StatelessWidget {
     final routes = viewModel.mixedMatchedRoutes;
     if (routes.isEmpty) {
       return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 24), // Scaled down spacing
+        padding: EdgeInsets.symmetric(vertical: 24),
         child: Center(
           child: Text(
             'No mixed routes available. Try selecting "Direct".',
             textAlign: TextAlign.center,
-            style: TextStyle(color: AppColors.greyText, height: 1.4, fontSize: 13), // Scaled font
+            style: TextStyle(color: AppColors.greyText, height: 1.4, fontSize: 13),
           ),
         ),
       );
@@ -161,7 +169,7 @@ class _MixedResults extends StatelessWidget {
           }),
           if (index != routes.length - 1)
             const Padding(
-              padding: EdgeInsets.symmetric(vertical: 16), // Scaled down list divider gap
+              padding: EdgeInsets.symmetric(vertical: 16),
               child: Divider(height: 1, thickness: 1, color: AppColors.greyBorder),
             ),
         ],

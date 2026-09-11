@@ -3,6 +3,7 @@ import 'package:nak_tumpang/core/components/base_button.dart';
 import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/components/base_filter_options.dart';
+import 'package:nak_tumpang/core/services/network_service.dart';
 import 'package:nak_tumpang/features/home/UI/components/direct_route_option_card.dart';
 import 'package:nak_tumpang/features/home/UI/components/mixed_route_option_card.dart';
 import 'package:nak_tumpang/features/home/UI/components/trip_selection_dropdown.dart';
@@ -30,18 +31,15 @@ class HomePanel extends StatelessWidget {
             borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
             boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 8, spreadRadius: 1)],
           ),
-          child: viewModel.isScreenLoading
-              ? const Center(child: CircularProgressIndicator(color: AppColors.primaryYellow))
-              : ListView(
+          child: ListView(
             controller: scrollController,
-            // Scaled down padding
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             children: [
               Center(
                 child: Container(
-                  margin: const EdgeInsets.only(bottom: 16), // Scaled down margin
+                  margin: const EdgeInsets.only(bottom: 16),
                   height: 4,
-                  width: 32, // Scaled down handle
+                  width: 32,
                   decoration: BoxDecoration(
                     color: AppColors.greyBorder,
                     borderRadius: BorderRadius.circular(2),
@@ -66,7 +64,7 @@ class HomePanel extends StatelessWidget {
   List<Widget> _buildDriverView(BuildContext context, HomeViewModel viewModel) {
     if (viewModel.activeSubscriptions.isNotEmpty && !viewModel.showMatchingUI) {
       return [
-        const Text('My Active Subscriptions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)), // Scaled down font
+        const Text('My Active Subscriptions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
         const SizedBox(height: 12),
         ..._buildSubscriptionList(viewModel, isDriver: true),
         const SizedBox(height: 16),
@@ -76,9 +74,9 @@ class HomePanel extends StatelessWidget {
           text: 'View Unmatched Trips',
           onPressed: () => viewModel.toggleMatchingUI(true),
           isOutlined: true,
-          height: 40, // Scaled down button height
+          height: 40,
           borderColor: AppColors.greyBorder,
-          textStyle: const TextStyle(color: AppColors.black, fontWeight: FontWeight.bold, fontSize: 13), // Scaled font
+          textStyle: const TextStyle(color: AppColors.black, fontWeight: FontWeight.bold, fontSize: 13),
         ),
       ];
     } else {
@@ -97,7 +95,7 @@ class HomePanel extends StatelessWidget {
         const Center(
           child: Text(
             'No passenger to fetch today!',
-            style: TextStyle(color: AppColors.greyText, fontSize: 14), // Scaled font
+            style: TextStyle(color: AppColors.greyText, fontSize: 14),
           ),
         ),
       ];
@@ -117,13 +115,20 @@ class HomePanel extends StatelessWidget {
       ),
       const TripSelectionDropdown(),
       const SizedBox(height: 24),
-      if (viewModel.currentSelectedTrip == null)
+      if (NetworkService.isOfflineNotifier.value)
+        const Center(
+          child: Text(
+            'Connect to the internet to find passengers.',
+            style: TextStyle(color: AppColors.greyText, fontSize: 14),
+          ),
+        )
+      else if (viewModel.currentSelectedTrip == null)
         _buildEmptyStatePrompt(context, viewModel)
       else
         const Center(
           child: Text(
             'Waiting for passenger requests...',
-            style: TextStyle(color: AppColors.greyText, fontSize: 14), // Scaled font
+            style: TextStyle(color: AppColors.greyText, fontSize: 14),
           ),
         ),
     ];
@@ -131,7 +136,7 @@ class HomePanel extends StatelessWidget {
 
   List<Widget> _buildPassengerSubscriptionView(HomeViewModel viewModel) {
     return [
-      const Text('My Active Subscriptions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)), // Scaled font
+      const Text('My Active Subscriptions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
       const SizedBox(height: 12),
       ..._buildSubscriptionList(viewModel, isDriver: false),
       const SizedBox(height: 16),
@@ -141,7 +146,7 @@ class HomePanel extends StatelessWidget {
         text: 'Find Tumpang for Another Trip',
         onPressed: () => viewModel.toggleMatchingUI(true),
         isOutlined: true,
-        height: 40, // Scaled button height
+        height: 40,
         borderColor: AppColors.greyBorder,
         textStyle: const TextStyle(color: AppColors.black, fontWeight: FontWeight.bold, fontSize: 13),
       ),
@@ -164,7 +169,7 @@ class HomePanel extends StatelessWidget {
         ),
       const TripSelectionDropdown(),
       const SizedBox(height: 16),
-      const Text('Available options', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)), // Scaled font
+      const Text('Available options', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
       const SizedBox(height: 12),
       BaseFilterOptions(
         options: const ['Direct', 'Mixed'],
@@ -173,154 +178,166 @@ class HomePanel extends StatelessWidget {
       ),
       const SizedBox(height: 16),
 
-      if (viewModel.currentSelectedTrip == null)
+      // --- Offline check immediately replaces the results area ---
+      if (NetworkService.isOfflineNotifier.value)
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: 24),
+          child: Center(
+            child: Text(
+              'Connect to the internet to find drivers.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: AppColors.greyText, height: 1.4, fontSize: 14),
+            ),
+          ),
+        )
+      else if (viewModel.currentSelectedTrip == null)
         _buildEmptyStatePrompt(context, viewModel)
       else if (viewModel.selectedFilter == 'Direct') ...[
-        if (viewModel.isDirectLoading)
-          const Center(child: CircularProgressIndicator(color: AppColors.primaryYellow))
-        else if (viewModel.matchedDrivers.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 24),
-            child: Center(
-              child: Text(
-                'No direct drivers found for this route.\nTry selecting "Mixed".',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: AppColors.greyText, height: 1.4, fontSize: 13),
-              ),
-            ),
-          )
-        else ...[
-            ...List.generate(viewModel.matchedDrivers.length, (index) {
-              final driver = viewModel.matchedDrivers[index];
-              final drivProfile = driver['driver_profile'];
-              return Column(
-                children: [
-                  DirectRouteOptionCard(
-                    driverName: driver['name'],
-                    phoneNumber: driver['phone'],
-                    distanceKm: driver['pickup_distance_km'] ?? 0.0,
-                    departTime: drivProfile['depart_time'],
-                    profileImageUrl: driver['profile_image_url'],
-                    isRequested: driver['is_requested'] ?? false,
-                    onRequestTumpang: () async {
-                      final requestId = await viewModel.requestTumpang(
-                        driverTripId: driver['trip_id'],
-                        passengerTripId: viewModel.currentSelectedTrip!['id'],
-                      );
-                      if (!context.mounted) return;
-                      if (requestId != null) {
-                        viewModel.markDriverRequestedGlobally([driver['trip_id']]);
-                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Request sent!'), backgroundColor: Colors.green));
-                        Navigator.push(context, MaterialPageRoute(builder: (_) => NegotiationScreen(requestId: requestId)));
-                      } else {
-                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to send request.'), backgroundColor: Colors.red));
-                      }
-                    },
-                  ),
-                  if (index != viewModel.matchedDrivers.length - 1)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 16), // Scaled down list divider
-                      child: Divider(height: 1, thickness: 1, color: AppColors.greyBorder),
-                    ),
-                ],
-              );
-            }),
-            if (viewModel.isDirectLoadingMore)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 16),
-                child: Center(child: CircularProgressIndicator(color: AppColors.primaryYellow)),
-              )
-            else if (viewModel.hasMoreDirect)
-              Padding(
-                padding: const EdgeInsets.only(top: 16, bottom: 8),
-                child: BaseButton(
-                  text: 'Load More Options',
-                  isOutlined: true,
-                  height: 40,
-                  foregroundColor: AppColors.black,
-                  borderColor: AppColors.greyBorder,
-                  onPressed: viewModel.loadMoreDirect,
-                  textStyle: const TextStyle(fontSize: 13), // Scaled font
+          // The spinner ONLY applies to the driver search results now
+          if (viewModel.isDirectLoading)
+            const Center(child: CircularProgressIndicator(color: AppColors.primaryYellow))
+          else if (viewModel.matchedDrivers.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Center(
+                child: Text(
+                  'No direct drivers found for this route.\nTry selecting "Mixed".',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: AppColors.greyText, height: 1.4, fontSize: 13),
                 ),
               ),
-          ],
-      ] else ...[
-        if (viewModel.isMixedLoading)
-          const Center(child: CircularProgressIndicator(color: AppColors.primaryYellow))
-        else if (viewModel.mixedMatchedRoutes.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 24),
-            child: Center(
-              child: Text(
-                'No mixed routes available. Try selecting "Direct".',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: AppColors.greyText, height: 1.4, fontSize: 13), // Scaled font
-              ),
-            ),
-          )
-        else ...[
-            ...List.generate(viewModel.mixedMatchedRoutes.length, (index) {
-              final route = viewModel.mixedMatchedRoutes[index];
-              return Column(
-                children: [
-                  MixedRouteOptionCard(
-                    pickupLocation: route['pickup_name'],
-                    destinationLocation: route['destination_name'],
-                    firstMileType: route['first_mile_type'],
-                    driverAName: route['driver_a_name'],
-                    driverADepartTime: route['driver_a_depart'],
-                    pickupDistanceKm: route['pickup_distance_km'],
-                    walkToStationMeters: route['walk_to_station_meters'],
-                    walkToStationMins: route['walk_to_station_mins'],
-                    boardStation: route['board_station'],
-                    alightStation: route['alight_station'],
-                    isInterchange: route['is_interchange'],
-                    boardLineName: route['board_line_name'],
-                    boardLineShortName: route['board_line_short_name'],
-                    boardLineColor: route['board_line_color'] as Color,
-                    alightLineName: route['alight_line_name'],
-                    alightLineShortName: route['alight_line_short_name'],
-                    alightLineColor: route['alight_line_color'] as Color,
-                    trainDuration: route['train_duration_mins'],
-                    lastMileType: route['last_mile_type'],
-                    driverBName: route['driver_b_name'],
-                    driverBDepartTime: route['driver_b_depart'],
-                    dropoffDistanceKm: route['dropoff_distance_km'],
-                    walkToDestMeters: route['walk_to_dest_meters'],
-                    walkToDestMins: route['walk_to_dest_mins'],
-                    isRequested: route['is_requested'] ?? false,
-                    onRequestTumpang: () async {
-                      // ... (Mixed Request Logic Remains Identical) ...
-                    },
-                  ),
-                  if (index != viewModel.mixedMatchedRoutes.length - 1)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 16), // Scaled down list divider
-                      child: Divider(height: 1, thickness: 1, color: AppColors.greyBorder),
+            )
+          else ...[
+              ...List.generate(viewModel.matchedDrivers.length, (index) {
+                final driver = viewModel.matchedDrivers[index];
+                final drivProfile = driver['driver_profile'];
+                return Column(
+                  children: [
+                    DirectRouteOptionCard(
+                      driverName: driver['name'],
+                      phoneNumber: driver['phone'],
+                      distanceKm: driver['pickup_distance_km'] ?? 0.0,
+                      departTime: drivProfile['depart_time'],
+                      profileImageUrl: driver['profile_image_url'],
+                      isRequested: driver['is_requested'] ?? false,
+                      onRequestTumpang: () async {
+                        final requestId = await viewModel.requestTumpang(
+                          driverTripId: driver['trip_id'],
+                          passengerTripId: viewModel.currentSelectedTrip!['id'],
+                        );
+                        if (!context.mounted) return;
+                        if (requestId != null) {
+                          viewModel.markDriverRequestedGlobally([driver['trip_id']]);
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Request sent!'), backgroundColor: Colors.green));
+                          Navigator.push(context, MaterialPageRoute(builder: (_) => NegotiationScreen(requestId: requestId)));
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to send request.'), backgroundColor: Colors.red));
+                        }
+                      },
                     ),
-                ],
-              );
-            }),
-            if (viewModel.isMixedLoadingMore)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 16),
-                child: Center(child: CircularProgressIndicator(color: AppColors.primaryYellow)),
-              )
-            else if (viewModel.hasMoreMixed)
-              Padding(
-                padding: const EdgeInsets.only(top: 16, bottom: 8),
-                child: BaseButton(
-                  text: 'Load More Options',
-                  isOutlined: true,
-                  height: 40,
-                  foregroundColor: AppColors.black,
-                  borderColor: AppColors.greyBorder,
-                  onPressed: viewModel.loadMoreMixed,
-                  textStyle: const TextStyle(fontSize: 13), // Scaled font
+                    if (index != viewModel.matchedDrivers.length - 1)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 16),
+                        child: Divider(height: 1, thickness: 1, color: AppColors.greyBorder),
+                      ),
+                  ],
+                );
+              }),
+              if (viewModel.isDirectLoadingMore)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 16),
+                  child: Center(child: CircularProgressIndicator(color: AppColors.primaryYellow)),
+                )
+              else if (viewModel.hasMoreDirect)
+                Padding(
+                  padding: const EdgeInsets.only(top: 16, bottom: 8),
+                  child: BaseButton(
+                    text: 'Load More Options',
+                    isOutlined: true,
+                    height: 40,
+                    foregroundColor: AppColors.black,
+                    borderColor: AppColors.greyBorder,
+                    onPressed: viewModel.loadMoreDirect,
+                    textStyle: const TextStyle(fontSize: 13),
+                  ),
+                ),
+            ],
+        ] else ...[
+          // The spinner ONLY applies to the mixed search results now
+          if (viewModel.isMixedLoading)
+            const Center(child: CircularProgressIndicator(color: AppColors.primaryYellow))
+          else if (viewModel.mixedMatchedRoutes.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Center(
+                child: Text(
+                  'No mixed routes available. Try selecting "Direct".',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: AppColors.greyText, height: 1.4, fontSize: 13),
                 ),
               ),
-          ],
-      ]
+            )
+          else ...[
+              ...List.generate(viewModel.mixedMatchedRoutes.length, (index) {
+                final route = viewModel.mixedMatchedRoutes[index];
+                return Column(
+                  children: [
+                    MixedRouteOptionCard(
+                      pickupLocation: route['pickup_name'],
+                      destinationLocation: route['destination_name'],
+                      firstMileType: route['first_mile_type'],
+                      driverAName: route['driver_a_name'],
+                      driverADepartTime: route['driver_a_depart'],
+                      pickupDistanceKm: route['pickup_distance_km'],
+                      walkToStationMeters: route['walk_to_station_meters'],
+                      walkToStationMins: route['walk_to_station_mins'],
+                      boardStation: route['board_station'],
+                      alightStation: route['alight_station'],
+                      isInterchange: route['is_interchange'],
+                      boardLineName: route['board_line_name'],
+                      boardLineShortName: route['board_line_short_name'],
+                      boardLineColor: route['board_line_color'] as Color,
+                      alightLineName: route['alight_line_name'],
+                      alightLineShortName: route['alight_line_short_name'],
+                      alightLineColor: route['alight_line_color'] as Color,
+                      trainDuration: route['train_duration_mins'],
+                      lastMileType: route['last_mile_type'],
+                      driverBName: route['driver_b_name'],
+                      driverBDepartTime: route['driver_b_depart'],
+                      dropoffDistanceKm: route['dropoff_distance_km'],
+                      walkToDestMeters: route['walk_to_dest_meters'],
+                      walkToDestMins: route['walk_to_dest_mins'],
+                      isRequested: route['is_requested'] ?? false,
+                      onRequestTumpang: () async {},
+                    ),
+                    if (index != viewModel.mixedMatchedRoutes.length - 1)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 16),
+                        child: Divider(height: 1, thickness: 1, color: AppColors.greyBorder),
+                      ),
+                  ],
+                );
+              }),
+              if (viewModel.isMixedLoadingMore)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 16),
+                  child: Center(child: CircularProgressIndicator(color: AppColors.primaryYellow)),
+                )
+              else if (viewModel.hasMoreMixed)
+                Padding(
+                  padding: const EdgeInsets.only(top: 16, bottom: 8),
+                  child: BaseButton(
+                    text: 'Load More Options',
+                    isOutlined: true,
+                    height: 40,
+                    foregroundColor: AppColors.black,
+                    borderColor: AppColors.greyBorder,
+                    onPressed: viewModel.loadMoreMixed,
+                    textStyle: const TextStyle(fontSize: 13),
+                  ),
+                ),
+            ],
+        ]
     ];
   }
 
@@ -334,7 +351,7 @@ class HomePanel extends StatelessWidget {
                 ? 'You have no trips to match.'
                 : 'No trip is selected.\nSelect one from the dropdown, or',
             textAlign: TextAlign.center,
-            style: const TextStyle(color: AppColors.greyText, fontSize: 14, height: 1.4), // Scaled font
+            style: const TextStyle(color: AppColors.greyText, fontSize: 14, height: 1.4),
           ),
           const SizedBox(height: 4),
           GestureDetector(
@@ -349,7 +366,7 @@ class HomePanel extends StatelessWidget {
               style: TextStyle(
                 color: AppColors.primaryYellow,
                 fontWeight: FontWeight.bold,
-                fontSize: 14, // Scaled font
+                fontSize: 14,
                 decoration: TextDecoration.underline,
                 decorationColor: AppColors.primaryYellow,
                 decorationThickness: 1.5,
@@ -381,7 +398,7 @@ class HomePanel extends StatelessWidget {
             onExceptionPressed: () => print('Filing exception...'),
           ),
           if (index != viewModel.activeSubscriptions.length - 1)
-            const SizedBox(height: 12), // Scaled down space between cards
+            const SizedBox(height: 12),
         ],
       );
     });
