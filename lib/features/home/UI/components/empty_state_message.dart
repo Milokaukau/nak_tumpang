@@ -1,10 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 
-/// Centered placeholder text used whenever a list (unmatched trips, pending
-/// matches, etc.) has nothing to show. Extracted so every "empty" panel
-/// looks and behaves the same way instead of re-declaring the same
-/// Text/style pair in each build method.
 class EmptyStateMessage extends StatelessWidget {
   final String message;
   final double topSpacing;
@@ -12,7 +8,7 @@ class EmptyStateMessage extends StatelessWidget {
   const EmptyStateMessage({
     super.key,
     required this.message,
-    this.topSpacing = 64,
+    this.topSpacing = 32,
   });
 
   @override
@@ -24,7 +20,7 @@ class EmptyStateMessage extends StatelessWidget {
           child: Text(
             message,
             textAlign: TextAlign.center,
-            style: const TextStyle(color: AppColors.greyText, fontSize: 16, height: 1.5),
+            style: const TextStyle(color: AppColors.greyText, fontSize: 14, height: 1.4), // Scaled font
           ),
         ),
       ],

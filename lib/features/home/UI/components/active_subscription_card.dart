@@ -6,7 +6,6 @@ import 'package:nak_tumpang/core/components/base_button.dart';
 class ActiveSubscriptionCard extends StatelessWidget {
   final String tripName;
   final String name;
-  final String phone;
   final String? imageUrl;
   final String pickupLocation;
   final String dropoffLocation;
@@ -23,7 +22,6 @@ class ActiveSubscriptionCard extends StatelessWidget {
     super.key,
     required this.tripName,
     required this.name,
-    required this.phone,
     this.imageUrl,
     required this.pickupLocation,
     required this.dropoffLocation,
@@ -40,7 +38,7 @@ class ActiveSubscriptionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10), // Scaled radius
         border: Border.all(
           color: isSelected ? AppColors.primaryYellow : AppColors.greyBorder,
           width: isSelected ? 2.0 : 1.0,
@@ -48,65 +46,65 @@ class ActiveSubscriptionCard extends StatelessWidget {
       ),
       child: Material(
         color: Colors.transparent,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onTap,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // --- HEADER: Trip Name (Placed above avatar & profile) ---
+              // --- HEADER: Extremely tight padding & small font ---
               Padding(
-                padding: const EdgeInsets.only(left: 16, top: 16, right: 16),
+                padding: const EdgeInsets.only(left: 10, top: 10, right: 10),
                 child: Text(
                   tripName,
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.black),
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.black),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
 
               const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16.0),
-                child: Divider(height: 24, thickness: 1, color: AppColors.greyBorder),
+                padding: EdgeInsets.symmetric(horizontal: 10.0),
+                child: Divider(height: 12, thickness: 1, color: AppColors.greyBorder), // Scaled divider
               ),
 
-              // --- BODY: User Profile & Details ---
+              // --- BODY: Scaled down profile & details ---
               BaseProfileCard(
                 hasBorder: false,
-                padding: const EdgeInsets.only(left: 16, right: 16, bottom: 16), // Top padding handled by divider
+                padding: const EdgeInsets.only(left: 10, right: 10, bottom: 10),
                 profileImageUrl: imageUrl,
                 title: Text(
                   name,
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold), // Scaled font
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
                 description: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 2),
                     Row(
                       children: [
-                        const Icon(Icons.location_on_outlined, size: 16, color: AppColors.primaryYellow),
+                        const Icon(Icons.location_on_outlined, size: 12, color: AppColors.primaryYellow), // Small icon
                         const SizedBox(width: 4),
                         Flexible(
                           child: Text(
                             pickupLocation,
-                            style: const TextStyle(fontSize: 13),
+                            style: const TextStyle(fontSize: 11), // Small font
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         const Padding(
                           padding: EdgeInsets.symmetric(horizontal: 4),
-                          child: Icon(Icons.keyboard_double_arrow_right, size: 16, color: AppColors.primaryYellow),
+                          child: Icon(Icons.keyboard_double_arrow_right, size: 12, color: AppColors.primaryYellow),
                         ),
-                        const Icon(Icons.location_on_outlined, size: 16, color: AppColors.primaryYellow),
+                        const Icon(Icons.location_on_outlined, size: 12, color: AppColors.primaryYellow),
                         const SizedBox(width: 4),
                         Flexible(
                           child: Text(
                             dropoffLocation,
-                            style: const TextStyle(fontSize: 13),
+                            style: const TextStyle(fontSize: 11),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
@@ -115,31 +113,25 @@ class ActiveSubscriptionCard extends StatelessWidget {
                     const SizedBox(height: 4),
                     Row(
                       children: [
-                        const Icon(Icons.schedule, size: 16, color: AppColors.primaryYellow),
+                        const Icon(Icons.schedule, size: 12, color: AppColors.primaryYellow),
                         const SizedBox(width: 4),
-                        Text(time, style: const TextStyle(fontSize: 13)),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        const Icon(Icons.phone, size: 16, color: AppColors.primaryYellow),
-                        const SizedBox(width: 4),
-                        Text(phone, style: const TextStyle(fontSize: 13)),
+                        Text(time, style: const TextStyle(fontSize: 11)), // Small font
                       ],
                     ),
                   ],
                 ),
+
+                // --- ACTION BUTTONS: Highly compressed buttons ---
                 actionButtons: Column(
                   children: [
                     BaseButton(
                       text: 'Call',
                       onPressed: onCallPressed,
-                      height: 44,
+                      height: 32, // Minimum comfortable touch height
                       foregroundColor: AppColors.white,
-                      textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                      textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13), // Scaled text
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 6), // Very tight spacing
                     Row(
                       children: [
                         Expanded(
@@ -148,19 +140,19 @@ class ActiveSubscriptionCard extends StatelessWidget {
                             text: 'Details',
                             onPressed: onDetailsPressed,
                             isOutlined: true,
-                            height: 44,
-                            textStyle: const TextStyle(fontWeight: FontWeight.normal, fontSize: 14),
+                            height: 32,
+                            textStyle: const TextStyle(fontWeight: FontWeight.normal, fontSize: 11), // Scaled text
                           ),
                         ),
-                        const SizedBox(width: 12),
+                        const SizedBox(width: 6),
                         Expanded(
                           flex: 3,
                           child: BaseButton(
                             text: exceptionButtonText,
                             onPressed: onExceptionPressed,
                             isOutlined: true,
-                            height: 44,
-                            textStyle: const TextStyle(fontWeight: FontWeight.normal, fontSize: 13),
+                            height: 32,
+                            textStyle: const TextStyle(fontWeight: FontWeight.normal, fontSize: 11), // Scaled text
                           ),
                         ),
                       ],
