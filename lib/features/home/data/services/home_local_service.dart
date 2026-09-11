@@ -12,7 +12,6 @@ class HomeLocalService {
   }
 
   // --- ATOMIC CACHE (Fixes CodeRabbit Points 1, 2, and 3) ---
-  // --- ATOMIC CACHE (Fixes CodeRabbit Points 1, 2, and 3) ---
   Future<void> cacheHomeData({
     required List<Map<String, dynamic>> trips,
     required List<Map<String, dynamic>> rawSubs,
@@ -39,7 +38,7 @@ class HomeLocalService {
         'status': 'active',
       }, conflictAlgorithm: ConflictAlgorithm.ignore);
 
-      // 3. Insert User's own trips (FIXED: Separated columns based on role)
+      // 3. Insert User's own trips
       for (final t in trips) {
         if (isForPassenger) {
           batch.insert('passenger_trips', {

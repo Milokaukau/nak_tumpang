@@ -2,19 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/features/negotiation/utils/date_range_rules.dart';
 
-/// Lets the user propose a Tumpang start + end date together.
-/// Rules:
-/// - Picking a start date auto-sets the end date to (start + 1 month).
-/// - The end date calendar disables (greys out) any date before
-///   (start + 1 month) — the subscription must be at least 1 month.
-/// - Dates beyond 1 month are freely selectable.
-///
-/// The 1-month rule itself now lives in [DateRangeRules] and is shared
-/// with [NegotiationViewModel.proposeTumpangDateRange], so this picker and
-/// the server-side validation can't drift out of sync.
 class DateRangeProposalBottomSheet extends StatefulWidget {
-  final String initialStartDate; // e.g. "2026-09-04"
-  final String initialEndDate;   // e.g. "2026-10-04"
+  final String initialStartDate;
+  final String initialEndDate;
 
   const DateRangeProposalBottomSheet({
     super.key,
@@ -34,25 +24,32 @@ class _DateRangeProposalBottomSheetState extends State<DateRangeProposalBottomSh
   void initState() {
     super.initState();
     final now = DateTime.now();
-    // Normalize today to midnight to avoid hours/minutes causing false "past date" flags
     final today = DateTime(now.year, now.month, now.day);
 
+    // 1. Parse Start Date
     _startDate = DateTime.tryParse(widget.initialStartDate) ?? today;
-    // Strip any potential time components from the parsed initial date
     _startDate = DateTime(_startDate.year, _startDate.month, _startDate.day);
 
     if (_startDate.isBefore(today)) {
       _startDate = today;
     }
 
+    // 2. Parse End Date
     final parsedEnd = DateTime.tryParse(widget.initialEndDate);
-    final minEnd = DateRangeRules.minEndDate(_startDate);
+    final twoWeeksLater = DateRangeRules.minEndDate(_startDate);
 
     if (parsedEnd != null) {
       final normalizedEnd = DateTime(parsedEnd.year, parsedEnd.month, parsedEnd.day);
-      _endDate = normalizedEnd.isBefore(minEnd) ? minEnd : normalizedEnd;
+      final daysDiff = normalizedEnd.difference(_startDate).inDays;
+
+      if (normalizedEnd.isBefore(twoWeeksLater)) {
+        _endDate = twoWeeksLater;
+      } else {
+        _endDate = normalizedEnd;
+      }
     } else {
-      _endDate = minEnd;
+      // 3. New Request Auto-Fill: Exactly 2 weeks
+      _endDate = twoWeeksLater;
     }
   }
 
@@ -74,7 +71,7 @@ class _DateRangeProposalBottomSheetState extends State<DateRangeProposalBottomSh
     final picked = await showDatePicker(
       context: context,
       initialDate: _startDate.isBefore(today) ? today : _startDate,
-      firstDate: today, // Hard locks the calendar to prevent picking past dates
+      firstDate: today,
       lastDate: today.add(const Duration(days: 730)),
       builder: (context, child) => Theme(data: _yellowTheme(context), child: child!),
     );
@@ -82,8 +79,8 @@ class _DateRangeProposalBottomSheetState extends State<DateRangeProposalBottomSh
     if (picked != null) {
       setState(() {
         _startDate = picked;
-        // Auto-set end date to exactly 1 month out whenever start date changes.
-        _endDate = DateRangeRules.addOneMonth(picked);
+        // Auto-fill exactly 2 weeks out whenever start date is manually changed
+        _endDate = DateRangeRules.addTwoWeeks(picked);
       });
     }
   }
@@ -93,7 +90,7 @@ class _DateRangeProposalBottomSheetState extends State<DateRangeProposalBottomSh
     final picked = await showDatePicker(
       context: context,
       initialDate: _endDate.isBefore(minEnd) ? minEnd : _endDate,
-      firstDate: minEnd, // anything earlier than +1 month is greyed out / unselectable
+      firstDate: minEnd, // Greys out any date earlier than 2 weeks
       lastDate: _startDate.add(const Duration(days: 730)),
       builder: (context, child) => Theme(data: _yellowTheme(context), child: child!),
     );
@@ -113,23 +110,29 @@ class _DateRangeProposalBottomSheetState extends State<DateRangeProposalBottomSh
         children: [
           const Text(
             'Propose Tumpang Dates',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.black),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 6),
           const Text(
-            'Subscription must be at least 1 month.',
-            style: TextStyle(fontSize: 12, color: Colors.grey),
+            'Subscription must be at least 2 weeks.',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              color: Colors.black87,
+            ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 18),
 
           TextFormField(
             readOnly: true,
             onTap: _pickStartDate,
             controller: TextEditingController(text: _format(_startDate)),
+            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.black),
             decoration: const InputDecoration(
               labelText: 'Start Date',
+              labelStyle: TextStyle(color: Colors.black87),
               border: OutlineInputBorder(),
-              suffixIcon: Icon(Icons.calendar_today, color: Colors.grey),
+              suffixIcon: Icon(Icons.calendar_today, color: Colors.black54),
             ),
           ),
           const SizedBox(height: 16),
@@ -138,20 +141,24 @@ class _DateRangeProposalBottomSheetState extends State<DateRangeProposalBottomSh
             readOnly: true,
             onTap: _pickEndDate,
             controller: TextEditingController(text: _format(_endDate)),
+            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.black),
             decoration: const InputDecoration(
               labelText: 'End Date',
+              labelStyle: TextStyle(color: Colors.black87),
               border: OutlineInputBorder(),
-              suffixIcon: Icon(Icons.calendar_today, color: Colors.grey),
+              suffixIcon: Icon(Icons.calendar_today, color: Colors.black54),
             ),
           ),
 
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primaryYellow,
                 foregroundColor: AppColors.black,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               ),
               onPressed: () {
                 Navigator.pop(context, {
@@ -159,7 +166,7 @@ class _DateRangeProposalBottomSheetState extends State<DateRangeProposalBottomSh
                   'end': _format(_endDate),
                 });
               },
-              child: const Text('Submit Proposal'),
+              child: const Text('Submit Proposal', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
             ),
           ),
         ],
