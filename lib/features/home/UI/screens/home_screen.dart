@@ -186,6 +186,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   );
                 }).toList(),
               ),
+              // 2. Pins paint last (on top of the lines)
               MarkerLayer(
                 markers: [
                   ...viewModel.mapMarkers.map((markerData) {
@@ -193,8 +194,14 @@ class _HomeScreenState extends State<HomeScreen> {
                       point: markerData.point,
                       width: 32,
                       height: 40,
-                      alignment: Alignment.bottomCenter,
-                      child: MapPin(color: markerData.color),
+                      // Center the bounding box exactly on the coordinate
+                      alignment: Alignment.center,
+                      // --- FIXED: Manually push the drawing UP by half its height (20px)
+                      // so the bottom tip perfectly hits the line endpoint ---
+                      child: Transform.translate(
+                        offset: const Offset(0, -20),
+                        child: MapPin(color: markerData.color),
+                      ),
                     );
                   }),
                   if (_userLocation != null)

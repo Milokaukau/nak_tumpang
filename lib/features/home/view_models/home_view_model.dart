@@ -854,12 +854,10 @@ class HomeViewModel extends ChangeNotifier {
   }
 
   Future<void> updateMapRoute() async {
-
     if (NetworkService.isOfflineNotifier.value) {
       _clearMap();
       return;
     }
-
 
     final requestId = ++_routeFetchId;
     mapRoutes = [];
@@ -875,43 +873,54 @@ class HomeViewModel extends ChangeNotifier {
           if (currentSelectedTrip == null) return _clearMap();
           start = FormatUtils.latLngFromMap(currentSelectedTrip!, 'pickup_lat', 'pickup_lng');
           end = FormatUtils.latLngFromMap(currentSelectedTrip!, 'dropoff_lat', 'dropoff_lng');
+
+          if (start.latitude == 0.0 || end.latitude == 0.0) return _clearMap();
+          if (requestId != _routeFetchId) return;
+
+          // --- FIXED: Generates a curved arc instead of a straight line ---
+          mapRoutes = [
+            (points: _getCurvedRoute(start, end), color: Colors.indigo),
+          ];
+          mapMarkers = [
+            (point: start, color: Colors.green),
+            (point: end, color: Colors.red),
+          ];
         } else {
           if (selectedSubscriptionId == null || activeSubscriptions.isEmpty) return _clearMap();
-          final sub = activeSubscriptions.firstWhere((s) => s['id'] == selectedSubscriptionId, orElse: () => <String, dynamic>{});
+          final sub = activeSubscriptions.firstWhere(
+                (s) => s['id'] == selectedSubscriptionId,
+            orElse: () => <String, dynamic>{},
+          );
           if (sub.isEmpty) return _clearMap();
 
           start = FormatUtils.latLngFromMap(sub, 'pickup_lat', 'pickup_lng');
           end = FormatUtils.latLngFromMap(sub, 'dropoff_lat', 'dropoff_lng');
+
+          if (start.latitude == 0.0 || end.latitude == 0.0) return _clearMap();
+
+          final route = await _getCachedRoute(start, end);
+          if (requestId != _routeFetchId) return;
+
+          mapRoutes = [
+            (points: [start, ...route, end], color: Colors.indigo),
+          ];
+          mapMarkers = [
+            (point: start, color: Colors.green),
+            (point: end, color: Colors.red),
+          ];
         }
-
-        if (start.latitude == 0.0 || end.latitude == 0.0) return _clearMap();
-
-        final route = await _getCachedRoute(start, end);
-        if (requestId != _routeFetchId) return;
-
-        mapRoutes = [
-          // Changed from blueAccent to indigo
-          (points: [start, ...route, end], color: Colors.indigo),
-        ];
-        mapMarkers = [
-          (point: start, color: Colors.green),
-          (point: end, color: Colors.red),
-        ];
-      }
-      else if (currentUserRole == 'driver') {
+      } else if (currentUserRole == 'driver') {
         if (showMatchingUI) {
           if (currentSelectedTrip == null) return _clearMap();
           final depart = FormatUtils.latLngFromMap(currentSelectedTrip!, 'depart_lat', 'depart_lng');
           final arrival = FormatUtils.latLngFromMap(currentSelectedTrip!, 'arrival_lat', 'arrival_lng');
 
           if (depart.latitude == 0.0 || arrival.latitude == 0.0) return _clearMap();
-
-          final route = await _getCachedRoute(depart, arrival);
           if (requestId != _routeFetchId) return;
 
+          // --- FIXED: Generates a curved arc instead of a straight line ---
           mapRoutes = [
-            // Changed from blueAccent to indigo
-            (points: [depart, ...route, arrival], color: Colors.indigo),
+            (points: _getCurvedRoute(depart, arrival), color: Colors.indigo),
           ];
           mapMarkers = [
             (point: depart, color: Colors.blue),
@@ -919,7 +928,10 @@ class HomeViewModel extends ChangeNotifier {
           ];
         } else {
           if (selectedSubscriptionId == null || activeSubscriptions.isEmpty) return _clearMap();
-          final sub = activeSubscriptions.firstWhere((s) => s['id'] == selectedSubscriptionId, orElse: () => <String, dynamic>{});
+          final sub = activeSubscriptions.firstWhere(
+                (s) => s['id'] == selectedSubscriptionId,
+            orElse: () => <String, dynamic>{},
+          );
           if (sub.isEmpty) return _clearMap();
 
           final depart = FormatUtils.latLngFromMap(sub, 'driver_depart_lat', 'driver_depart_lng');
@@ -939,7 +951,6 @@ class HomeViewModel extends ChangeNotifier {
 
           mapRoutes = [
             if (validDepart) (points: [depart, ...segments[0], pickup], color: AppColors.primaryYellow),
-            // Changed from blueAccent to indigo
             (points: [pickup, ...segments[1], dropoff], color: Colors.indigo),
             if (validArrival) (points: [dropoff, ...segments[2], arrival], color: AppColors.primaryYellow),
           ];
@@ -953,7 +964,7 @@ class HomeViewModel extends ChangeNotifier {
         }
       }
     } catch (e) {
-      print('⚠️ Error updating map route: $e');
+      debugPrint('⚠️ Error updating map route: $e');
     } finally {
       if (requestId == _routeFetchId) {
         isRouteLoading = false;
@@ -998,5 +1009,32 @@ class HomeViewModel extends ChangeNotifier {
             : 'TBD',
       };
     }).toList();
+  }
+
+  // Generates a curved Quadratic Bezier path between two coordinates
+  List<LatLng> _getCurvedRoute(LatLng start, LatLng end, {int segments = 60}) {
+    final double midLat = (start.latitude + end.latitude) / 2;
+    final double midLng = (start.longitude + end.longitude) / 2;
+
+    final double dLat = end.latitude - start.latitude;
+    final double dLng = end.longitude - start.longitude;
+
+    // --- FIXED: Increased magnitude (0.6) for a tall flight-path arc,
+    // and made it negative to flip the curve upwards. ---
+    const double offset = -0.6;
+
+    // Perpendicular vector for the control point
+    final double ctrlLat = midLat - dLng * offset;
+    final double ctrlLng = midLng + dLat * offset;
+
+    List<LatLng> points = [];
+    for (int i = 0; i <= segments; i++) {
+      double t = i / segments;
+      // Bezier formula
+      double lat = (1 - t) * (1 - t) * start.latitude + 2 * (1 - t) * t * ctrlLat + t * t * end.latitude;
+      double lng = (1 - t) * (1 - t) * start.longitude + 2 * (1 - t) * t * ctrlLng + t * t * end.longitude;
+      points.add(LatLng(lat, lng));
+    }
+    return points;
   }
 }
