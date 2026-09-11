@@ -193,7 +193,7 @@ class NegotiationSupabaseService {
   ///
   /// Returns the id of the subscription now in effect (the same id for
   /// 'date_only', a new id for 'renegotiate').
-  Future<String> finalizeExtension(String extensionRequestId) async {
+  Future<String> finalizeExtension(String extensionRequestId, {double additionalDeposit = 0.0}) async {
     final request = await fetchSingleRequest(extensionRequestId);
     if (request == null) {
       throw StateError('Extension request $extensionRequestId not found.');
@@ -206,18 +206,25 @@ class NegotiationSupabaseService {
     }
 
     final oldSubscriptionId = request.extendsSubscriptionId!;
+    final oldSub = await _supabase
+        .from('tumpang_subscription')
+        .select()
+        .eq('id', oldSubscriptionId)
+        .maybeSingle();
+
+    if (oldSub == null) {
+      throw StateError('Original subscription $oldSubscriptionId not found.');
+    }
+
+    // Calculate total updated deposit
+    final currentDeposit = double.tryParse(oldSub['deposit']?.toString() ?? '') ?? 0.0;
+    final newTotalDeposit = currentDeposit + additionalDeposit;
+    String activeSubscriptionId = oldSubscriptionId;
 
     if (request.extensionType == 'renegotiate') {
-      final oldSub = await _supabase
-          .from('tumpang_subscription')
-          .select()
-          .eq('id', oldSubscriptionId)
-          .maybeSingle();
-      if (oldSub == null) {
-        throw StateError('Original subscription $oldSubscriptionId not found.');
-      }
-
       final newSubscriptionId = 'sub_${DateTime.now().millisecondsSinceEpoch}';
+      activeSubscriptionId = newSubscriptionId;
+
       await _supabase.from('tumpang_subscription').insert({
         'id': newSubscriptionId,
         'passenger_trip_id': oldSub['passenger_trip_id'],
@@ -230,47 +237,53 @@ class NegotiationSupabaseService {
         'dropoff_location': request.dropoffLocation.name,
         'pickup_time': request.pickupTime.value,
         'fee': request.fee.value,
-        'deposit': oldSub['deposit'], // no new deposit charged for an extension
+        'deposit': newTotalDeposit, // Updated Deposit
         'deposit_refunded': false,
         'subscription_start_date': request.subscriptionStartDate.value,
         'subscription_end_date': request.subscriptionEndDate.value,
         'status': 'active',
       });
 
-      // Old data is preserved, not overwritten - just marked superseded.
       await _supabase
           .from('tumpang_subscription')
           .update({'status': 'superseded'})
           .eq('id', oldSubscriptionId);
 
-      await _supabase.from(_table).update({
-        'status': 'completed',
-        'subscription_id': newSubscriptionId,
-      }).eq('id', extensionRequestId);
-
-      return newSubscriptionId;
     } else {
       // date_only
       await _supabase.from('tumpang_subscription').update({
         'subscription_end_date': request.subscriptionEndDate.value,
+        'deposit': newTotalDeposit, // Updated Deposit
       }).eq('id', oldSubscriptionId);
 
-      // Keep the ORIGINAL completed request's own displayed end date in
-      // sync too, since NegotiationSummaryCard's "can still extend?" check
-      // reads a request's own subscriptionEndDate — without this it would
-      // keep offering "extend" forever using the pre-extension date.
       await _supabase
           .from(_table)
           .update({'sub_end_date': request.subscriptionEndDate.value})
           .eq('subscription_id', oldSubscriptionId)
           .neq('id', extensionRequestId);
-
-      await _supabase.from(_table).update({
-        'status': 'completed',
-        'subscription_id': oldSubscriptionId,
-      }).eq('id', extensionRequestId);
-
-      return oldSubscriptionId;
     }
+
+    // Mark request completed
+    await _supabase.from(_table).update({
+      'status': 'completed',
+      'subscription_id': activeSubscriptionId,
+    }).eq('id', extensionRequestId);
+
+    // Create payment record for the additional deposit collected
+    if (additionalDeposit > 0) {
+      final paidAt = DateTime.now();
+      final paymentId = 'pay_${paidAt.millisecondsSinceEpoch}_extdep';
+      await _supabase.from('payments').insert({
+        'id': paymentId,
+        'tumpang_subscription_id': activeSubscriptionId,
+        'month': paidAt.month,
+        'year': paidAt.year,
+        'due_date': paidAt.toIso8601String(),
+        'paid_at': paidAt.toIso8601String(),
+        'amount': additionalDeposit,
+      });
+    }
+
+    return activeSubscriptionId;
   }
 }
