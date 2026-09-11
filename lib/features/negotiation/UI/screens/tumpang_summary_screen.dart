@@ -7,7 +7,6 @@ import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/entities/tumpang_request.dart';
 import 'package:nak_tumpang/features/negotiation/view_models/negotiation_view_model.dart';
 import 'package:nak_tumpang/features/negotiation/UI/components/summary_route_map.dart';
-import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
 
 class TumpangSummaryScreen extends StatefulWidget {
   final String requestId;
@@ -42,6 +41,8 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
   /// Deposit rule:
   /// - subscription <= 60 days -> flexible deposit: exact days * daily fee
   /// - subscription >  60 days -> fixed deposit capped at 60 days * daily fee
+  ///   (e.g. a 69-day subscription still only pays a 60-day deposit; the
+  ///   remaining days are billed later via the monthly invoice cycle).
   int _calculateDepositDays(int subscriptionDays) {
     if (subscriptionDays <= 0) return 0;
     return subscriptionDays <= 60 ? subscriptionDays : 60;
@@ -95,14 +96,6 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
       final endDate = DateTime.tryParse(request.subscriptionEndDate.value) ?? startDate;
       final subId = 'sub_${DateTime.now().millisecondsSinceEpoch}';
 
-      final depositDays = _calculateDepositDays(request.subscriptionDays);
-      final cycleStartDateStr = startDate.toIso8601String().split('T').first;
-      final cycleEndDateStr = startDate
-          .add(Duration(days: depositDays > 0 ? depositDays - 1 : 0))
-          .toIso8601String()
-          .split('T')
-          .first;
-
       await _supabase.from('tumpang_subscription').insert({
         'id': subId,
         'passenger_trip_id': request.passengerTripId,
@@ -122,21 +115,15 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
         'status': 'active',
       });
 
-      // --- NEW BILLING LOGIC: Snap to 1st of next month ---
-      final now = DateTime.now();
-      final firstOfNextMonth = DateTime(now.year, now.month + 1, 1);
-
       final paymentId = 'pay_${DateTime.now().millisecondsSinceEpoch}';
       await _supabase.from('payments').insert({
         'id': paymentId,
         'tumpang_subscription_id': subId,
-        'month': now.month,
-        'year': now.year,
-        'due_date': firstOfNextMonth.toIso8601String(),
-        'paid_at': now.toIso8601String(), // It's paid immediately during deposit
+        'month': DateTime.now().month,
+        'year': DateTime.now().year,
+        'due_date': DateTime.now().toIso8601String(),
+        'paid_at': DateTime.now().toIso8601String(),
         'amount': depositAmount,
-        'cycle_start_date': cycleStartDateStr,
-        'cycle_end_date': cycleEndDateStr,
       });
 
       await _supabase.from('tumpang_request').update({
@@ -144,15 +131,6 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
       }).eq('id', request.id);
 
       if (!mounted) return;
-
-      try {
-        await context.read<HomeViewModel>().fetchCurrentUser();
-      } catch (e) {
-        debugPrint('⚠️ Error refreshing HomeViewModel: $e');
-      }
-
-      if (!mounted) return;
-
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Payment Successful!'), backgroundColor: Colors.green),
       );
@@ -208,6 +186,14 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
           final depositAmount = depositDays * dailyFee;
           final bool depositCapped = request.subscriptionDays > 60;
 
+          final invoicePeriods = NegotiationViewModel.calculateInvoicePeriods(
+            subscriptionDays: request.subscriptionDays,
+            dailyFee: dailyFee,
+            depositDays: depositDays,
+          );
+          final int remainingDays = invoicePeriods.fold<int>(0, (sum, p) => sum + (p['days'] as int));
+          final double remainingAmount = invoicePeriods.fold<double>(0, (sum, p) => sum + (p['amount'] as double));
+
           return SingleChildScrollView(
             padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
             child: Container(
@@ -248,7 +234,7 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
                         _SummaryRow(label: 'Dropoff Location', value: request.dropoffLocation.name),
                         _SummaryRow(label: 'Tumpang Start', value: request.subscriptionStartDate.value),
                         _SummaryRow(label: 'Tumpang End', value: request.subscriptionEndDate.value),
-                        _SummaryRow(label: 'Pickup Time', value: _formatAmPm(request.pickupTime.value)),
+                        _SummaryRow(label: 'Pickup Time', value: _formatAmPm(request.pickupTime.value)), // ADDED FORMATTING HERE
                         const SizedBox(height: 16),
                         _SummaryRow(
                           label: 'Tumpang Fee',
@@ -264,6 +250,16 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
                               '${depositCapped ? ' deposit, capped at 60 days' : ' deposit'})',
                           isBold: true,
                         ),
+                        if (invoicePeriods.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          _SummaryRow(
+                            label: 'Remaining Balance',
+                            value: 'RM ${remainingAmount.toStringAsFixed(2)} for $remainingDays day${remainingDays == 1 ? '' : 's'} total'
+                                ' (billed as ${invoicePeriods.length} invoice${invoicePeriods.length == 1 ? '' : 's'} after the deposit period)\n'
+                                '${invoicePeriods.map((p) => 'Day ${p['startDay']}\u2013${p['endDay']}: RM ${(p['amount'] as double).toStringAsFixed(2)} (${p['days']} day${p['days'] == 1 ? '' : 's'})').join('\n')}',
+                            isBold: true,
+                          ),
+                        ],
                         const SizedBox(height: 24),
                         SizedBox(
                           width: double.infinity,

@@ -10,7 +10,6 @@ class NegotiationSummaryCard extends StatelessWidget {
   final bool isReadOnly;
   final bool isRejected;
   final VoidCallback onReject;
-  final VoidCallback? onCancelRequest; // Add this callback
   final VoidCallback onProceedToSummary;
 
   // Lifecycle Callbacks
@@ -26,7 +25,6 @@ class NegotiationSummaryCard extends StatelessWidget {
     this.isReadOnly = false,
     this.isRejected = false,
     required this.onReject,
-    this.onCancelRequest, // Add this
     required this.onProceedToSummary,
     this.onRenew,
     this.onRenegotiate,
@@ -37,11 +35,15 @@ class NegotiationSummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final endDate = DateTime.tryParse(request.subscriptionEndDate.value) ?? DateTime.now();
     final now = DateTime.now();
+    // Normalize to midnight for accurate day difference
     final endDateOnly = DateTime(endDate.year, endDate.month, endDate.day);
     final nowOnly = DateTime(now.year, now.month, now.day);
 
     final isExpired = nowOnly.isAfter(endDateOnly);
     final daysSinceExpiry = isExpired ? nowOnly.difference(endDateOnly).inDays : 0;
+    // "no edit during sub period" - extend options only appear once the
+    // subscription has actually ended, never before.
+    // "after 1 week end can't extend any more" - hidden again past that.
     final canStillExtend = isExpired && daysSinceExpiry <= 7;
 
     return Container(
@@ -64,7 +66,7 @@ class NegotiationSummaryCard extends StatelessWidget {
             ),
             child: Text(
               isRejected
-                  ? 'Request Rejected / Cancelled'
+                  ? 'Request Rejected'
                   : (isReadOnly ? 'Agreement Finalized & Paid' : 'Agreement Status'),
               textAlign: TextAlign.center,
               style: TextStyle(
@@ -88,7 +90,7 @@ class NegotiationSummaryCard extends StatelessWidget {
                       SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'This request was rejected or cancelled. No further changes can be made.',
+                          'This request was rejected. No further changes can be made.',
                           style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
                         ),
                       ),
@@ -221,9 +223,8 @@ class NegotiationSummaryCard extends StatelessWidget {
                   const SizedBox(height: 12),
                 ],
 
-                // Universally render Cancel/Reject button before payment is finalized
-                if (!isReadOnly && !isRejected) ...[
-                  const SizedBox(height: 12),
+                if (isDriver && !isReadOnly && !isRejected) ...[
+                  const SizedBox(height: 4),
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton(
@@ -233,11 +234,8 @@ class NegotiationSummaryCard extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
                       ),
-                      onPressed: isDriver ? onReject : onCancelRequest,
-                      child: Text(
-                          isDriver ? 'Reject Request' : 'Cancel Request',
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)
-                      ),
+                      onPressed: onReject,
+                      child: const Text('Reject Request', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                     ),
                   ),
                 ],

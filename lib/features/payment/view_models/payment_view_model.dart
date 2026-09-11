@@ -22,13 +22,51 @@ class PaymentViewModel extends ChangeNotifier {
   String? errorMessage;
   String? paymentErrorMessage;
 
+  String? _currentUserId;
+
   bool get isOffline => NetworkService.isOfflineNotifier.value;
 
   PaymentViewModel() {
+    _currentUserId = _supabase.auth.currentSession?.user.id;
     _initSession();
-    _authSubscription = _supabase.auth.onAuthStateChange.listen((data) {
+    _authSubscription = _supabase.auth.onAuthStateChange.listen((data) async {
+      final newUserId = data.session?.user.id;
+
+      // An explicit sign-out, or a DIFFERENT account signing in without an
+      // app restart in between — either way the SQLite payments cache
+      // still holds the PREVIOUS account's invoices/history and must not
+      // leak into the new session.
+      final isAccountChange = data.event == AuthChangeEvent.signedOut ||
+          (data.event == AuthChangeEvent.signedIn && _currentUserId != null && newUserId != _currentUserId);
+
+      if (isAccountChange) {
+        try {
+          await _localService.clearPaymentsCache();
+        } catch (e) {
+          debugPrint('Failed to clear local payments cache on account change: $e');
+        }
+        pendingPayments = [];
+        paymentHistory = [];
+        selectedPaymentIds.clear();
+      }
+
+      _currentUserId = newUserId;
       _initSession();
     });
+  }
+
+  /// Call this from your auth/logout flow as an extra safeguard so the
+  /// cache is cleared immediately, without waiting for the
+  /// onAuthStateChange event to round-trip.
+  Future<void> clearLocalCacheOnLogout() async {
+    try {
+      await _localService.clearPaymentsCache();
+    } catch (e) {
+      debugPrint('Failed to clear local payments cache on logout: $e');
+    }
+    pendingPayments = [];
+    paymentHistory = [];
+    selectedPaymentIds.clear();
   }
 
   @override
@@ -39,6 +77,7 @@ class PaymentViewModel extends ChangeNotifier {
 
   void _initSession() {
     final session = _supabase.auth.currentSession;
+    _currentUserId = session?.user.id;
     if (session != null) {
       errorMessage = null;
       fetchAllPayments();
@@ -183,6 +222,53 @@ class PaymentViewModel extends ChangeNotifier {
       return false;
     } finally {
       isProcessingPayment = false;
+      notifyListeners();
+    }
+  }
+
+  // =========================================================================
+  // CANCELLATION BILLING
+  // =========================================================================
+
+  /// Returns the breakdown of actual fetched days and exact fees owed/refundable.
+  /// Perfect for powering the cancellation confirmation screen UI.
+  Future<Map<String, dynamic>?> getCancellationSummary(String subscriptionId) async {
+    if (isOffline) {
+      paymentErrorMessage = 'Cannot calculate exact cancellation fees while offline.';
+      notifyListeners();
+      return null;
+    }
+
+    try {
+      return await _service.calculateCancellationFee(subscriptionId);
+    } catch (e) {
+      debugPrint('Error calculating cancellation summary: $e');
+      return null;
+    }
+  }
+
+  /// Executes the final bill generation upon successful cancellation.
+  Future<bool> processCancellationBill(String subscriptionId) async {
+    if (isOffline) {
+      paymentErrorMessage = 'Cannot process cancellations while offline.';
+      notifyListeners();
+      return false;
+    }
+
+    isLoading = true;
+    paymentErrorMessage = null;
+    notifyListeners();
+
+    try {
+      await _service.generateCancellationInvoice(subscriptionId);
+      await fetchAllPayments(); // Refresh list to instantly show the final bill
+      return true;
+    } catch (e) {
+      paymentErrorMessage = 'Failed to generate final cancellation bill: $e';
+      debugPrint(paymentErrorMessage);
+      return false;
+    } finally {
+      isLoading = false;
       notifyListeners();
     }
   }

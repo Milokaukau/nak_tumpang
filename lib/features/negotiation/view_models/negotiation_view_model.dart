@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:nak_tumpang/core/entities/tumpang_request.dart';
 import 'package:nak_tumpang/features/negotiation/data/services/negotiation_supabase_service.dart';
 import 'package:nak_tumpang/features/negotiation/utils/date_range_rules.dart';
@@ -12,6 +13,8 @@ class NegotiationViewModel extends ChangeNotifier {
   final NegotiationSupabaseService _service = NegotiationSupabaseService();
   final SupabaseClient _supabase = Supabase.instance.client;
   final NegotiationLocalService _localService = NegotiationLocalService();
+
+  static const String _roleCacheKeyPrefix = 'nak_tumpang_cached_role_';
 
   String? currentUserId;
   String? currentUserRole;
@@ -29,9 +32,60 @@ class NegotiationViewModel extends ChangeNotifier {
 
   NegotiationViewModel() {
     _initSession();
-    _authSubscription = _supabase.auth.onAuthStateChange.listen((data) {
-      _initSession();
+    _authSubscription = _supabase.auth.onAuthStateChange.listen((data) async {
+      final newUserId = data.session?.user.id;
+
+      // An explicit sign-out, or a DIFFERENT account signing in without an
+      // app restart in between (no cold start to naturally reset state) —
+      // either way the SQLite cache still holds the PREVIOUS account's
+      // negotiation data and must not leak into the new session.
+      final isAccountChange = data.event == AuthChangeEvent.signedOut ||
+          (data.event == AuthChangeEvent.signedIn && currentUserId != null && newUserId != currentUserId);
+
+      if (isAccountChange) {
+        try {
+          await _localService.clearRequestsCache();
+        } catch (e) {
+          debugPrint('Failed to clear local negotiation cache on account change: $e');
+        }
+        _userCache.clear();
+        currentUserRole = null;
+      }
+
+      await _initSession();
     });
+  }
+
+  /// Call this from your auth/logout flow as an extra safeguard so the
+  /// cache is cleared immediately, without waiting for the
+  /// onAuthStateChange event to round-trip.
+  Future<void> clearLocalCacheOnLogout() async {
+    try {
+      await _localService.clearRequestsCache();
+    } catch (e) {
+      debugPrint('Failed to clear local negotiation cache on logout: $e');
+    }
+    _userCache.clear();
+    currentUserRole = null;
+  }
+
+  Future<void> _persistRole(String userId, String role) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('$_roleCacheKeyPrefix$userId', role);
+    } catch (e) {
+      debugPrint('Could not persist local role cache: $e');
+    }
+  }
+
+  Future<String?> _readCachedRole(String userId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString('$_roleCacheKeyPrefix$userId');
+    } catch (e) {
+      debugPrint('Could not read local role cache: $e');
+      return null;
+    }
   }
 
   @override
@@ -44,6 +98,16 @@ class NegotiationViewModel extends ChangeNotifier {
     final user = _supabase.auth.currentUser;
     if (user != null) {
       currentUserId = user.id;
+
+      // Load the last-known role from local storage FIRST. This is what
+      // makes an offline cold start work at all: previously, the remote
+      // role query below was the ONLY way currentUserRole got set, so if
+      // it threw (no network) the catch block swallowed the error and
+      // fetchRequests() below never ran — an offline cold start loaded
+      // nothing, even though fetchRequests() has a perfectly good SQLite
+      // fallback once currentUserRole is known.
+      currentUserRole ??= await _readCachedRole(currentUserId!);
+
       try {
         final userData = await _supabase
             .from('users')
@@ -51,11 +115,18 @@ class NegotiationViewModel extends ChangeNotifier {
             .eq('id', currentUserId!)
             .maybeSingle();
 
-        currentUserRole = userData?['role']?.toString().replaceAll("'", "") ?? 'passenger';
-        await fetchRequests();
+        final remoteRole = userData?['role']?.toString().replaceAll("'", "") ?? 'passenger';
+        currentUserRole = remoteRole;
+        await _persistRole(currentUserId!, remoteRole);
       } catch (e) {
-        debugPrint('Error initializing session: $e');
+        debugPrint('Error refreshing role from Supabase (falling back to cached role if any): $e');
       }
+
+      // Whether the remote refresh above succeeded or not, always try to
+      // load requests — fetchRequests() knows how to serve from the
+      // SQLite cache when offline.
+      currentUserRole ??= 'passenger';
+      await fetchRequests();
     }
   }
 
@@ -73,13 +144,25 @@ class NegotiationViewModel extends ChangeNotifier {
       }
 
       if (currentUserRole == null) {
-        final userData = await _supabase
-            .from('users')
-            .select('role')
-            .eq('id', currentUserId!)
-            .maybeSingle();
-        currentUserRole = userData?['role']?.toString().replaceAll("'", "") ?? 'passenger';
+        currentUserRole = await _readCachedRole(currentUserId!);
       }
+      if (currentUserRole == null && !isOffline) {
+        try {
+          final userData = await _supabase
+              .from('users')
+              .select('role')
+              .eq('id', currentUserId!)
+              .maybeSingle();
+          currentUserRole = userData?['role']?.toString().replaceAll("'", "") ?? 'passenger';
+          await _persistRole(currentUserId!, currentUserRole!);
+        } catch (e) {
+          debugPrint('Error fetching role in fetchRequests(): $e');
+        }
+      }
+      // Still unknown (first-ever run, offline, with no cached role) —
+      // default rather than throw, so the isOffline branch below still
+      // gets a chance to serve from SQLite instead of failing outright.
+      currentUserRole ??= 'passenger';
 
       final isDriver = currentUserRole == 'driver';
       final tripTable = isDriver ? 'driver_trips' : 'passenger_trips';
@@ -333,6 +416,80 @@ class NegotiationViewModel extends ChangeNotifier {
     String? reason,
   }) async {
     throw UnimplementedError();
+  }
+
+  /// Fetches the raw `tumpang_subscription` row for [subscriptionId]. This
+  /// is the prefill source for [ExtendNegotiationScreen] — the
+  /// subscription row already holds whatever terms the LAST negotiation
+  /// request for it settled on (it's written from that request's fields
+  /// at finalization time, see negotiation_supabase_service.dart), so
+  /// there's no need to separately hunt down "the last request" — the
+  /// subscription row already IS its result.
+  ///
+  /// Returns null if the subscription can't be found (e.g. bad id,
+  /// network issue while offline) — callers should fall back to empty/
+  /// default field values in that case, same as a brand new negotiation.
+  Future<Map<String, dynamic>?> getSubscriptionById(String subscriptionId) async {
+    if (isOffline) return null;
+    try {
+      final row = await _supabase
+          .from('tumpang_subscription')
+          .select()
+          .eq('id', subscriptionId)
+          .maybeSingle();
+      return row;
+    } catch (e) {
+      debugPrint('Error fetching subscription $subscriptionId: $e');
+      return null;
+    }
+  }
+
+  /// Submits an extension request for an existing subscription. Thin
+  /// wrapper around [NegotiationSupabaseService.createExtensionRequest]
+  /// (which already existed but had no caller) — creates a new
+  /// `tumpang_request` row with `is_extension: true`, pre-accepting
+  /// whichever fields the caller did NOT override (they're unchanged from
+  /// the subscription) and leaving overridden fields — plus the end date,
+  /// always — unaccepted so the driver still has to agree to them.
+  /// Returns the new request's id so the caller can navigate straight
+  /// into [NegotiationScreen] to show it.
+  Future<String> submitExtensionRequest({
+    required Map<String, dynamic> subscription,
+    required DateTime newEndDate,
+    required String extensionType, // 'date_only' | 'renegotiate'
+    String? overridePickupName,
+    double? overridePickupLat,
+    double? overridePickupLng,
+    String? overrideDropoffName,
+    double? overrideDropoffLat,
+    double? overrideDropoffLng,
+    String? overridePickupTime,
+    double? overrideFee,
+  }) {
+    if (isOffline) throw NegotiationException('You cannot request an extension while offline.');
+    if (currentUserId == null) throw NegotiationException('You must be signed in to request an extension.');
+
+    return runNegotiationAction<String>(
+          () async {
+        final requestId = await _service.createExtensionRequest(
+          subscription: subscription,
+          requestedById: currentUserId!,
+          newEndDate: newEndDate,
+          extensionType: extensionType,
+          overridePickupName: overridePickupName,
+          overridePickupLat: overridePickupLat,
+          overridePickupLng: overridePickupLng,
+          overrideDropoffName: overrideDropoffName,
+          overrideDropoffLat: overrideDropoffLat,
+          overrideDropoffLng: overrideDropoffLng,
+          overridePickupTime: overridePickupTime,
+          overrideFee: overrideFee,
+        );
+        await refreshRequests();
+        return requestId;
+      },
+      fallbackMessage: "Couldn't submit the extension request. Please check your connection and try again.",
+    );
   }
 
   static List<Map<String, dynamic>> calculateInvoicePeriods({
