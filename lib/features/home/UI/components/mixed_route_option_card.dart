@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/components/base_button.dart';
+import 'package:nak_tumpang/core/constants/transit_constants.dart'; // Add this import
 
 class MixedRouteOptionCard extends StatelessWidget {
   final String firstMileType;
@@ -65,23 +66,6 @@ class MixedRouteOptionCard extends StatelessWidget {
     this.isRequested = false,
   });
 
-  String _formatStationName(String name, String lineName) {
-    final formattedName = name.toLowerCase().split(' ').map((word) {
-      if (word.isEmpty) return '';
-      return word[0].toUpperCase() + word.substring(1);
-    }).join(' ');
-
-    String suffix = 'LRT';
-    final lowerLine = lineName.toLowerCase();
-    if (lowerLine.contains('mrl') || lowerLine.contains('monorail')) {
-      suffix = 'MRL';
-    } else if (lowerLine.contains('mrt')) {
-      suffix = 'MRT';
-    }
-
-    return '$formattedName $suffix';
-  }
-
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -98,7 +82,8 @@ class MixedRouteOptionCard extends StatelessWidget {
 
         // Node 2: Train Step
         _buildTimelineStep(
-          location: _formatStationName(boardStation, boardLineName),
+          // --- Use TransitConstants here ---
+          location: TransitConstants.formatStationName(boardStation, boardLineShortName),
           isLast: false,
           isDashed: true,
           child: _buildTrainInfo(),
@@ -106,7 +91,8 @@ class MixedRouteOptionCard extends StatelessWidget {
 
         // Node 3: Last Mile
         _buildTimelineStep(
-          location: _formatStationName(alightStation, alightLineName),
+          // --- Use TransitConstants here ---
+          location: TransitConstants.formatStationName(alightStation, alightLineShortName),
           isLast: false,
           child: lastMileType == 'Driver' && driverBName != null
               ? _buildDriverInfo(driverBName!, Icons.directions_car, driverBDepartTime!, dropoffDistanceKm)
@@ -193,7 +179,8 @@ class MixedRouteOptionCard extends StatelessWidget {
       );
     }
 
-    return _buildLrtInfo(boardLineName, Icons.train, boardLineColor, '~ $trainDuration mins');
+    // --- Use TransitConstants here ---
+    return _buildLrtInfo(TransitConstants.getLineName(boardLineShortName, boardLineName), Icons.train, boardLineColor, '~ $trainDuration mins');
   }
 
   Widget _buildTimelineStep({
@@ -252,7 +239,6 @@ class MixedRouteOptionCard extends StatelessWidget {
     );
   }
 
-  // --- FIX APPLIED: Wrapped inner Column with Expanded and added TextOverflow.ellipsis ---
   Widget _buildDriverInfo(String name, IconData icon, String time, double? distanceKm) {
     return Row(
       children: [
@@ -278,7 +264,6 @@ class MixedRouteOptionCard extends StatelessWidget {
     );
   }
 
-  // --- FIX APPLIED: Wrapped inner Column with Expanded and added TextOverflow.ellipsis ---
   Widget _buildWalkInfo(String actionText, {required double distanceMeters, required int durationMins}) {
     final formattedDistance = distanceMeters >= 1000
         ? '${(distanceMeters / 1000).toStringAsFixed(1)} km'

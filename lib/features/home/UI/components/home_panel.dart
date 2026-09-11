@@ -13,6 +13,7 @@ import 'package:nak_tumpang/features/negotiation/UI/screens/negotiation_screen.d
 import 'package:nak_tumpang/features/home/UI/components/cant_fetch_panel.dart';
 import 'package:nak_tumpang/features/home/UI/components/no_need_fetch_panel.dart';
 import 'package:nak_tumpang/features/subscriptions/UI/screens/subscription_detail_screen.dart';
+import 'package:nak_tumpang/core/utils/url_utils.dart';
 
 class HomePanel extends StatelessWidget {
   const HomePanel({super.key});
@@ -119,19 +120,37 @@ class HomePanel extends StatelessWidget {
   }
 
   List<Widget> _buildDriverUnmatchedView(BuildContext context, HomeViewModel viewModel) {
-    return [
-      if (viewModel.activeSubscriptions.isNotEmpty)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 16),
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: () => viewModel.toggleMatchingUI(false),
-              icon: const Icon(Icons.arrow_back, color: AppColors.black),
-              label: const Text('Back to Subscriptions', style: TextStyle(color: AppColors.black, fontWeight: FontWeight.bold)),
-            ),
+    // If they have no trips created yet at all
+    if (viewModel.availableTrips.isEmpty && viewModel.activeSubscriptions.isEmpty) {
+      return [_buildEmptyStatePrompt(context, viewModel)];
+    }
+
+    // --- FIX: Show text and hide dropdown if no subscriptions exist ---
+    if (viewModel.activeSubscriptions.isEmpty) {
+      return [
+        const SizedBox(height: 32),
+        const Center(
+          child: Text(
+            'No passenger to fetch today!',
+            style: TextStyle(color: AppColors.greyText, fontSize: 16),
           ),
         ),
+      ];
+    }
+
+    // Otherwise, they clicked "View Unmatched Trips" from the subscription list
+    return [
+      Padding(
+        padding: const EdgeInsets.only(bottom: 16),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () => viewModel.toggleMatchingUI(false),
+            icon: const Icon(Icons.arrow_back, color: AppColors.black),
+            label: const Text('Back to Subscriptions', style: TextStyle(color: AppColors.black, fontWeight: FontWeight.bold)),
+          ),
+        ),
+      ),
       const TripSelectionDropdown(),
       const SizedBox(height: 32),
       if (viewModel.currentSelectedTrip == null)
@@ -334,6 +353,7 @@ class HomePanel extends StatelessWidget {
                           overridePickupTime: viewModel.currentSelectedTrip!['desired_pickup_time'],
                         );
                       }
+
                       if (attemptB) {
                         requestIdB = await viewModel.requestTumpang(
                           driverTripId: route['driver_b_trip_id'],
@@ -347,20 +367,26 @@ class HomePanel extends StatelessWidget {
                           overridePickupTime: route['driver_b_depart_sql'],
                         );
                       }
+
                       if (!context.mounted) return;
+
                       final bool successA = attemptA ? (requestIdA != null) : true;
                       final bool successB = attemptB ? (requestIdB != null) : true;
                       final bool allSuccess = successA && successB;
+
                       if (allSuccess) {
                         List<String> requestedIds = [];
                         if (requestIdA != null) requestedIds.add(route['driver_a_trip_id']);
                         if (requestIdB != null) requestedIds.add(route['driver_b_trip_id']);
+
                         if (requestedIds.isNotEmpty) {
                           viewModel.markDriverRequestedGlobally(requestedIds);
                         }
+
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(content: Text('Mixed requests sent successfully!'), backgroundColor: Colors.green),
                         );
+
                         final targetId = requestIdA ?? requestIdB;
                         if (targetId != null) {
                           Navigator.push(
@@ -383,6 +409,8 @@ class HomePanel extends StatelessWidget {
                 ],
               );
             }),
+
+            // --- UPDATED: Show mini spinner below the list during pagination ---
             if (viewModel.isMixedLoadingMore)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 24),
@@ -431,6 +459,8 @@ class HomePanel extends StatelessWidget {
                 color: AppColors.primaryYellow,
                 fontWeight: FontWeight.bold,
                 decoration: TextDecoration.underline,
+                decorationColor: AppColors.primaryYellow,
+                decorationThickness: 2.0,
               ),
             ),
           ),
@@ -449,6 +479,7 @@ class HomePanel extends StatelessWidget {
       return Column(
         children: [
           ActiveSubscriptionCard(
+            tripName: sub['trip_name'],
             name: sub['name'],
             phone: sub['phone'],
             imageUrl: sub['imageUrl'],
@@ -458,9 +489,8 @@ class HomePanel extends StatelessWidget {
             exceptionButtonText: isDriver ? "Can't fetch at..." : 'No need tumpang at...',
             isSelected: viewModel.selectedSubscriptionId == sub['id'],
             onTap: () => viewModel.selectSubscription(sub['id']),
-            onCallPressed: () {
-              print('Calling ${sub['phone']}...');
-            },
+            // Trigger the native dialer
+            onCallPressed: () => UrlUtils.makePhoneCall(sub['phone']),
             onDetailsPressed: () {
               Navigator.push(
                 context,

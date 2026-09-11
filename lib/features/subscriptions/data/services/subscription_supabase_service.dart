@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+
 class SubscriptionSupabaseService {
   final _supabase = Supabase.instance.client;
 
@@ -75,6 +76,40 @@ class SubscriptionSupabaseService {
     };
   }
 
+  Future<void> _checkAndAutoExpire(String subscriptionId, String endDateStr) async {
+    final endDate = DateTime.tryParse(endDateStr);
+    if (endDate == null) return;
+    final today = DateTime.now();
+    final todayDateOnly = DateTime(today.year, today.month, today.day);
+
+    if (endDate.isBefore(todayDateOnly)) {
+      await _supabase.from('tumpang_subscription').update({
+        'status': 'inactive',
+        'ended_by': 'natural',
+        'ended_at': DateTime.now().toIso8601String(),
+        'deposit_refunded': true,
+      }).eq('id', subscriptionId);
+    }
+  }
+
+  Future<bool> extendSubscription({
+    required String subscriptionId,
+    required DateTime newEndDate,
+  }) async {
+    try {
+      await _supabase.from('tumpang_subscription').update({
+        'subscription_end_date': _formatDate(newEndDate),
+        'status': 'active',
+        'ended_by': null,
+        'ended_at': null,
+      }).eq('id', subscriptionId);
+      return true;
+    } catch (e) {
+      print('Error in extendSubscription: $e');
+      return false;
+    }
+  }
+
   Future<List<Map<String, dynamic>>> fetchSubscriptions({
     required String userId,
     required String role,
@@ -104,7 +139,26 @@ class SubscriptionSupabaseService {
           .inFilter(tripIdField, tripIds);
 
       final rawList = List<Map<String, dynamic>>.from(response);
-      return rawList.map((sub) => _normalizeSubscription(sub, role)).toList();
+
+      // Auto-expire any active subscription whose end date has passed
+      for (var sub in rawList) {
+        if (sub['status'] == 'active' && sub['subscription_end_date'] != null) {
+          await _checkAndAutoExpire(sub['id'], sub['subscription_end_date']);
+        }
+      }
+
+      // Re-fetch so status reflects any auto-expiry that just happened
+      final refreshedResponse = await _supabase
+          .from('tumpang_subscription')
+          .select('''
+            *,
+            passenger_trips:passenger_trip_id (*, users (*)),
+            driver_trips:driver_trip_id (*, users (*))
+          ''')
+          .inFilter(tripIdField, tripIds);
+
+      final refreshedList = List<Map<String, dynamic>>.from(refreshedResponse);
+      return refreshedList.map((sub) => _normalizeSubscription(sub, role)).toList();
     } catch (e) {
       print("Error in fetchSubscriptions: $e");
       return [];
@@ -194,6 +248,61 @@ class SubscriptionSupabaseService {
     } catch (e) {
       print("Error in updateException: $e");
       return false;
+    }
+  }
+
+  Future<String?> createExtensionRequest({
+    required Map<String, dynamic> oldSubscription,
+    required DateTime newStartDate,
+    required DateTime newEndDate,
+  }) async {
+    final supabase = Supabase.instance.client;
+
+    try {
+      // Generate a unique ID since the schema doesn't have a default value
+      final String newRequestId = 'REQ-${DateTime.now().millisecondsSinceEpoch}';
+
+      // Insert valid payload matching the EXACT schema of tumpang_request
+      final response = await supabase.from('tumpang_request').insert({
+        'id': newRequestId,
+        'passenger_trip_id': oldSubscription['passenger_trip_id'],
+        'driver_trip_id': oldSubscription['driver_trip_id'],
+
+        // Pickups
+        'pickup_name': oldSubscription['pickup_location'],
+        'pickup_lat': oldSubscription['pickup_lat'],
+        'pickup_lng': oldSubscription['pickup_lng'],
+
+        // Dropoffs
+        'dropoff_name': oldSubscription['dropoff_location'],
+        'dropoff_lat': oldSubscription['dropoff_lat'],
+        'dropoff_lng': oldSubscription['dropoff_lng'],
+
+        // Time & Dates
+        'pickup_time': oldSubscription['pickup_time'],
+        'sub_start_date': newStartDate.toIso8601String().split('T')[0],
+        'sub_end_date': newEndDate.toIso8601String().split('T')[0],
+
+        // Extension Data
+        'status': 'pending',
+        'is_extension': true,
+        'extends_subscription_id': oldSubscription['id'],
+        'extension_type': 'extend',
+
+        // Carry over the existing fee
+        'fee': oldSubscription['fee'],
+      }).select('id').maybeSingle();
+
+      if (response == null) {
+        print('❌ Failed to create request: No ID returned');
+        return null;
+      }
+
+      return response['id'] as String; // Return the new ID
+    } catch (e, stackTrace) {
+      print('❌ Service Extension Insert Error: $e');
+      print(stackTrace);
+      return null;
     }
   }
 

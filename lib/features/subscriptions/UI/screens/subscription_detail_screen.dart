@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:nak_tumpang/features/negotiation/UI/screens/negotiation_screen.dart';
 import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/components/base_button.dart';
@@ -29,6 +30,63 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen> {
 
   void _refreshExceptions() {
     setState(() => _exceptionListKey = UniqueKey());
+  }
+
+  bool _isWithinExtendWindow() {
+    if (widget.subscription['ended_by'] != 'natural') return false;
+    final endDateStr = widget.subscription['subscription_end_date'];
+    final endDate = DateTime.tryParse(endDateStr ?? '');
+    if (endDate == null) return false;
+
+    final today = DateTime.now();
+    final todayDateOnly = DateTime(today.year, today.month, today.day);
+    final daysPastExpiry = todayDateOnly.difference(endDate).inDays;
+
+    return daysPastExpiry >= 0 && daysPastExpiry <= 7;
+  }
+
+  Future<void> _handleExtend(BuildContext context) async {
+    final vm = context.read<SubscriptionViewModel>();
+    final currentEndDate = DateTime.tryParse(widget.subscription['subscription_end_date'] ?? '') ?? DateTime.now();
+
+    // 1. Create a default proposal (e.g., extend by 30 days)
+    final firstValidDate = currentEndDate.add(const Duration(days: 1));
+    final defaultNewEndDate = firstValidDate.add(const Duration(days: 30));
+
+    // Show a quick loading indicator
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const Center(child: CircularProgressIndicator()),
+    );
+
+    // 2. Generate the request in the background
+    final String? newRequestId = await vm.createExtensionRequest(
+      oldSubscription: widget.subscription,
+      newStartDate: firstValidDate,
+      newEndDate: defaultNewEndDate,
+    );
+
+    if (context.mounted) Navigator.pop(context); // Close loading dialog
+
+    if (newRequestId != null && context.mounted) {
+      // 3. Success! Navigate straight to the Negotiation Screen
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => NegotiationScreen(
+            requestId: newRequestId, // Pass the ID generated from Supabase
+          ),
+        ),
+      );
+    } else if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to start extension request.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   Future<void> _confirmCancel(BuildContext context) async {
@@ -136,7 +194,7 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen> {
     final driverName = widget.subscription['driver_name'] ?? driverUser?['name'] ?? widget.subscription['name'] ?? 'Driver';
     final passengerName = widget.subscription['passenger_name'] ?? passengerUser?['name'] ?? widget.subscription['name'] ?? 'Passenger';
     final driverPhone = widget.subscription['driver_phone'] ?? driverUser?['phone'] ?? widget.subscription['phone'] ?? '';
-    final passengerPhone = widget.subscription['passenger_phone'] ?? passengerUser?['phone'] ?? widget.subscription['phone'] ?? '';
+    final passengerPhone = widget.subscription['passenger_phone'] ?? passengerUser?['phone'] ?? passengerUser?['phone'] ?? '';
 
     showModalBottomSheet(
       context: context,
@@ -315,6 +373,24 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen> {
                   style: TextStyle(color: AppColors.greyText, fontStyle: FontStyle.italic),
                 ),
               ),
+
+              // Only naturally-ended subscriptions can be extended within 7 days
+              if (_isWithinExtendWindow()) ...[
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: BaseButton(
+                    text: 'Extend Your Journey?',
+                    onPressed: () => _handleExtend(context),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${7 - DateTime.now().difference(DateTime.parse(widget.subscription['subscription_end_date'])).inDays} day(s) left to extend',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 11, color: AppColors.greyText),
+                ),
+              ],
             ],
 
             const SizedBox(height: 24),

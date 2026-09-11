@@ -1006,8 +1006,8 @@ class HomeViewModel extends ChangeNotifier {
             (points: [depart, ...route, arrival], color: Colors.blueAccent),
           ];
           mapMarkers = [
-            (point: depart, color: Colors.black),
-            (point: arrival, color: Colors.black),
+            (point: depart, color: Colors.blue), // --- FIX: Blue for driver start ---
+            (point: arrival, color: Colors.orange), // --- FIX: Orange for driver end ---
           ];
         } else {
           if (selectedSubscriptionId == null || activeSubscriptions.isEmpty) return _clearMap();
@@ -1036,10 +1036,10 @@ class HomeViewModel extends ChangeNotifier {
           ];
 
           mapMarkers = [
-            if (validDepart) (point: depart, color: Colors.black),
+            if (validDepart) (point: depart, color: Colors.blue), // --- FIX: Blue for driver start ---
             (point: pickup, color: Colors.green),
             (point: dropoff, color: Colors.red),
-            if (validArrival) (point: arrival, color: Colors.black),
+            if (validArrival) (point: arrival, color: Colors.orange), // --- FIX: Orange for driver end ---
           ];
         }
       }
@@ -1056,9 +1056,11 @@ class HomeViewModel extends ChangeNotifier {
   List<Map<String, dynamic>> _mapSubscriptions(List<Map<String, dynamic>> rawSubs, {required bool isForPassenger}) {
     return rawSubs.map((sub) {
       final tripKey = isForPassenger ? 'driver_trips' : 'passenger_trips';
+      final myTripKey = isForPassenger ? 'passenger_trips' : 'driver_trips'; // Added
       final defaultName = isForPassenger ? 'Unknown Driver' : 'Unknown Passenger';
 
       final trip = sub[tripKey] ?? {};
+      final myTrip = sub[myTripKey] ?? {}; // Added
       final user = trip['users'] ?? {};
       final driverTrip = isForPassenger ? trip : (sub['driver_trips'] ?? {});
       final driverId = isForPassenger ? (user['id'] ?? '') : (currentUserId ?? '');
@@ -1068,6 +1070,7 @@ class HomeViewModel extends ChangeNotifier {
 
       return {
         'id': sub['id'],
+        'trip_name': myTrip['trip_name'] ?? 'My Trip', // Added
         'driver_id': driverId,
         'passenger_id': passengerId,
         'other_party_id': user['id'],

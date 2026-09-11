@@ -42,6 +42,7 @@ void main() async {
 
   await LocalDbService.instance.testConnection();
 
+
   runApp(
     MultiProvider(
       providers: AppProviders.providers,

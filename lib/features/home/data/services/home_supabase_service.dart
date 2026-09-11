@@ -42,23 +42,39 @@ class HomeSupabaseService {
                 id, name, phone, avatar_url 
               )
             ),
-            passenger_trips!inner(user_id),
+            passenger_trips!inner(user_id, trip_name),
             tumpang_trip_log ( id, trip_date ) 
           ''') // <-- Changed to trip_date
           .eq('passenger_trips.user_id', userId)
           .eq('status', 'active');
 
-      final today = _formatDate(DateTime.now());
+      final rawList = (response as List).map((e) => e as Map<String, dynamic>).toList();
+      final List<Map<String, dynamic>> validActiveList = [];
 
-      return (response as List).map((e) {
-        final sub = e as Map<String, dynamic>;
+      final now = DateTime.now();
+      final todayDateOnly = DateTime(now.year, now.month, now.day);
+
+      for (var sub in rawList) {
+        if (sub['status'] == 'active' && sub['subscription_end_date'] != null) {
+          final endDate = DateTime.tryParse(sub['subscription_end_date']);
+
+          if (endDate != null && endDate.isBefore(todayDateOnly)) {
+            // Expire it in DB and skip adding it to our UI list!
+            await _checkAndAutoExpire(sub['id'], sub['subscription_end_date']);
+            continue;
+          }
+        }
+        validActiveList.add(sub);
+      }
+
+      return validActiveList.map((sub) {
         final logs = sub['tumpang_trip_log'] as List<dynamic>? ?? [];
 
         sub['is_completed_today'] = logs.any((log) {
           final logDate = DateTime.tryParse(log['trip_date']?.toString() ?? '');
           if (logDate == null) return false;
-          final now = DateTime.now();
-          return logDate.year == now.year && logDate.month == now.month && logDate.day == now.day;
+          final current = DateTime.now();
+          return logDate.year == current.year && logDate.month == current.month && logDate.day == current.day;
         });
 
         return sub;
@@ -82,6 +98,7 @@ class HomeSupabaseService {
             ),
             driver_trips!inner(
               user_id,
+              trip_name, 
               depart_lat, depart_lng,
               arrival_lat, arrival_lng
             ),
@@ -90,17 +107,32 @@ class HomeSupabaseService {
           .eq('driver_trips.user_id', userId)
           .eq('status', 'active');
 
-      final today = _formatDate(DateTime.now()); // e.g. "2026-09-09"
+      final rawList = (response as List).map((e) => e as Map<String, dynamic>).toList();
+      final List<Map<String, dynamic>> validActiveList = [];
 
-      return (response as List).map((e) {
-        final sub = e as Map<String, dynamic>;
+      final now = DateTime.now();
+      final todayDateOnly = DateTime(now.year, now.month, now.day);
+
+      for (var sub in rawList) {
+        if (sub['status'] == 'active' && sub['subscription_end_date'] != null) {
+          final endDate = DateTime.tryParse(sub['subscription_end_date']);
+
+          if (endDate != null && endDate.isBefore(todayDateOnly)) {
+            await _checkAndAutoExpire(sub['id'], sub['subscription_end_date']);
+            continue;
+          }
+        }
+        validActiveList.add(sub);
+      }
+
+      return validActiveList.map((sub) {
         final logs = sub['tumpang_trip_log'] as List<dynamic>? ?? [];
 
         sub['is_completed_today'] = logs.any((log) {
           final logDate = DateTime.tryParse(log['trip_date']?.toString() ?? '');
           if (logDate == null) return false;
-          final now = DateTime.now();
-          return logDate.year == now.year && logDate.month == now.month && logDate.day == now.day;
+          final current = DateTime.now();
+          return logDate.year == current.year && logDate.month == current.month && logDate.day == current.day;
         });
 
         return sub;
@@ -137,6 +169,7 @@ class HomeSupabaseService {
     }
   }
 
+  // --- NEW: Fetch existing requests so buttons stay disabled on reload ---
   Future<Set<String>> fetchRequestedDriverTripIds(String passengerTripId) async {
     try {
       final response = await _supabase
@@ -174,6 +207,22 @@ class HomeSupabaseService {
     } catch (e) {
       print("Error in createException: $e");
       return false;
+    }
+  }
+
+  Future<void> _checkAndAutoExpire(String subscriptionId, String endDateStr) async {
+    final endDate = DateTime.tryParse(endDateStr);
+    if (endDate == null) return;
+    final today = DateTime.now();
+    final todayDateOnly = DateTime(today.year, today.month, today.day);
+
+    if (endDate.isBefore(todayDateOnly)) {
+      await _supabase.from('tumpang_subscription').update({
+        'status': 'inactive',
+        'ended_by': 'natural',
+        'ended_at': DateTime.now().toIso8601String(),
+        'deposit_refunded': true,
+      }).eq('id', subscriptionId);
     }
   }
 

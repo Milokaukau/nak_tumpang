@@ -74,4 +74,25 @@ class SubscriptionViewModel extends ChangeNotifier {
       reason: reason,
     );
   }
+
+  Future<String?> createExtensionRequest({
+    required Map<String, dynamic> oldSubscription,
+    required DateTime newStartDate,
+    required DateTime newEndDate,
+  }) async {
+    isLoading = true;
+    notifyListeners();
+
+    final newRequestId = await _service.createExtensionRequest(
+      oldSubscription: oldSubscription,
+      newStartDate: newStartDate,
+      newEndDate: newEndDate,
+    );
+
+    isLoading = false;
+    notifyListeners();
+
+    return newRequestId; // Will be null if it failed, or the ID if it succeeded
+  }
 }
+
