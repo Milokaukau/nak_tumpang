@@ -46,14 +46,19 @@ class HomePanel extends StatelessWidget {
                   ),
                 ),
               ),
-              if (viewModel.currentUserRole == 'driver')
+              if (viewModel.isScreenLoading)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 48),
+                  child: Center(child: CircularProgressIndicator(color: AppColors.primaryYellow)),
+                )
+              else if (viewModel.currentUserRole == 'driver')
                 ..._buildDriverView(context, viewModel)
               else ...[
-                if (viewModel.activeSubscriptions.isNotEmpty && !viewModel.showMatchingUI)
-                  ..._buildPassengerSubscriptionView(viewModel)
-                else
-                  ..._buildPassengerMatchingView(context, viewModel),
-              ],
+                  if (viewModel.activeSubscriptions.isNotEmpty && !viewModel.showMatchingUI)
+                    ..._buildPassengerSubscriptionView(viewModel)
+                  else
+                    ..._buildPassengerMatchingView(context, viewModel),
+                ],
             ],
           ),
         );
@@ -62,22 +67,11 @@ class HomePanel extends StatelessWidget {
   }
 
   List<Widget> _buildDriverView(BuildContext context, HomeViewModel viewModel) {
-    if (viewModel.activeSubscriptions.isNotEmpty && !viewModel.showMatchingUI) {
+    if (viewModel.activeSubscriptions.isNotEmpty) {
       return [
         const Text('My Active Subscriptions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
         const SizedBox(height: 12),
         ..._buildSubscriptionList(viewModel, isDriver: true),
-        const SizedBox(height: 16),
-        const Divider(height: 1, thickness: 1, color: AppColors.greyBorder),
-        const SizedBox(height: 12),
-        BaseButton(
-          text: 'View Unmatched Trips',
-          onPressed: () => viewModel.toggleMatchingUI(true),
-          isOutlined: true,
-          height: 40,
-          borderColor: AppColors.greyBorder,
-          textStyle: const TextStyle(color: AppColors.black, fontWeight: FontWeight.bold, fontSize: 13),
-        ),
       ];
     } else {
       return _buildDriverUnmatchedView(context, viewModel);
@@ -85,34 +79,11 @@ class HomePanel extends StatelessWidget {
   }
 
   List<Widget> _buildDriverUnmatchedView(BuildContext context, HomeViewModel viewModel) {
-    if (viewModel.availableTrips.isEmpty && viewModel.activeSubscriptions.isEmpty) {
+    if (viewModel.availableTrips.isEmpty) {
       return [_buildEmptyStatePrompt(context, viewModel)];
     }
 
-    if (viewModel.activeSubscriptions.isEmpty) {
-      return [
-        const SizedBox(height: 24),
-        const Center(
-          child: Text(
-            'No passenger to fetch today!',
-            style: TextStyle(color: AppColors.greyText, fontSize: 14),
-          ),
-        ),
-      ];
-    }
-
     return [
-      Padding(
-        padding: const EdgeInsets.only(bottom: 12),
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton.icon(
-            onPressed: () => viewModel.toggleMatchingUI(false),
-            icon: const Icon(Icons.arrow_back, color: AppColors.black, size: 20),
-            label: const Text('Back to Subscriptions', style: TextStyle(color: AppColors.black, fontWeight: FontWeight.bold, fontSize: 13)),
-          ),
-        ),
-      ),
       const TripSelectionDropdown(),
       const SizedBox(height: 24),
       if (NetworkService.isOfflineNotifier.value)
