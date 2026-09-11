@@ -45,7 +45,8 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen> {
       ),
       body: Consumer<PaymentViewModel>(
         builder: (context, viewModel, child) {
-          if (viewModel.isLoading) {
+          // UPDATE: Only show full-screen spinner if it is the first load
+          if (viewModel.isLoading && viewModel.paymentHistory.isEmpty) {
             return const Center(child: CircularProgressIndicator());
           }
 

@@ -38,24 +38,41 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
     }
   }
 
-  /// Deposit rule:
-  /// - subscription <= 60 days -> flexible deposit: exact days * daily fee
-  /// - subscription >  60 days -> fixed deposit capped at 60 days * daily fee
-  ///   (e.g. a 69-day subscription still only pays a 60-day deposit; the
-  ///   remaining days are billed later via the monthly invoice cycle).
   int _calculateDepositDays(int subscriptionDays) {
     if (subscriptionDays <= 0) return 0;
     return subscriptionDays <= 60 ? subscriptionDays : 60;
   }
 
-  Future<void> _handlePayDeposit(TumpangRequest request, double depositAmount) async {
+  Future<void> _handlePayDeposit({
+    required TumpangRequest request,
+    required double totalDeposit,
+    required double additionalDeposit,
+  }) async {
     setState(() => _isProcessing = true);
 
     try {
+      // 1. If it's an extension and no new deposit is needed, skip Stripe entirely!
+      if (request.isExtension && additionalDeposit <= 0) {
+        await Provider.of<NegotiationViewModel>(context, listen: false)
+            .finalizeExtensionRequest(
+          extensionRequestId: request.id,
+          additionalDeposit: 0.0,
+        );
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Extension Finalized!'), backgroundColor: Colors.green),
+        );
+        Navigator.of(context).popUntil((route) => route.isFirst);
+        return;
+      }
+
+      // 2. Otherwise, charge the Required Amount via Stripe (either full or additional top-up)
+      final chargeAmount = request.isExtension ? additionalDeposit : totalDeposit;
+
       final response = await _supabase.functions.invoke(
         'create-payment-intent',
         body: {
-          'amount': depositAmount,
+          'amount': chargeAmount,
           'currency': 'myr',
           'description': 'Nak Tumpang deposit for request ${request.id}',
         },
@@ -92,43 +109,56 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
 
       await Stripe.instance.presentPaymentSheet();
 
-      final startDate = DateTime.parse(request.subscriptionStartDate.value);
-      final endDate = DateTime.tryParse(request.subscriptionEndDate.value) ?? startDate;
-      final subId = 'sub_${DateTime.now().millisecondsSinceEpoch}';
+      // 3. Backend Finalization
+      if (request.isExtension) {
+        // Route to the Extension logic
+        await Provider.of<NegotiationViewModel>(context, listen: false)
+            .finalizeExtensionRequest(
+          extensionRequestId: request.id,
+          additionalDeposit: additionalDeposit,
+        );
+      } else {
+        // Standard Fresh Subscription Logic
+        final startDate = DateTime.parse(request.subscriptionStartDate.value);
+        final endDate = DateTime.tryParse(request.subscriptionEndDate.value) ?? startDate;
+        final subId = 'sub_${DateTime.now().millisecondsSinceEpoch}';
 
-      await _supabase.from('tumpang_subscription').insert({
-        'id': subId,
-        'passenger_trip_id': request.passengerTripId,
-        'driver_trip_id': request.driverTripId,
-        'pickup_lat': request.pickupLocation.lat,
-        'pickup_lng': request.pickupLocation.lng,
-        'pickup_location': request.pickupLocation.name,
-        'dropoff_lat': request.dropoffLocation.lat,
-        'dropoff_lng': request.dropoffLocation.lng,
-        'dropoff_location': request.dropoffLocation.name,
-        'pickup_time': request.pickupTime.value,
-        'fee': request.fee.value,
-        'deposit': depositAmount,
-        'deposit_refunded': false,
-        'subscription_start_date': startDate.toIso8601String().split('T').first,
-        'subscription_end_date': endDate.toIso8601String().split('T').first,
-        'status': 'active',
-      });
+        await _supabase.from('tumpang_subscription').insert({
+          'id': subId,
+          'passenger_trip_id': request.passengerTripId,
+          'driver_trip_id': request.driverTripId,
+          'pickup_lat': request.pickupLocation.lat,
+          'pickup_lng': request.pickupLocation.lng,
+          'pickup_location': request.pickupLocation.name,
+          'dropoff_lat': request.dropoffLocation.lat,
+          'dropoff_lng': request.dropoffLocation.lng,
+          'dropoff_location': request.dropoffLocation.name,
+          'pickup_time': request.pickupTime.value,
+          'fee': request.fee.value,
+          'deposit': totalDeposit,
+          'deposit_refunded': false,
+          'subscription_start_date': startDate.toIso8601String().split('T').first,
+          'subscription_end_date': endDate.toIso8601String().split('T').first,
+          'status': 'active',
+        });
 
-      final paymentId = 'pay_${DateTime.now().millisecondsSinceEpoch}';
-      await _supabase.from('payments').insert({
-        'id': paymentId,
-        'tumpang_subscription_id': subId,
-        'month': DateTime.now().month,
-        'year': DateTime.now().year,
-        'due_date': DateTime.now().toIso8601String(),
-        'paid_at': DateTime.now().toIso8601String(),
-        'amount': depositAmount,
-      });
+        final paidAt = DateTime.now();
+        final paymentId = 'pay_${paidAt.millisecondsSinceEpoch}';
 
-      await _supabase.from('tumpang_request').update({
-        'status': 'completed',
-      }).eq('id', request.id);
+        await _supabase.from('payments').insert({
+          'id': paymentId,
+          'tumpang_subscription_id': subId,
+          'month': paidAt.month,
+          'year': paidAt.year,
+          'due_date': paidAt.toIso8601String(),
+          'paid_at': paidAt.toIso8601String(),
+          'amount': totalDeposit,
+        });
+
+        await _supabase.from('tumpang_request').update({
+          'status': 'completed',
+        }).eq('id', request.id);
+      }
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -169,8 +199,8 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
         iconTheme: const IconThemeData(color: AppColors.black),
         leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => Navigator.pop(context)),
       ),
-      body: FutureBuilder<TumpangRequest?>(
-        future: controller.getSingleRequest(widget.requestId),
+      body: FutureBuilder<Map<String, dynamic>?>(
+        future: controller.getSummaryData(widget.requestId),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
@@ -179,12 +209,19 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
             return const Center(child: Text('Error loading summary details.'));
           }
 
-          final request = snapshot.data!;
+          final request = snapshot.data!['request'] as TumpangRequest;
+          final oldDeposit = snapshot.data!['oldDeposit'] as double;
+
           final dailyFee = request.fee.value;
 
           final depositDays = _calculateDepositDays(request.subscriptionDays);
-          final depositAmount = depositDays * dailyFee;
+          final targetTotalDeposit = depositDays * dailyFee;
           final bool depositCapped = request.subscriptionDays > 60;
+
+          // Calculate "Top-Up" for extensions
+          final additionalDeposit = request.isExtension
+              ? (targetTotalDeposit - oldDeposit).clamp(0.0, double.infinity)
+              : targetTotalDeposit;
 
           final invoicePeriods = NegotiationViewModel.calculateInvoicePeriods(
             subscriptionDays: request.subscriptionDays,
@@ -211,7 +248,11 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
                       color: AppColors.primaryYellow,
                       borderRadius: BorderRadius.vertical(top: Radius.circular(11)),
                     ),
-                    child: const Text('Tumpang Summary', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: AppColors.black)),
+                    child: Text(
+                        request.isExtension ? 'Extension Summary' : 'Tumpang Summary',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: AppColors.black)
+                    ),
                   ),
                   Padding(
                     padding: const EdgeInsets.all(12.0),
@@ -234,7 +275,7 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
                         _SummaryRow(label: 'Dropoff Location', value: request.dropoffLocation.name),
                         _SummaryRow(label: 'Tumpang Start', value: request.subscriptionStartDate.value),
                         _SummaryRow(label: 'Tumpang End', value: request.subscriptionEndDate.value),
-                        _SummaryRow(label: 'Pickup Time', value: _formatAmPm(request.pickupTime.value)), // ADDED FORMATTING HERE
+                        _SummaryRow(label: 'Pickup Time', value: _formatAmPm(request.pickupTime.value)),
                         const SizedBox(height: 16),
                         _SummaryRow(
                           label: 'Tumpang Fee',
@@ -243,20 +284,41 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
                           isBold: true,
                         ),
                         const SizedBox(height: 8),
-                        _SummaryRow(
-                          label: 'Deposit',
-                          value: 'RM ${depositAmount.toStringAsFixed(2)} '
-                              '($depositDays day${depositDays == 1 ? '' : 's'}'
-                              '${depositCapped ? ' deposit, capped at 60 days' : ' deposit'})',
-                          isBold: true,
-                        ),
+
+                        // Render Deposit details dynamically based on if it's an extension
+                        if (request.isExtension) ...[
+                          _SummaryRow(
+                            label: 'Total Required Deposit',
+                            value: 'RM ${targetTotalDeposit.toStringAsFixed(2)} '
+                                '($depositDays day${depositDays == 1 ? '' : 's'}'
+                                '${depositCapped ? ' deposit, capped at 60 days' : ' deposit'})',
+                          ),
+                          _SummaryRow(
+                            label: 'Prev. Paid Deposit',
+                            value: 'RM ${oldDeposit.toStringAsFixed(2)}',
+                          ),
+                          _SummaryRow(
+                            label: 'Additional Deposit',
+                            value: 'RM ${additionalDeposit.toStringAsFixed(2)}',
+                            isBold: true,
+                          ),
+                        ] else ...[
+                          _SummaryRow(
+                            label: 'Deposit',
+                            value: 'RM ${targetTotalDeposit.toStringAsFixed(2)} '
+                                '($depositDays day${depositDays == 1 ? '' : 's'}'
+                                '${depositCapped ? ' deposit, capped at 60 days' : ' deposit'})',
+                            isBold: true,
+                          ),
+                        ],
+
                         if (invoicePeriods.isNotEmpty) ...[
                           const SizedBox(height: 8),
                           _SummaryRow(
                             label: 'Remaining Balance',
                             value: 'RM ${remainingAmount.toStringAsFixed(2)} for $remainingDays day${remainingDays == 1 ? '' : 's'} total'
                                 ' (billed as ${invoicePeriods.length} invoice${invoicePeriods.length == 1 ? '' : 's'} after the deposit period)\n'
-                                '${invoicePeriods.map((p) => 'Day ${p['startDay']}\u2013${p['endDay']}: RM ${(p['amount'] as double).toStringAsFixed(2)} (${p['days']} day${p['days'] == 1 ? '' : 's'})').join('\n')}',
+                                '${invoicePeriods.map((p) => 'Day ${(p['startDay'] as int) + 1}\u2013${p['endDay']}: RM ${(p['amount'] as double).toStringAsFixed(2)} (${p['days']} day${p['days'] == 1 ? '' : 's'})').join('\n')}',
                             isBold: true,
                           ),
                         ],
@@ -271,10 +333,22 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                               elevation: 0,
                             ),
-                            onPressed: _isProcessing ? null : () => _handlePayDeposit(request, depositAmount),
+                            onPressed: _isProcessing
+                                ? null
+                                : () => _handlePayDeposit(
+                                request: request,
+                                totalDeposit: targetTotalDeposit,
+                                additionalDeposit: additionalDeposit
+                            ),
                             child: _isProcessing
                                 ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.black))
-                                : const Text('Pay deposit to confirm', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                                : Text(
+                              request.isExtension && additionalDeposit <= 0
+                                  ? 'Confirm Extension (No Deposit Required)'
+                                  : 'Pay RM ${(request.isExtension ? additionalDeposit : targetTotalDeposit).toStringAsFixed(2)} to confirm',
+                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                              textAlign: TextAlign.center,
+                            ),
                           ),
                         ),
                       ],

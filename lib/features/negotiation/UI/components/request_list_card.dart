@@ -14,6 +14,21 @@ class RequestListCard extends StatelessWidget {
     required this.request,
   });
 
+  // CodeRabbit Fix: Shared 12-hour AM/PM formatting logic
+  String _formatAmPm(String dbTime) {
+    if (dbTime.isEmpty) return dbTime;
+    try {
+      final parts = dbTime.split(':');
+      final hour = int.parse(parts[0]);
+      final minute = parts[1];
+      final period = hour >= 12 ? 'PM' : 'AM';
+      final displayHour = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
+      return '$displayHour:$minute $period';
+    } catch (e) {
+      return dbTime;
+    }
+  }
+
   Widget? _buildStatusBadge() {
     late final Color bg;
     late final Color fg;
@@ -28,6 +43,11 @@ class RequestListCard extends StatelessWidget {
         bg = Colors.red.shade50;
         fg = Colors.red.shade800;
         label = 'Rejected';
+        break;
+      case 'cancelled': // CodeRabbit Fix: Handle cancelled terminal state
+        bg = Colors.grey.shade200;
+        fg = Colors.grey.shade800;
+        label = 'Cancelled';
         break;
       default:
         return null;
@@ -103,8 +123,9 @@ class RequestListCard extends StatelessWidget {
                             ),
                           ),
                           const SizedBox(height: 4),
+                          // CodeRabbit Fix: Use the formatter for AM/PM display
                           Text(
-                            'pickup time: ${request.pickupTime.value}',
+                            'pickup time: ${_formatAmPm(request.pickupTime.value)}',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(

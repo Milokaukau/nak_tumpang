@@ -35,10 +35,6 @@ class NegotiationViewModel extends ChangeNotifier {
     _authSubscription = _supabase.auth.onAuthStateChange.listen((data) async {
       final newUserId = data.session?.user.id;
 
-      // An explicit sign-out, or a DIFFERENT account signing in without an
-      // app restart in between (no cold start to naturally reset state) —
-      // either way the SQLite cache still holds the PREVIOUS account's
-      // negotiation data and must not leak into the new session.
       final isAccountChange = data.event == AuthChangeEvent.signedOut ||
           (data.event == AuthChangeEvent.signedIn && currentUserId != null && newUserId != currentUserId);
 
@@ -56,9 +52,6 @@ class NegotiationViewModel extends ChangeNotifier {
     });
   }
 
-  /// Call this from your auth/logout flow as an extra safeguard so the
-  /// cache is cleared immediately, without waiting for the
-  /// onAuthStateChange event to round-trip.
   Future<void> clearLocalCacheOnLogout() async {
     try {
       await _localService.clearRequestsCache();
@@ -98,14 +91,6 @@ class NegotiationViewModel extends ChangeNotifier {
     final user = _supabase.auth.currentUser;
     if (user != null) {
       currentUserId = user.id;
-
-      // Load the last-known role from local storage FIRST. This is what
-      // makes an offline cold start work at all: previously, the remote
-      // role query below was the ONLY way currentUserRole got set, so if
-      // it threw (no network) the catch block swallowed the error and
-      // fetchRequests() below never ran — an offline cold start loaded
-      // nothing, even though fetchRequests() has a perfectly good SQLite
-      // fallback once currentUserRole is known.
       currentUserRole ??= await _readCachedRole(currentUserId!);
 
       try {
@@ -119,12 +104,9 @@ class NegotiationViewModel extends ChangeNotifier {
         currentUserRole = remoteRole;
         await _persistRole(currentUserId!, remoteRole);
       } catch (e) {
-        debugPrint('Error refreshing role from Supabase (falling back to cached role if any): $e');
+        debugPrint('Error refreshing role from Supabase: $e');
       }
 
-      // Whether the remote refresh above succeeded or not, always try to
-      // load requests — fetchRequests() knows how to serve from the
-      // SQLite cache when offline.
       currentUserRole ??= 'passenger';
       await fetchRequests();
     }
@@ -159,9 +141,6 @@ class NegotiationViewModel extends ChangeNotifier {
           debugPrint('Error fetching role in fetchRequests(): $e');
         }
       }
-      // Still unknown (first-ever run, offline, with no cached role) —
-      // default rather than throw, so the isOffline branch below still
-      // gets a chance to serve from SQLite instead of failing outright.
       currentUserRole ??= 'passenger';
 
       final isDriver = currentUserRole == 'driver';
@@ -171,7 +150,6 @@ class NegotiationViewModel extends ChangeNotifier {
       List<dynamic> rows;
 
       if (isOffline) {
-        // Read from SQLite Cache
         final p = await _localService.getOfflineRequests('pending');
         final n = await _localService.getOfflineRequests('negotiating');
         final c = await _localService.getOfflineRequests('completed');
@@ -179,12 +157,10 @@ class NegotiationViewModel extends ChangeNotifier {
         final x = await _localService.getOfflineRequests('cancelled');
         rows = [...p, ...n, ...c, ...r, ...x];
 
-        // Mock a tripId so the UI doesn't break
         if (rows.isNotEmpty) {
           currentTripId = isDriver ? rows.first['driver_trip_id'] : rows.first['passenger_trip_id'];
         }
       } else {
-        // Fetch from Supabase
         final List<dynamic> trips = await _supabase
             .from(tripTable)
             .select('id')
@@ -208,13 +184,12 @@ class NegotiationViewModel extends ChangeNotifier {
             .inFilter(tripIdColumn, tripIds)
             .or('status.eq.pending,status.eq.negotiating,status.eq.completed,status.eq.rejected,status.eq.cancelled');
 
-        // Safely attempt to cache without crashing the UI
         try {
           await _localService.cacheTumpangRequests(rows.cast<Map<String, dynamic>>());
         } catch (e) {
           debugPrint('Could not cache request offline due to strict foreign keys: $e');
         }
-      } // <-- The missing bracket has been restored here!
+      }
 
       final allRequests = rows.map((row) {
         try {
@@ -250,14 +225,17 @@ class NegotiationViewModel extends ChangeNotifier {
   Future<TumpangRequest?> getSingleRequest(String requestId) async {
     if (isOffline) {
       final all = [...pendingRequests, ...completedRequests];
-      return all.firstWhere((r) => r.id == requestId);
+      for (final r in all) {
+        if (r.id == requestId) return r;
+      }
+      return null;
     }
     return _service.fetchSingleRequest(requestId);
   }
 
   Future<Map<String, dynamic>?> getUserProfileByTripId(String tripId, {required bool isDriverTrip}) async {
     if (_userCache.containsKey(tripId)) return _userCache[tripId];
-    if (isOffline) return null; // Can't fetch new profiles offline
+    if (isOffline) return null;
 
     final tableName = isDriverTrip ? 'driver_trips' : 'passenger_trips';
     try {
@@ -271,6 +249,20 @@ class NegotiationViewModel extends ChangeNotifier {
       debugPrint('Error fetching user profile: $e');
     }
     return null;
+  }
+
+  // Generic wrapper for standard errors
+  Future<T> runNegotiationAction<T>(
+      Future<T> Function() action, {
+        String fallbackMessage = 'An error occurred during negotiation.',
+      }) async {
+    try {
+      return await action();
+    } on PostgrestException catch (e) {
+      throw NegotiationException(e.message);
+    } catch (e) {
+      throw NegotiationException(fallbackMessage);
+    }
   }
 
   Future<void> acceptTerm(String requestId, String fieldPrefix) {
@@ -365,31 +357,6 @@ class NegotiationViewModel extends ChangeNotifier {
     );
   }
 
-  Future<void> extendSubscription({
-    required String subscriptionId,
-    required DateTime newEndDate,
-    required double monthlyFee,
-  }) async {
-    if (isOffline) throw NegotiationException('You cannot extend subscriptions while offline.');
-    await _supabase.from('tumpang_subscription').update({
-      'subscription_end_date': newEndDate.toIso8601String().split('T').first,
-      'status': 'active',
-    }).eq('id', subscriptionId);
-
-    final paymentId = 'pay_${DateTime.now().millisecondsSinceEpoch}';
-    await _supabase.from('payments').insert({
-      'id': paymentId,
-      'tumpang_subscription_id': subscriptionId,
-      'month': newEndDate.month,
-      'year': newEndDate.year,
-      'due_date': DateTime.now().toIso8601String(),
-      'paid_at': null,
-      'amount': monthlyFee,
-    });
-
-    notifyListeners();
-  }
-
   Future<void> endSubscription(String subscriptionId) async {
     if (isOffline) throw NegotiationException('You cannot end subscriptions while offline.');
     await _supabase.from('tumpang_subscription').update({
@@ -410,25 +377,6 @@ class NegotiationViewModel extends ChangeNotifier {
     return (rows as List).cast<Map<String, dynamic>>();
   }
 
-  Future<void> reportCannotFetchDay({
-    required String subscriptionId,
-    required DateTime date,
-    String? reason,
-  }) async {
-    throw UnimplementedError();
-  }
-
-  /// Fetches the raw `tumpang_subscription` row for [subscriptionId]. This
-  /// is the prefill source for [ExtendNegotiationScreen] — the
-  /// subscription row already holds whatever terms the LAST negotiation
-  /// request for it settled on (it's written from that request's fields
-  /// at finalization time, see negotiation_supabase_service.dart), so
-  /// there's no need to separately hunt down "the last request" — the
-  /// subscription row already IS its result.
-  ///
-  /// Returns null if the subscription can't be found (e.g. bad id,
-  /// network issue while offline) — callers should fall back to empty/
-  /// default field values in that case, same as a brand new negotiation.
   Future<Map<String, dynamic>?> getSubscriptionById(String subscriptionId) async {
     if (isOffline) return null;
     try {
@@ -444,19 +392,10 @@ class NegotiationViewModel extends ChangeNotifier {
     }
   }
 
-  /// Submits an extension request for an existing subscription. Thin
-  /// wrapper around [NegotiationSupabaseService.createExtensionRequest]
-  /// (which already existed but had no caller) — creates a new
-  /// `tumpang_request` row with `is_extension: true`, pre-accepting
-  /// whichever fields the caller did NOT override (they're unchanged from
-  /// the subscription) and leaving overridden fields — plus the end date,
-  /// always — unaccepted so the driver still has to agree to them.
-  /// Returns the new request's id so the caller can navigate straight
-  /// into [NegotiationScreen] to show it.
   Future<String> submitExtensionRequest({
     required Map<String, dynamic> subscription,
     required DateTime newEndDate,
-    required String extensionType, // 'date_only' | 'renegotiate'
+    required String extensionType,
     String? overridePickupName,
     double? overridePickupLat,
     double? overridePickupLng,
@@ -490,6 +429,37 @@ class NegotiationViewModel extends ChangeNotifier {
       },
       fallbackMessage: "Couldn't submit the extension request. Please check your connection and try again.",
     );
+  }
+
+  // --- NEW METHODS FOR SUMMARY & EXTENSION DEPOSIT HANDLING ---
+
+  /// Fetches both the request AND the old deposit (if it's an extension) in one go
+  Future<Map<String, dynamic>?> getSummaryData(String requestId) async {
+    final req = await getSingleRequest(requestId);
+    if (req == null) return null;
+
+    double oldDeposit = 0.0;
+    if (req.isExtension && req.extendsSubscriptionId != null) {
+      final oldSub = await getSubscriptionById(req.extendsSubscriptionId!);
+      oldDeposit = double.tryParse(oldSub?['deposit']?.toString() ?? '') ?? 0.0;
+    }
+
+    return {
+      'request': req,
+      'oldDeposit': oldDeposit,
+    };
+  }
+
+  /// Finalizes the extension and pushes the additional deposit to Supabase
+  Future<void> finalizeExtensionRequest({
+    required String extensionRequestId,
+    required double additionalDeposit,
+  }) {
+    if (isOffline) throw NegotiationException('You cannot finalize an extension while offline.');
+    return runNegotiationAction(() async {
+      await _service.finalizeExtension(extensionRequestId, additionalDeposit: additionalDeposit);
+      await refreshRequests();
+    });
   }
 
   static List<Map<String, dynamic>> calculateInvoicePeriods({

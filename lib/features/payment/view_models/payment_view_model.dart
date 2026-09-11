@@ -67,6 +67,7 @@ class PaymentViewModel extends ChangeNotifier {
     pendingPayments = [];
     paymentHistory = [];
     selectedPaymentIds.clear();
+    notifyListeners();
   }
 
   @override
@@ -160,6 +161,7 @@ class PaymentViewModel extends ChangeNotifier {
   Future<bool> paySelectedWithStripe() async {
     if (isOffline) {
       paymentErrorMessage = 'Payment cannot be processed offline.';
+      notifyListeners();
       return false;
     }
     if (selectedPaymentIds.isEmpty) return false;

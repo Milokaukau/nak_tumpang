@@ -141,7 +141,9 @@ class _ExtendNegotiationScreenState extends State<ExtendNegotiationScreen> {
       }
 
       final base = _oldEndDate ?? DateTime.now();
-      _newEndDate = DateTime(base.year, base.month + 1, base.day);
+      final daysInTargetMonth = DateTime(base.year, base.month + 2, 0).day;
+      final day = base.day > daysInTargetMonth ? daysInTargetMonth : base.day;
+      _newEndDate = DateTime(base.year, base.month + 1, day);
 
       _isLoading = false;
     });
@@ -252,7 +254,7 @@ class _ExtendNegotiationScreenState extends State<ExtendNegotiationScreen> {
   String? _validate() {
     if (_pickupName.trim().isEmpty) return 'Please set a pickup location.';
     if (_dropoffName.trim().isEmpty) return 'Please set a dropoff location.';
-    if (_fee <= 0) return 'Please enter a valid fee.';
+    if (_fee < 0) return 'Please enter a valid fee.'; // Fix: Rejects negative values only, allows 0.
     if (_oldEndDate != null && !_newEndDate.isAfter(_oldEndDate!)) {
       return 'The new end date must be after the current end date (${_formatDate(_oldEndDate!)}).';
     }

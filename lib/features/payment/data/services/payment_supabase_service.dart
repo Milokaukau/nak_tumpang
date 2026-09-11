@@ -259,27 +259,60 @@ class PaymentSupabaseService {
 
   /// Generates the final cancellation bill based ONLY on the actual fetched days logic.
   Future<void> generateCancellationInvoice(String subscriptionId) async {
+    // 1. Idempotency Check: Prevent duplicate cancellation invoices
+    final existing = await _supabase
+        .from(_table)
+        .select('id')
+        .eq('tumpang_subscription_id', subscriptionId)
+        .like('id', '%_cancel')
+        .maybeSingle();
+    if (existing != null) return;
+
     final summary = await calculateCancellationFee(subscriptionId);
     final payableAmount = summary['payableAmount'] as double;
 
-    // Only generate a new invoice if there's a positive amount owed
-    if (payableAmount > 0) {
-      final now = DateTime.now();
-      final todayStr = now.toIso8601String().split('T').first;
-      final paymentId = 'pay_${now.millisecondsSinceEpoch}_cancel';
+    final now = DateTime.now();
+    final todayStr = now.toIso8601String().split('T').first;
 
+    if (payableAmount > 0) {
+      final paymentId = 'pay_${now.millisecondsSinceEpoch}_cancel';
       await _supabase.from(_table).insert({
         'id': paymentId,
         'tumpang_subscription_id': subscriptionId,
         'month': now.month,
         'year': now.year,
-        // Cancellation bills are due immediately to settle the account
         'due_date': now.toIso8601String(),
         'paid_at': null,
-        'amount': payableAmount, // Enforces the pure "actual fetched days" math
+        'amount': payableAmount,
         'cycle_start_date': todayStr,
         'cycle_end_date': todayStr,
       });
+    } else if (payableAmount < 0) {
+      // 2. Handle negative balances as a Refund Transaction
+      final refundId = 'pay_${now.millisecondsSinceEpoch}_refund';
+      await _supabase.from(_table).insert({
+        'id': refundId,
+        'tumpang_subscription_id': subscriptionId,
+        'month': now.month,
+        'year': now.year,
+        'due_date': now.toIso8601String(),
+        'paid_at': now.toIso8601String(), // Settled instantly
+        'amount': payableAmount, // Negative amount
+        'cycle_start_date': todayStr,
+        'cycle_end_date': todayStr,
+      });
+      // Update the subscription deposit status only after refund succeeds
+      await _supabase.from('tumpang_subscription')
+          .update({'deposit_refunded': true})
+          .eq('id', subscriptionId);
     }
+
+    // 3. Void any pending monthly invoices to prevent double-charging
+    await _supabase
+        .from(_table)
+        .delete()
+        .eq('tumpang_subscription_id', subscriptionId)
+        .isFilter('paid_at', null)
+        .not('id', 'like', '%_cancel');
   }
 }
