@@ -8,6 +8,9 @@ import 'package:nak_tumpang/core/services/gtfs_service.dart';
 import 'package:nak_tumpang/core/utils/transit_utils.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:uuid/uuid.dart';
+import 'package:nak_tumpang/features/home/data/services/home_local_service.dart';
+import 'package:nak_tumpang/core/utils/format_utils.dart';
+import 'package:nak_tumpang/core/services/network_service.dart';
 
 enum HomePanelMode { none, cantFetch, noNeedFetch }
 
@@ -179,6 +182,25 @@ class HomeViewModel extends ChangeNotifier {
   List<({LatLng point, Color color})> mapMarkers = [];
 
   final Map<String, List<LatLng>> _routeCache = {};
+
+  HomeViewModel() {
+    // Listen for network changes to auto-refresh
+    NetworkService.isOfflineNotifier.addListener(_onNetworkChange);
+  }
+
+  @override
+  void dispose() {
+    NetworkService.isOfflineNotifier.removeListener(_onNetworkChange);
+    super.dispose();
+  }
+
+  void _onNetworkChange() {
+    notifyListeners(); // Tells the UI to hide/show the map tiles
+    if (!NetworkService.isOfflineNotifier.value) {
+      // Internet is back! Refresh data from Supabase.
+      fetchCurrentUser();
+    }
+  }
 
   // --- UPDATED: Directly call the fetcher instead of resetting the whole screen state ---
   void loadMoreDirect() {
@@ -410,6 +432,8 @@ class HomeViewModel extends ChangeNotifier {
     notifyListeners();
 
     final authUser = _auth.currentUser;
+
+    // --- Fix #1: Clear loading state before returning unauthenticated ---
     if (authUser == null) {
       if (requestId == _userFetchId) {
         isScreenLoading = false;
@@ -418,30 +442,25 @@ class HomeViewModel extends ChangeNotifier {
       return;
     }
 
-    final profile = await _homeService.fetchUserProfile(authUser.id);
-    if (requestId != _userFetchId) return;
+    final localRole = await HomeLocalService().getUserRole(authUser.id);
+    currentUserRole = localRole ?? 'passenger';
 
-    if (profile == null) {
-      if (requestId == _userFetchId) {
-        isScreenLoading = false;
-        notifyListeners();
+    try {
+      final profile = await _homeService.fetchUserProfile(authUser.id);
+      if (requestId != _userFetchId) return;
+
+      if (profile != null) {
+        currentUser = profile;
+        final role = profile['role'] as String?;
+        if (role == 'driver' || role == 'passenger') {
+          currentUserRole = role!;
+        }
       }
-      return;
+    } catch (e) {
+      debugPrint('⚠️ Profile fetch failed, proceeding with local role ($currentUserRole): $e');
     }
 
-    currentUser = profile;
-    final role = profile['role'] as String?;
-
-    if (role == null || (role != 'driver' && role != 'passenger')) {
-      if (requestId == _userFetchId) {
-        isScreenLoading = false;
-        notifyListeners();
-      }
-      return;
-    }
-    currentUserRole = role;
-
-    if (role == 'driver') {
+    if (currentUserRole == 'driver') {
       await _loadDriverData(authUser.id, requestId);
     } else {
       await _loadPassengerData(authUser.id, requestId);
@@ -454,61 +473,100 @@ class HomeViewModel extends ChangeNotifier {
   }
 
   Future<void> _loadDriverData(String userId, int requestId) async {
-    try {
-      final rawSubs = await _homeService.fetchDriverActiveSubscriptions(userId);
-      if (requestId != _userFetchId) return;
-      activeSubscriptions = _mapSubscriptions(rawSubs, isForPassenger: false);
+    List<Map<String, dynamic>> rawSubs = [];
+    List<Map<String, dynamic>> allDriverTrips = [];
+    List<Map<String, dynamic>> myTrips = []; // Track only current user's trips locally
 
-      final allDriverTrips = await _homeService.fetchDriverTrips();
-      if (requestId != _userFetchId) return;
-      final myTrips = allDriverTrips.where((t) => t['user_id'] == userId).toList();
+    if (NetworkService.isOfflineNotifier.value) {
+      myTrips = await HomeLocalService().getCachedUserTrips(userId, isForPassenger: false);
+      rawSubs = await HomeLocalService().getCachedSubscriptions(userId, isForPassenger: false);
+      allDriverTrips = myTrips;
+    } else {
+      try {
+        rawSubs = await _homeService.fetchDriverActiveSubscriptions(userId);
+        allDriverTrips = await _homeService.fetchDriverTrips();
 
-      final subbedTripIds = activeSubscriptions.map((s) => s['driver_trip_id']).toSet();
-      availableTrips = myTrips.where((t) => !subbedTripIds.contains(t['id'])).toList();
+        // --- Fix #2: Filter only current user's driver trips before caching ---
+        myTrips = allDriverTrips.where((trip) => trip['user_id'] == userId).toList();
 
-      if (availableTrips.isNotEmpty) {
-        currentSelectedTrip = availableTrips.first;
+        // --- Fix #3: Save both using the atomic transaction ---
+        await HomeLocalService().cacheHomeData(
+          trips: myTrips,
+          rawSubs: rawSubs,
+          isForPassenger: false,
+          currentUserId: userId,
+        );
+      } catch (e) {
+        debugPrint('⚠️ Network error, falling back to SQLite cache (Driver): $e');
+        myTrips = await HomeLocalService().getCachedUserTrips(userId, isForPassenger: false);
+        rawSubs = await HomeLocalService().getCachedSubscriptions(userId, isForPassenger: false);
+        allDriverTrips = myTrips;
       }
-
-      if (activeSubscriptions.isNotEmpty) {
-        selectedSubscriptionId = activeSubscriptions.first['id'];
-      }
-
-      showMatchingUI = activeSubscriptions.isEmpty;
-      updateMapRoute();
-    } catch (e) {
-      print('⚠️ Error fetching driver data: $e');
     }
+
+    if (requestId != _userFetchId) return;
+
+    activeSubscriptions = _mapSubscriptions(rawSubs, isForPassenger: false);
+    final subbedTripIds = activeSubscriptions.map((s) => s['driver_trip_id']).toSet();
+    availableTrips = myTrips.where((t) => !subbedTripIds.contains(t['id'])).toList();
+
+    if (availableTrips.isNotEmpty) {
+      currentSelectedTrip = availableTrips.first;
+    }
+
+    if (activeSubscriptions.isNotEmpty) {
+      selectedSubscriptionId = activeSubscriptions.first['id'];
+    }
+
+    showMatchingUI = activeSubscriptions.isEmpty;
+    updateMapRoute();
   }
 
   Future<void> _loadPassengerData(String userId, int requestId) async {
-    try {
-      final trips = await _homeService.fetchPassengerTrips(userId);
-      if (requestId != _userFetchId) return;
-      final rawSubs = await _homeService.fetchAllPassengerSubscriptions(userId);
-      if (requestId != _userFetchId) return;
+    List<Map<String, dynamic>> rawSubs = [];
+    List<Map<String, dynamic>> trips = [];
 
-      activeSubscriptions = _mapSubscriptions(rawSubs, isForPassenger: true);
+    if (NetworkService.isOfflineNotifier.value) {
+      trips = await HomeLocalService().getCachedUserTrips(userId, isForPassenger: true);
+      rawSubs = await HomeLocalService().getCachedSubscriptions(userId, isForPassenger: true);
+    } else {
+      try {
+        trips = await _homeService.fetchPassengerTrips(userId);
+        rawSubs = await _homeService.fetchAllPassengerSubscriptions(userId);
 
-      final subbedTripIds = activeSubscriptions.map((s) => s['passenger_trip_id']).toSet();
-      availableTrips = trips.where((t) => !subbedTripIds.contains(t['id'])).toList();
-
-      if (availableTrips.isNotEmpty) {
-        currentSelectedTrip = availableTrips.first;
+        // --- Fix #3: Save both using the atomic transaction ---
+        await HomeLocalService().cacheHomeData(
+          trips: trips,
+          rawSubs: rawSubs,
+          isForPassenger: true,
+          currentUserId: userId,
+        );
+      } catch (e) {
+        debugPrint('⚠️ Network error, falling back to SQLite cache (Passenger): $e');
+        trips = await HomeLocalService().getCachedUserTrips(userId, isForPassenger: true);
+        rawSubs = await HomeLocalService().getCachedSubscriptions(userId, isForPassenger: true);
       }
+    }
 
-      if (activeSubscriptions.isNotEmpty) {
-        selectedSubscriptionId = activeSubscriptions.first['id'];
-      }
+    if (requestId != _userFetchId) return;
 
-      showMatchingUI = activeSubscriptions.isEmpty;
-      updateMapRoute();
+    activeSubscriptions = _mapSubscriptions(rawSubs, isForPassenger: true);
+    final subbedTripIds = activeSubscriptions.map((s) => s['passenger_trip_id']).toSet();
+    availableTrips = trips.where((t) => !subbedTripIds.contains(t['id'])).toList();
 
-      if (showMatchingUI && currentSelectedTrip != null) {
-        await _matchCurrentRouteType();
-      }
-    } catch (e) {
-      print('⚠️ Error fetching initial data: $e');
+    if (availableTrips.isNotEmpty) {
+      currentSelectedTrip = availableTrips.first;
+    }
+
+    if (activeSubscriptions.isNotEmpty) {
+      selectedSubscriptionId = activeSubscriptions.first['id'];
+    }
+
+    showMatchingUI = activeSubscriptions.isEmpty;
+    updateMapRoute();
+
+    if (showMatchingUI && currentSelectedTrip != null) {
+      await _matchCurrentRouteType();
     }
   }
 
@@ -558,10 +616,10 @@ class HomeViewModel extends ChangeNotifier {
     }
     notifyListeners();
 
-    final passDays = _extractActiveDays(currentSelectedTrip!);
-    final passPick = _latLngFromMap(currentSelectedTrip!, 'pickup_lat', 'pickup_lng');
-    final passDrop = _latLngFromMap(currentSelectedTrip!, 'dropoff_lat', 'dropoff_lng');
-    final passTime = _sqlTimeToMinutes(currentSelectedTrip!['desired_pickup_time']);
+    final passDays = FormatUtils.extractActiveDays(currentSelectedTrip!);
+    final passPick = FormatUtils.latLngFromMap(currentSelectedTrip!, 'pickup_lat', 'pickup_lng');
+    final passDrop = FormatUtils.latLngFromMap(currentSelectedTrip!, 'dropoff_lat', 'dropoff_lng');
+    final passTime = FormatUtils.sqlTimeToMinutes(currentSelectedTrip!['desired_pickup_time']);
 
     final driverTrips = await _homeService.fetchDriverTrips();
     if (_fetchId != currentFetchId) return;
@@ -578,15 +636,15 @@ class HomeViewModel extends ChangeNotifier {
       var driverTrip = driverTrips[i];
 
       final driverName = driverTrip['users']?['name'] ?? 'Unknown Driver';
-      final driverDays = _extractActiveDays(driverTrip);
+      final driverDays = FormatUtils.extractActiveDays(driverTrip);
 
       if (!MatchingUtils.hasOverlappingDays(passDays, driverDays)) continue;
 
-      final drivTime = _sqlTimeToMinutes(driverTrip['depart_time']);
+      final drivTime = FormatUtils.sqlTimeToMinutes(driverTrip['depart_time']);
       if ((drivTime - passTime).abs() > 30) continue;
 
-      final drivStart = _latLngFromMap(driverTrip, 'depart_lat', 'depart_lng');
-      final drivEnd = _latLngFromMap(driverTrip, 'arrival_lat', 'arrival_lng');
+      final drivStart = FormatUtils.latLngFromMap(driverTrip, 'depart_lat', 'depart_lng');
+      final drivEnd = FormatUtils.latLngFromMap(driverTrip, 'arrival_lat', 'arrival_lng');
 
       if (drivStart.latitude == 0 || drivEnd.latitude == 0) continue;
 
@@ -613,7 +671,7 @@ class HomeViewModel extends ChangeNotifier {
             'pickup_distance_km': pickDist / 1000,
             'is_requested': existingReqIds.contains(driverTrip['id']),
             'driver_profile': {
-              'depart_time': _formatSqlTimeToUI(driverTrip['depart_time']),
+              'depart_time': FormatUtils.formatSqlTimeToUI(driverTrip['depart_time']),
             },
           });
 
@@ -684,10 +742,10 @@ class HomeViewModel extends ChangeNotifier {
     }
     notifyListeners();
 
-    final passDays = _extractActiveDays(currentSelectedTrip!);
-    final passPick = _latLngFromMap(currentSelectedTrip!, 'pickup_lat', 'pickup_lng');
-    final passDrop = _latLngFromMap(currentSelectedTrip!, 'dropoff_lat', 'dropoff_lng');
-    final passTime = _sqlTimeToMinutes(currentSelectedTrip!['desired_pickup_time']);
+    final passDays = FormatUtils.extractActiveDays(currentSelectedTrip!);
+    final passPick = FormatUtils.latLngFromMap(currentSelectedTrip!, 'pickup_lat', 'pickup_lng');
+    final passDrop = FormatUtils.latLngFromMap(currentSelectedTrip!, 'dropoff_lat', 'dropoff_lng');
+    final passTime = FormatUtils.sqlTimeToMinutes(currentSelectedTrip!['desired_pickup_time']);
 
     final driverTrips = await _homeService.fetchDriverTrips();
     if (_fetchId != currentFetchId) return;
@@ -757,12 +815,12 @@ class HomeViewModel extends ChangeNotifier {
         if (_fetchId != currentFetchId) return;
         var driverTrip = driverTrips[i];
 
-        final driverDays = _extractActiveDays(driverTrip);
+        final driverDays = FormatUtils.extractActiveDays(driverTrip);
         if (!MatchingUtils.hasOverlappingDays(passDays, driverDays)) continue;
 
-        final drivStart = LatLng(_parseDouble(driverTrip['depart_lat']), _parseDouble(driverTrip['depart_lng']));
-        final drivEnd = LatLng(_parseDouble(driverTrip['arrival_lat']), _parseDouble(driverTrip['arrival_lng']));
-        final drivTime = _sqlTimeToMinutes(driverTrip['depart_time']);
+        final drivStart = LatLng(FormatUtils.parseDouble(driverTrip['depart_lat']), FormatUtils.parseDouble(driverTrip['depart_lng']));
+        final drivEnd = LatLng(FormatUtils.parseDouble(driverTrip['arrival_lat']), FormatUtils.parseDouble(driverTrip['arrival_lng']));
+        final drivTime = FormatUtils.sqlTimeToMinutes(driverTrip['depart_time']);
         final driverName = driverTrip['users']?['name'] ?? 'Unknown Driver';
 
         if (drivStart.latitude == 0 || drivEnd.latitude == 0) continue;
@@ -793,7 +851,7 @@ class HomeViewModel extends ChangeNotifier {
                   'driver_id': driverTrip['user_id'],
                   'trip_id': driverTrip['id'],
                   'driver_name': driverName,
-                  'depart_time': _formatSqlTimeToUI(driverTrip['depart_time']),
+                  'depart_time': FormatUtils.formatSqlTimeToUI(driverTrip['depart_time']),
                   'depart_time_sql': driverTrip['depart_time'],
                   'distance_km': pickDist / 1000,
                   'arrival_at_board_station': drivTime + driveMinsToStation,
@@ -821,7 +879,7 @@ class HomeViewModel extends ChangeNotifier {
                   'driver_id': driverTrip['user_id'],
                   'trip_id': driverTrip['id'],
                   'driver_name': driverName,
-                  'depart_time': _formatSqlTimeToUI(driverTrip['depart_time']),
+                  'depart_time': FormatUtils.formatSqlTimeToUI(driverTrip['depart_time']),
                   'depart_time_sql': driverTrip['depart_time'],
                   'depart_time_mins': drivTime,
                   'distance_km': pickDistFromStation / 1000,
@@ -955,6 +1013,13 @@ class HomeViewModel extends ChangeNotifier {
   }
 
   Future<void> updateMapRoute() async {
+
+    if (NetworkService.isOfflineNotifier.value) {
+      _clearMap();
+      return;
+    }
+
+
     final requestId = ++_routeFetchId;
     mapRoutes = [];
     mapMarkers = [];
@@ -967,15 +1032,15 @@ class HomeViewModel extends ChangeNotifier {
 
         if (showMatchingUI) {
           if (currentSelectedTrip == null) return _clearMap();
-          start = _latLngFromMap(currentSelectedTrip!, 'pickup_lat', 'pickup_lng');
-          end = _latLngFromMap(currentSelectedTrip!, 'dropoff_lat', 'dropoff_lng');
+          start = FormatUtils.latLngFromMap(currentSelectedTrip!, 'pickup_lat', 'pickup_lng');
+          end = FormatUtils.latLngFromMap(currentSelectedTrip!, 'dropoff_lat', 'dropoff_lng');
         } else {
           if (selectedSubscriptionId == null || activeSubscriptions.isEmpty) return _clearMap();
           final sub = activeSubscriptions.firstWhere((s) => s['id'] == selectedSubscriptionId, orElse: () => <String, dynamic>{});
           if (sub.isEmpty) return _clearMap();
 
-          start = _latLngFromMap(sub, 'pickup_lat', 'pickup_lng');
-          end = _latLngFromMap(sub, 'dropoff_lat', 'dropoff_lng');
+          start = FormatUtils.latLngFromMap(sub, 'pickup_lat', 'pickup_lng');
+          end = FormatUtils.latLngFromMap(sub, 'dropoff_lat', 'dropoff_lng');
         }
 
         if (start.latitude == 0.0 || end.latitude == 0.0) return _clearMap();
@@ -984,7 +1049,8 @@ class HomeViewModel extends ChangeNotifier {
         if (requestId != _routeFetchId) return;
 
         mapRoutes = [
-          (points: [start, ...route, end], color: Colors.blueAccent),
+          // Changed from blueAccent to indigo
+          (points: [start, ...route, end], color: Colors.indigo),
         ];
         mapMarkers = [
           (point: start, color: Colors.green),
@@ -994,8 +1060,8 @@ class HomeViewModel extends ChangeNotifier {
       else if (currentUserRole == 'driver') {
         if (showMatchingUI) {
           if (currentSelectedTrip == null) return _clearMap();
-          final depart = _latLngFromMap(currentSelectedTrip!, 'depart_lat', 'depart_lng');
-          final arrival = _latLngFromMap(currentSelectedTrip!, 'arrival_lat', 'arrival_lng');
+          final depart = FormatUtils.latLngFromMap(currentSelectedTrip!, 'depart_lat', 'depart_lng');
+          final arrival = FormatUtils.latLngFromMap(currentSelectedTrip!, 'arrival_lat', 'arrival_lng');
 
           if (depart.latitude == 0.0 || arrival.latitude == 0.0) return _clearMap();
 
@@ -1003,21 +1069,22 @@ class HomeViewModel extends ChangeNotifier {
           if (requestId != _routeFetchId) return;
 
           mapRoutes = [
-            (points: [depart, ...route, arrival], color: Colors.blueAccent),
+            // Changed from blueAccent to indigo
+            (points: [depart, ...route, arrival], color: Colors.indigo),
           ];
           mapMarkers = [
-            (point: depart, color: Colors.blue), // --- FIX: Blue for driver start ---
-            (point: arrival, color: Colors.orange), // --- FIX: Orange for driver end ---
+            (point: depart, color: Colors.blue),
+            (point: arrival, color: Colors.orange),
           ];
         } else {
           if (selectedSubscriptionId == null || activeSubscriptions.isEmpty) return _clearMap();
           final sub = activeSubscriptions.firstWhere((s) => s['id'] == selectedSubscriptionId, orElse: () => <String, dynamic>{});
           if (sub.isEmpty) return _clearMap();
 
-          final depart = _latLngFromMap(sub, 'driver_depart_lat', 'driver_depart_lng');
-          final pickup = _latLngFromMap(sub, 'pickup_lat', 'pickup_lng');
-          final dropoff = _latLngFromMap(sub, 'dropoff_lat', 'dropoff_lng');
-          final arrival = _latLngFromMap(sub, 'driver_arrival_lat', 'driver_arrival_lng');
+          final depart = FormatUtils.latLngFromMap(sub, 'driver_depart_lat', 'driver_depart_lng');
+          final pickup = FormatUtils.latLngFromMap(sub, 'pickup_lat', 'pickup_lng');
+          final dropoff = FormatUtils.latLngFromMap(sub, 'dropoff_lat', 'dropoff_lng');
+          final arrival = FormatUtils.latLngFromMap(sub, 'driver_arrival_lat', 'driver_arrival_lng');
 
           final validDepart = depart.latitude != 0.0 && depart.longitude != 0.0;
           final validArrival = arrival.latitude != 0.0 && arrival.longitude != 0.0;
@@ -1031,15 +1098,16 @@ class HomeViewModel extends ChangeNotifier {
 
           mapRoutes = [
             if (validDepart) (points: [depart, ...segments[0], pickup], color: AppColors.primaryYellow),
-            (points: [pickup, ...segments[1], dropoff], color: Colors.blueAccent),
+            // Changed from blueAccent to indigo
+            (points: [pickup, ...segments[1], dropoff], color: Colors.indigo),
             if (validArrival) (points: [dropoff, ...segments[2], arrival], color: AppColors.primaryYellow),
           ];
 
           mapMarkers = [
-            if (validDepart) (point: depart, color: Colors.blue), // --- FIX: Blue for driver start ---
+            if (validDepart) (point: depart, color: Colors.blue),
             (point: pickup, color: Colors.green),
             (point: dropoff, color: Colors.red),
-            if (validArrival) (point: arrival, color: Colors.orange), // --- FIX: Orange for driver end ---
+            if (validArrival) (point: arrival, color: Colors.orange),
           ];
         }
       }
@@ -1101,52 +1169,9 @@ class HomeViewModel extends ChangeNotifier {
         'deposit_refunded': sub['deposit_refunded'],
         'ended_by': sub['ended_by'],
         'pickup_time': sub['pickup_time'] != null
-            ? _formatSqlTimeToUI(sub['pickup_time'])
+            ? FormatUtils.formatSqlTimeToUI(sub['pickup_time'])
             : 'TBD',
       };
     }).toList();
-  }
-
-  double _parseDouble(dynamic value) {
-    if (value == null) return 0.0;
-    if (value is double) return value;
-    if (value is int) return value.toDouble();
-    return double.tryParse(value.toString()) ?? 0.0;
-  }
-
-  LatLng _latLngFromMap(Map<String, dynamic> map, String latKey, String lngKey) {
-    return LatLng(_parseDouble(map[latKey]), _parseDouble(map[lngKey]));
-  }
-
-  int _sqlTimeToMinutes(String sqlTime) {
-    final parts = sqlTime.split(':');
-    final hours = int.parse(parts[0]);
-    final minutes = int.parse(parts[1]);
-    return (hours * 60) + minutes;
-  }
-
-  String _formatSqlTimeToUI(String sqlTime) {
-    final parts = sqlTime.split(':');
-    int hours = int.parse(parts[0]);
-    final minutes = parts[1];
-
-    final period = hours >= 12 ? 'PM' : 'AM';
-    if (hours > 12) hours -= 12;
-    if (hours == 0) hours = 12;
-
-    final hoursStr = hours.toString().padLeft(2, '0');
-    return '$hoursStr:$minutes $period';
-  }
-
-  Map<String, bool> _extractActiveDays(Map<String, dynamic> row) {
-    return {
-      'monday': row['active_monday'] ?? false,
-      'tuesday': row['active_tuesday'] ?? false,
-      'wednesday': row['active_wednesday'] ?? false,
-      'thursday': row['active_thursday'] ?? false,
-      'friday': row['active_friday'] ?? false,
-      'saturday': row['active_saturday'] ?? false,
-      'sunday': row['active_sunday'] ?? false,
-    };
   }
 }
