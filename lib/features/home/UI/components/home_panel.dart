@@ -113,7 +113,7 @@ class HomePanel extends StatelessWidget {
   List<Widget> _buildDriverView(BuildContext context, HomeViewModel viewModel) {
     if (viewModel.activeSubscriptions.isNotEmpty) {
       return [
-        const Text('My Active Subscriptions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        const Text('My Active Tumpang Trips', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
         const SizedBox(height: 12),
         ..._buildSubscriptionList(context, viewModel, isDriver: true),
       ];
@@ -151,7 +151,7 @@ class HomePanel extends StatelessWidget {
 
   List<Widget> _buildPassengerSubscriptionView(BuildContext context, HomeViewModel viewModel) {
     return [
-      const Text('My Active Subscriptions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+      const Text('My Active Tumpang Trips', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
       const SizedBox(height: 12),
       ..._buildSubscriptionList(context, viewModel, isDriver: false),
       const SizedBox(height: 16),
@@ -178,7 +178,7 @@ class HomePanel extends StatelessWidget {
             child: TextButton.icon(
               onPressed: () => viewModel.toggleMatchingUI(false),
               icon: const Icon(Icons.arrow_back, color: AppColors.black, size: 20),
-              label: const Text('Back to Subscriptions', style: TextStyle(color: AppColors.black, fontWeight: FontWeight.bold, fontSize: 13)),
+              label: const Text('Back to Active Trips', style: TextStyle(color: AppColors.black, fontWeight: FontWeight.bold, fontSize: 13)),
             ),
           ),
         ),
@@ -450,7 +450,7 @@ class HomePanel extends StatelessWidget {
         children: [
           Text(
             viewModel.availableTrips.isEmpty
-                ? 'You have no trips to match.'
+                ? (viewModel.hasExceptedTripsToday ? 'Your active trip is paused for today.' : 'You have no trips to match.')
                 : 'No trip is selected.\nSelect one from the dropdown, or',
             textAlign: TextAlign.center,
             style: const TextStyle(color: AppColors.greyText, fontSize: 14, height: 1.4),
@@ -569,7 +569,7 @@ class HomePanel extends StatelessWidget {
             if (confirmed == true) {
               final success = await viewModel.completeTrip(
                 subscriptionId: leg['sub_id'] ?? leg['id'],
-                driverId: leg['driver_id'] ?? viewModel.currentUserId,
+                driverId: leg['driver_id'] ?? viewModel.currentUserId ?? '',
                 passengerId: leg['passenger_id'] ?? '',
                 pickupLat: FormatUtils.parseDouble(leg['pickup_lat']),
                 pickupLng: FormatUtils.parseDouble(leg['pickup_lng']),
@@ -702,7 +702,7 @@ class HomePanel extends StatelessWidget {
           }
         },
         onExceptionPressed: () => viewModel.openNoNeedFetchPanel(leg),
-        isCompletedToday: false,
+        isCompletedToday: false, // Passengers don't complete trips, drivers do
         onCompleteTripPressed: null,
       ));
     }

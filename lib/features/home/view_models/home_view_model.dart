@@ -179,6 +179,13 @@ class HomeViewModel extends ChangeNotifier {
         endDate: exceptionEndDate!,
         reason: reasonText,
       );
+
+      // --- FIXED: Instantly refresh the UI if the exception is successfully filed! ---
+      if (success) {
+        closeExceptionPanel();
+        await refreshHome();
+      }
+
       return success;
     } catch (e) {
       debugPrint('⚠️ Error submitting exception: $e');
