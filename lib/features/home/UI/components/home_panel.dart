@@ -12,7 +12,10 @@ import 'package:nak_tumpang/features/home/UI/components/active_subscription_card
 import 'package:nak_tumpang/features/trips/UI/add_edit_trip_screen.dart';
 import 'package:nak_tumpang/features/negotiation/UI/screens/negotiation_screen.dart';
 import 'package:nak_tumpang/core/utils/url_utils.dart';
-// --- NEW IMPORT ---
+import 'package:latlong2/latlong.dart';
+import 'package:nak_tumpang/core/utils/format_utils.dart';
+import 'package:nak_tumpang/core/utils/matching_utils.dart';
+import 'package:nak_tumpang/core/utils/transit_utils.dart';
 import 'package:nak_tumpang/features/negotiation/view_models/negotiation_view_model.dart';
 
 class HomePanel extends StatelessWidget {
@@ -156,7 +159,6 @@ class HomePanel extends StatelessWidget {
       ),
       const SizedBox(height: 16),
 
-      // --- Offline check immediately replaces the results area ---
       if (NetworkService.isOfflineNotifier.value)
         const Padding(
           padding: EdgeInsets.symmetric(vertical: 24),
@@ -207,7 +209,6 @@ class HomePanel extends StatelessWidget {
                           viewModel.markDriverRequestedGlobally([driver['trip_id']]);
                           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Request sent!'), backgroundColor: Colors.green));
 
-                          // --- FIXED: Force the NegotiationViewModel to refresh immediately ---
                           try {
                             context.read<NegotiationViewModel>().refreshRequests();
                           } catch (_) {}
@@ -357,7 +358,6 @@ class HomePanel extends StatelessWidget {
                           return;
                         }
 
-                        // --- FIXED: Force the NegotiationViewModel to refresh immediately ---
                         try {
                           context.read<NegotiationViewModel>().refreshRequests();
                         } catch (_) {}
@@ -449,26 +449,156 @@ class HomePanel extends StatelessWidget {
   List<Widget> _buildSubscriptionList(HomeViewModel viewModel, {required bool isDriver}) {
     return List.generate(viewModel.activeSubscriptions.length, (index) {
       final sub = viewModel.activeSubscriptions[index];
+      final legs = _buildJourneyLegs(sub, isDriver: isDriver);
+
       return Column(
         children: [
           ActiveSubscriptionCard(
             tripName: sub['trip_name'],
-            name: sub['name'],
-            imageUrl: sub['imageUrl'],
-            pickupLocation: sub['pickup_location'],
-            dropoffLocation: sub['dropoff_location'],
-            time: sub['pickup_time'],
-            exceptionButtonText: isDriver ? "Can't fetch at..." : 'No need tumpang at...',
             isSelected: viewModel.selectedSubscriptionId == sub['id'],
             onTap: () => viewModel.selectSubscription(sub['id']),
-            onCallPressed: () => UrlUtils.makePhoneCall(sub['phone']),
-            onDetailsPressed: () => print('Opening details...'),
-            onExceptionPressed: () => print('Filing exception...'),
+            legs: legs,
           ),
           if (index != viewModel.activeSubscriptions.length - 1)
             const SizedBox(height: 12),
         ],
       );
     });
+  }
+
+  List<ActiveSubscriptionLeg> _buildJourneyLegs(Map<String, dynamic> sub, {required bool isDriver}) {
+    final driverLegsData = (sub['legs'] as List).cast<Map<String, dynamic>>();
+
+    if (isDriver) {
+      return driverLegsData.map((leg) {
+        return ActiveSubscriptionLeg(
+          type: LegType.driver,
+          name: leg['name'],
+          imageUrl: leg['imageUrl'],
+          pickupLocation: leg['pickup_location'],
+          dropoffLocation: leg['dropoff_location'],
+          time: leg['pickup_time'],
+          exceptionButtonText: "Can't fetch at...",
+          onCallPressed: () => UrlUtils.makePhoneCall(leg['phone']),
+          onDetailsPressed: () => print('Opening details...'),
+          onExceptionPressed: () => print('Filing exception...'),
+        );
+      }).toList();
+    }
+
+    final result = <ActiveSubscriptionLeg>[];
+
+    final passStartLat = FormatUtils.parseDouble(sub['pass_pickup_lat'] ?? 0);
+    final passStartLng = FormatUtils.parseDouble(sub['pass_pickup_lng'] ?? 0);
+    final passEndLat = FormatUtils.parseDouble(sub['pass_dropoff_lat'] ?? 0);
+    final passEndLng = FormatUtils.parseDouble(sub['pass_dropoff_lng'] ?? 0);
+
+    final passStart = LatLng(passStartLat, passStartLng);
+    final passEnd = LatLng(passEndLat, passEndLng);
+
+    final firstDriverLat = FormatUtils.parseDouble(driverLegsData.first['pickup_lat']);
+    final firstDriverLng = FormatUtils.parseDouble(driverLegsData.first['pickup_lng']);
+    final lastDriverLat = FormatUtils.parseDouble(driverLegsData.last['dropoff_lat']);
+    final lastDriverLng = FormatUtils.parseDouble(driverLegsData.last['dropoff_lng']);
+
+    final startGapDist = MatchingUtils.calculateDistance(passStart.latitude, passStart.longitude, firstDriverLat, firstDriverLng);
+    final endGapDist = MatchingUtils.calculateDistance(passEnd.latitude, passEnd.longitude, lastDriverLat, lastDriverLng);
+
+    // --- BUG FIX: Differentiate between a short walk (<1500m) and a multi-modal Train route ---
+    if (startGapDist > 100) {
+      if (startGapDist > 1500) {
+        final boardStation = TransitUtils.findNearestStation(passStart);
+        if (boardStation != null) {
+          result.add(ActiveSubscriptionLeg(
+            type: LegType.walk,
+            name: 'Walk',
+            pickupLocation: 'Origin',
+            dropoffLocation: boardStation.name,
+            time: '',
+          ));
+          result.add(ActiveSubscriptionLeg(
+            type: LegType.transit,
+            name: 'Train',
+            pickupLocation: boardStation.name,
+            dropoffLocation: driverLegsData.first['pickup_location'],
+            time: '',
+          ));
+        }
+      } else {
+        result.add(ActiveSubscriptionLeg(
+          type: LegType.walk,
+          name: 'Walk',
+          pickupLocation: 'Origin',
+          dropoffLocation: driverLegsData.first['pickup_location'],
+          time: '',
+        ));
+      }
+    }
+
+    for (int i = 0; i < driverLegsData.length; i++) {
+      final leg = driverLegsData[i];
+
+      if (i > 0) {
+        final prevLat = FormatUtils.parseDouble(driverLegsData[i - 1]['dropoff_lat']);
+        final prevLng = FormatUtils.parseDouble(driverLegsData[i - 1]['dropoff_lng']);
+        final currentLat = FormatUtils.parseDouble(leg['pickup_lat']);
+        final currentLng = FormatUtils.parseDouble(leg['pickup_lng']);
+
+        if (MatchingUtils.calculateDistance(prevLat, prevLng, currentLat, currentLng) > 100) {
+          result.add(ActiveSubscriptionLeg(
+            type: LegType.transit,
+            name: 'Train',
+            pickupLocation: driverLegsData[i - 1]['dropoff_location'],
+            dropoffLocation: leg['pickup_location'],
+            time: '',
+          ));
+        }
+      }
+
+      result.add(ActiveSubscriptionLeg(
+        type: LegType.driver,
+        name: leg['name'],
+        imageUrl: leg['imageUrl'],
+        pickupLocation: leg['pickup_location'],
+        dropoffLocation: leg['dropoff_location'],
+        time: leg['pickup_time'],
+        exceptionButtonText: 'No need tumpang at...',
+        onCallPressed: () => UrlUtils.makePhoneCall(leg['phone']),
+        onDetailsPressed: () => print('Opening details...'),
+        onExceptionPressed: () => print('Filing exception...'),
+      ));
+    }
+
+    if (endGapDist > 100) {
+      if (endGapDist > 1500) {
+        final alightStation = TransitUtils.findNearestStation(passEnd);
+        if (alightStation != null) {
+          result.add(ActiveSubscriptionLeg(
+            type: LegType.transit,
+            name: 'Train',
+            pickupLocation: driverLegsData.last['dropoff_location'],
+            dropoffLocation: alightStation.name,
+            time: '',
+          ));
+          result.add(ActiveSubscriptionLeg(
+            type: LegType.walk,
+            name: 'Walk',
+            pickupLocation: alightStation.name,
+            dropoffLocation: 'Destination',
+            time: '',
+          ));
+        }
+      } else {
+        result.add(ActiveSubscriptionLeg(
+          type: LegType.walk,
+          name: 'Walk',
+          pickupLocation: driverLegsData.last['dropoff_location'],
+          dropoffLocation: 'Destination',
+          time: '',
+        ));
+      }
+    }
+
+    return result;
   }
 }

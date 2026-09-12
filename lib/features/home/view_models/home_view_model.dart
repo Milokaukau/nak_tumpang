@@ -55,8 +55,8 @@ class HomeViewModel extends ChangeNotifier {
   List<Map<String, dynamic>> matchedDrivers = [];
   List<Map<String, dynamic>> mixedMatchedRoutes = [];
 
-  List<({List<LatLng> points, Color color})> mapRoutes = [];
-  List<({LatLng point, Color color})> mapMarkers = [];
+  List<({List<LatLng> points, Color color, bool isTransit})> mapRoutes = [];
+  List<({LatLng point, Color color, bool isSmallNode})> mapMarkers = [];
 
   final Map<String, List<LatLng>> _routeCache = {};
 
@@ -72,7 +72,6 @@ class HomeViewModel extends ChangeNotifier {
 
   void _onNetworkChange() {
     if (!NetworkService.isOfflineNotifier.value) {
-      // --- FIXED: Reset search flags so it actually searches again on reconnect ---
       _hasFoundDirect = false;
       _hasFoundMixed = false;
       fetchCurrentUser();
@@ -262,14 +261,8 @@ class HomeViewModel extends ChangeNotifier {
 
   Future<void> fetchCurrentUser() async {
     final requestId = ++_userFetchId;
-
     final authUser = _auth.currentUser;
 
-    // --- FIXED: a different auth user than the one we last loaded for means
-    // this is an account switch, not just a re-fetch/reconnect for the same
-    // user. Wipe every piece of per-user state (matches, subscriptions,
-    // selected trip/subscription, map, etc.) so nothing from the previous
-    // user lingers on screen while the new user's data loads. ---
     if (authUser != null && _lastLoadedUserId != null && _lastLoadedUserId != authUser.id) {
       _resetForUserSwitch();
     }
@@ -344,10 +337,7 @@ class HomeViewModel extends ChangeNotifier {
   }
 
   void _resetForUserSwitch() {
-    // Re-run the same path as a genuine first load (including the cached
-    // read in fetchCurrentUser), since the cache is keyed per-user.
     _isFirstLoad = true;
-
     currentUser = null;
     currentUserRole = 'passenger';
     currentSelectedTrip = null;
@@ -375,11 +365,8 @@ class HomeViewModel extends ChangeNotifier {
     mapMarkers = [];
     _routeCache.clear();
 
-    // Bump so any in-flight fetches from the previous user are ignored
-    // when they resolve.
     _fetchId++;
     _routeFetchId++;
-
     notifyListeners();
   }
 
@@ -422,7 +409,6 @@ class HomeViewModel extends ChangeNotifier {
 
     if (activeSubscriptions.isNotEmpty) {
       selectedSubscriptionId ??= activeSubscriptions.first['id'];
-      // If a new subscription was created or it's first load, force subscriptions view
       if (activeSubscriptions.length > previousSubCount || (_isFirstLoad && _matchingUiEpoch == matchingUiEpochAtStart)) {
         showMatchingUI = false;
         selectedSubscriptionId = activeSubscriptions.first['id'];
@@ -460,6 +446,14 @@ class HomeViewModel extends ChangeNotifier {
 
     if (requestId != _userFetchId) return;
 
+    for (var sub in rawSubs) {
+      final pTripId = sub['passenger_trip_id'];
+      final matchingTrip = trips.firstWhere((t) => t['id'] == pTripId, orElse: () => <String, dynamic>{});
+      if (matchingTrip.isNotEmpty) {
+        sub['passenger_trips'] = matchingTrip;
+      }
+    }
+
     final previousSubCount = activeSubscriptions.length;
     activeSubscriptions = _mapSubscriptions(rawSubs, isForPassenger: true);
     final subbedTripIds = activeSubscriptions.map((s) => s['passenger_trip_id']).toSet();
@@ -469,7 +463,6 @@ class HomeViewModel extends ChangeNotifier {
 
     if (activeSubscriptions.isNotEmpty) {
       selectedSubscriptionId ??= activeSubscriptions.first['id'];
-      // If a new subscription was created or it's first load, force subscriptions view
       if (activeSubscriptions.length > previousSubCount || (_isFirstLoad && _matchingUiEpoch == matchingUiEpochAtStart)) {
         showMatchingUI = false;
         selectedSubscriptionId = activeSubscriptions.first['id'];
@@ -529,7 +522,6 @@ class HomeViewModel extends ChangeNotifier {
     }
     notifyListeners();
 
-    // --- FIXED: Wrap in a try-finally block to ensure spinners always turn off ---
     try {
       final passDays = FormatUtils.extractActiveDays(currentSelectedTrip!);
       final passPick = FormatUtils.latLngFromMap(currentSelectedTrip!, 'pickup_lat', 'pickup_lng');
@@ -629,7 +621,6 @@ class HomeViewModel extends ChangeNotifier {
     }
     notifyListeners();
 
-    // --- FIXED: Wrap in a try-finally block to ensure spinners always turn off ---
     try {
       final passDays = FormatUtils.extractActiveDays(currentSelectedTrip!);
       final passPick = FormatUtils.latLngFromMap(currentSelectedTrip!, 'pickup_lat', 'pickup_lng');
@@ -899,31 +890,23 @@ class HomeViewModel extends ChangeNotifier {
           if (requestId != _routeFetchId) return;
 
           mapRoutes = [
-            (points: _getCurvedRoute(start, end), color: Colors.indigo),
+            (points: _getCurvedRoute(start, end), color: Colors.indigo, isTransit: false),
           ];
           mapMarkers = [
-            (point: start, color: Colors.green),
-            (point: end, color: Colors.red),
+            (point: start, color: Colors.green, isSmallNode: false),
+            (point: end, color: Colors.red, isSmallNode: false),
           ];
         } else {
           if (selectedSubscriptionId == null || activeSubscriptions.isEmpty) return _clearMap();
           final sub = activeSubscriptions.firstWhere((s) => s['id'] == selectedSubscriptionId, orElse: () => <String, dynamic>{});
           if (sub.isEmpty) return _clearMap();
 
-          start = FormatUtils.latLngFromMap(sub, 'pickup_lat', 'pickup_lng');
-          end = FormatUtils.latLngFromMap(sub, 'dropoff_lat', 'dropoff_lng');
-          if (start.latitude == 0.0 || end.latitude == 0.0) return _clearMap();
-
-          final route = await _getCachedRoute(start, end);
+          final built = await _buildSubscriptionRoute(sub);
           if (requestId != _routeFetchId) return;
+          if (built == null) return _clearMap();
 
-          mapRoutes = [
-            (points: [start, ...route, end], color: Colors.indigo),
-          ];
-          mapMarkers = [
-            (point: start, color: Colors.green),
-            (point: end, color: Colors.red),
-          ];
+          mapRoutes = built.routes;
+          mapMarkers = built.markers;
         }
       } else if (currentUserRole == 'driver') {
         if (showMatchingUI) {
@@ -934,11 +917,11 @@ class HomeViewModel extends ChangeNotifier {
           if (requestId != _routeFetchId) return;
 
           mapRoutes = [
-            (points: _getCurvedRoute(depart, arrival), color: Colors.indigo),
+            (points: _getCurvedRoute(depart, arrival), color: Colors.indigo, isTransit: false),
           ];
           mapMarkers = [
-            (point: depart, color: Colors.blue),
-            (point: arrival, color: Colors.orange),
+            (point: depart, color: Colors.blue, isSmallNode: false),
+            (point: arrival, color: Colors.orange, isSmallNode: false),
           ];
         } else {
           if (selectedSubscriptionId == null || activeSubscriptions.isEmpty) return _clearMap();
@@ -961,15 +944,15 @@ class HomeViewModel extends ChangeNotifier {
           if (requestId != _routeFetchId) return;
 
           mapRoutes = [
-            if (validDepart) (points: [depart, ...segments[0], pickup], color: AppColors.primaryYellow),
-            (points: [pickup, ...segments[1], dropoff], color: Colors.indigo),
-            if (validArrival) (points: [dropoff, ...segments[2], arrival], color: AppColors.primaryYellow),
+            if (validDepart) (points: [depart, ...segments[0], pickup], color: AppColors.primaryYellow, isTransit: false),
+            (points: [pickup, ...segments[1], dropoff], color: Colors.indigo, isTransit: false),
+            if (validArrival) (points: [dropoff, ...segments[2], arrival], color: AppColors.primaryYellow, isTransit: false),
           ];
           mapMarkers = [
-            if (validDepart) (point: depart, color: Colors.blue),
-            (point: pickup, color: Colors.green),
-            (point: dropoff, color: Colors.red),
-            if (validArrival) (point: arrival, color: Colors.orange),
+            if (validDepart) (point: depart, color: Colors.blue, isSmallNode: false),
+            (point: pickup, color: Colors.green, isSmallNode: false),
+            (point: dropoff, color: Colors.red, isSmallNode: false),
+            if (validArrival) (point: arrival, color: Colors.orange, isSmallNode: false),
           ];
         }
       }
@@ -983,37 +966,224 @@ class HomeViewModel extends ChangeNotifier {
     }
   }
 
-  List<Map<String, dynamic>> _mapSubscriptions(List<Map<String, dynamic>> rawSubs, {required bool isForPassenger}) {
-    return rawSubs.map((sub) {
-      final tripKey = isForPassenger ? 'driver_trips' : 'passenger_trips';
-      final myTripKey = isForPassenger ? 'passenger_trips' : 'driver_trips';
-      final defaultName = isForPassenger ? 'Unknown Driver' : 'Unknown Passenger';
-      final trip = sub[tripKey] ?? {};
-      final myTrip = sub[myTripKey] ?? {};
-      final user = trip['users'] ?? {};
-      final driverTrip = isForPassenger ? trip : (sub['driver_trips'] ?? {});
+  // --- BUG FIX: Implement safe > 1500m gap checks for map paths ---
+  Future<({List<({List<LatLng> points, Color color, bool isTransit})> routes, List<({LatLng point, Color color, bool isSmallNode})> markers})?> _buildSubscriptionRoute(
+      Map<String, dynamic> sub,
+      ) async {
+    final legs = (sub['legs'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
+    if (legs.isEmpty) return null;
 
-      return {
-        'id': sub['id'],
-        'trip_name': myTrip['trip_name'] ?? 'My Trip',
-        'passenger_trip_id': sub['passenger_trip_id'],
-        'driver_trip_id': sub['driver_trip_id'],
-        'pickup_lat': sub['pickup_lat'],
-        'pickup_lng': sub['pickup_lng'],
-        'dropoff_lat': sub['dropoff_lat'],
-        'dropoff_lng': sub['dropoff_lng'],
-        'driver_depart_lat': driverTrip['depart_lat'],
-        'driver_depart_lng': driverTrip['depart_lng'],
-        'driver_arrival_lat': driverTrip['arrival_lat'],
-        'driver_arrival_lng': driverTrip['arrival_lng'],
-        'name': user['name'] ?? defaultName,
-        'phone': user['phone'] ?? 'N/A',
-        'imageUrl': user['avatar_url'],
-        'pickup_location': sub['pickup_location'] ?? 'Unknown',
-        'dropoff_location': sub['dropoff_location'] ?? 'Unknown',
-        'pickup_time': sub['pickup_time'] != null ? FormatUtils.formatSqlTimeToUI(sub['pickup_time']) : 'TBD',
-      };
+    final isMultiDriver = legs.length > 1;
+    final routes = <({List<LatLng> points, Color color, bool isTransit})>[];
+    final markers = <({LatLng point, Color color, bool isSmallNode})>[];
+
+    const originColor = Colors.green;
+    const destinationColor = Colors.red;
+    const transferColor = Colors.deepPurple;
+    const transitColor = Colors.teal;
+    const walkColor = Colors.blueGrey;
+    const lastLegColor = Colors.indigo;
+
+    await GtfsService().initStations();
+
+    final passStart = FormatUtils.latLngFromMap(sub, 'pass_pickup_lat', 'pass_pickup_lng');
+    final passEnd = FormatUtils.latLngFromMap(sub, 'pass_dropoff_lat', 'pass_dropoff_lng');
+    final firstLegStart = FormatUtils.latLngFromMap(legs.first, 'pickup_lat', 'pickup_lng');
+    final lastLegEnd = FormatUtils.latLngFromMap(legs.last, 'dropoff_lat', 'dropoff_lng');
+
+    final startGapDist = MatchingUtils.calculateDistance(passStart.latitude, passStart.longitude, firstLegStart.latitude, firstLegStart.longitude);
+    final endGapDist = MatchingUtils.calculateDistance(passEnd.latitude, passEnd.longitude, lastLegEnd.latitude, lastLegEnd.longitude);
+
+    final isMixedRoute = isMultiDriver || startGapDist > 1500 || endGapDist > 1500;
+    final firstLegColor = isMixedRoute ? AppColors.primaryYellow : Colors.indigo;
+
+    // 1. GAP AT START
+    if (startGapDist > 100) {
+      if (startGapDist > 1500) {
+        final boardStation = TransitUtils.findNearestStation(passStart);
+        if (boardStation != null) {
+          final walkRoute = await _getCachedRoute(passStart, boardStation.location);
+          routes.add((points: [passStart, ...walkRoute, boardStation.location], color: walkColor, isTransit: false));
+          routes.add((points: [boardStation.location, firstLegStart], color: transitColor, isTransit: true));
+
+          markers.add((point: passStart, color: originColor, isSmallNode: false));
+          markers.add((point: boardStation.location, color: transferColor, isSmallNode: true));
+          markers.add((point: firstLegStart, color: transferColor, isSmallNode: true));
+        }
+      } else {
+        final walkRoute = await _getCachedRoute(passStart, firstLegStart);
+        routes.add((points: [passStart, ...walkRoute, firstLegStart], color: walkColor, isTransit: false));
+        markers.add((point: passStart, color: originColor, isSmallNode: false));
+        markers.add((point: firstLegStart, color: transferColor, isSmallNode: true));
+      }
+    } else {
+      markers.add((point: firstLegStart, color: originColor, isSmallNode: false));
+    }
+
+    // 2. DRIVER LEGS
+    LatLng? previousEnd;
+    for (int i = 0; i < legs.length; i++) {
+      final legStart = FormatUtils.latLngFromMap(legs[i], 'pickup_lat', 'pickup_lng');
+      final legEnd = FormatUtils.latLngFromMap(legs[i], 'dropoff_lat', 'dropoff_lng');
+
+      if (previousEnd != null && MatchingUtils.calculateDistance(previousEnd.latitude, previousEnd.longitude, legStart.latitude, legStart.longitude) > 100) {
+        routes.add((points: [previousEnd, legStart], color: transitColor, isTransit: true));
+        markers.add((point: legStart, color: transferColor, isSmallNode: true));
+      }
+
+      final route = await _getCachedRoute(legStart, legEnd);
+      routes.add((points: [legStart, ...route, legEnd], color: i == 0 ? firstLegColor : lastLegColor, isTransit: false));
+
+      final isLastLeg = (i == legs.length - 1);
+      if (isLastLeg) {
+        if (endGapDist <= 100) {
+          markers.add((point: legEnd, color: destinationColor, isSmallNode: false));
+        } else {
+          markers.add((point: legEnd, color: transferColor, isSmallNode: true));
+        }
+      } else {
+        markers.add((point: legEnd, color: transferColor, isSmallNode: true));
+      }
+      previousEnd = legEnd;
+    }
+
+    // 3. GAP AT END
+    if (endGapDist > 100 && previousEnd != null) {
+      if (endGapDist > 1500) {
+        final alightStation = TransitUtils.findNearestStation(passEnd);
+        if (alightStation != null) {
+          routes.add((points: [previousEnd, alightStation.location], color: transitColor, isTransit: true));
+          final walkRoute = await _getCachedRoute(alightStation.location, passEnd);
+          routes.add((points: [alightStation.location, ...walkRoute, passEnd], color: walkColor, isTransit: false));
+
+          markers.add((point: alightStation.location, color: transferColor, isSmallNode: true));
+          markers.add((point: passEnd, color: destinationColor, isSmallNode: false));
+        }
+      } else {
+        final walkRoute = await _getCachedRoute(previousEnd, passEnd);
+        routes.add((points: [previousEnd, ...walkRoute, passEnd], color: walkColor, isTransit: false));
+        markers.add((point: passEnd, color: destinationColor, isSmallNode: false));
+      }
+    }
+
+    return (routes: routes, markers: markers);
+  }
+
+  // --- BUG FIX: Add `created_at` sorting so the freshest subscription is rendered on top ---
+  List<Map<String, dynamic>> _mapSubscriptions(List<Map<String, dynamic>> rawSubs, {required bool isForPassenger}) {
+    final legs = rawSubs.map((sub) => _mapSubscriptionLeg(sub, isForPassenger: isForPassenger)).toList();
+
+    if (!isForPassenger) {
+      final sortedDriverLegs = legs.map((leg) => _wrapSubscriptionCard([leg])).toList();
+      sortedDriverLegs.sort((a, b) {
+        final dateA = DateTime.tryParse(a['created_at'] ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
+        final dateB = DateTime.tryParse(b['created_at'] ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
+        return dateB.compareTo(dateA);
+      });
+      return sortedDriverLegs;
+    }
+
+    final Map<String, List<Map<String, dynamic>>> grouped = {};
+    for (final leg in legs) {
+      final key = (leg['passenger_trip_id'] ?? leg['sub_id']).toString();
+      grouped.putIfAbsent(key, () => []).add(leg);
+    }
+
+    final result = grouped.values.map((groupLegs) {
+      groupLegs.sort((a, b) => (a['pickup_time_minutes'] as int).compareTo(b['pickup_time_minutes'] as int));
+      return _wrapSubscriptionCard(groupLegs);
     }).toList();
+
+    result.sort((a, b) {
+      final dateA = DateTime.tryParse(a['created_at'] ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final dateB = DateTime.tryParse(b['created_at'] ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
+      return dateB.compareTo(dateA); // Descending (newest first)
+    });
+
+    return result;
+  }
+
+  Map<String, dynamic> _mapSubscriptionLeg(Map<String, dynamic> sub, {required bool isForPassenger}) {
+    final tripKey = isForPassenger ? 'driver_trips' : 'passenger_trips';
+    final myTripKey = isForPassenger ? 'passenger_trips' : 'driver_trips';
+    final defaultName = isForPassenger ? 'Unknown Driver' : 'Unknown Passenger';
+    final trip = sub[tripKey] ?? {};
+    final myTrip = sub[myTripKey] ?? {};
+    final user = trip['users'] ?? {};
+    final driverTrip = isForPassenger ? trip : (sub['driver_trips'] ?? {});
+
+    return {
+      'sub_id': sub['id'],
+      'created_at': sub['created_at'], // Added to fuel descending sort
+      'trip_name': myTrip['trip_name'] ?? 'My Trip',
+      'passenger_trip_id': sub['passenger_trip_id'],
+      'driver_trip_id': sub['driver_trip_id'],
+      'pickup_lat': sub['pickup_lat'],
+      'pickup_lng': sub['pickup_lng'],
+      'dropoff_lat': sub['dropoff_lat'],
+      'dropoff_lng': sub['dropoff_lng'],
+      'pass_pickup_lat': myTrip['pickup_lat'],
+      'pass_pickup_lng': myTrip['pickup_lng'],
+      'pass_dropoff_lat': myTrip['dropoff_lat'],
+      'pass_dropoff_lng': myTrip['dropoff_lng'],
+      'driver_depart_lat': driverTrip['depart_lat'],
+      'driver_depart_lng': driverTrip['depart_lng'],
+      'driver_arrival_lat': driverTrip['arrival_lat'],
+      'driver_arrival_lng': driverTrip['arrival_lng'],
+      'name': user['name'] ?? defaultName,
+      'phone': user['phone'] ?? 'N/A',
+      'imageUrl': user['avatar_url'],
+      'pickup_location': sub['pickup_location'] ?? 'Unknown',
+      'dropoff_location': sub['dropoff_location'] ?? 'Unknown',
+      'pickup_time': sub['pickup_time'] != null ? FormatUtils.formatSqlTimeToUI(sub['pickup_time']) : 'TBD',
+      'pickup_time_minutes': _safeSqlTimeToMinutes(sub['pickup_time']),
+    };
+  }
+
+  int _safeSqlTimeToMinutes(dynamic sqlTime) {
+    if (sqlTime == null) return 1 << 30; // unknown time sorts last
+    try {
+      return FormatUtils.sqlTimeToMinutes(sqlTime);
+    } catch (_) {
+      return 1 << 30;
+    }
+  }
+
+  Map<String, dynamic> _wrapSubscriptionCard(List<Map<String, dynamic>> legs) {
+    final first = legs.first;
+    final last = legs.last;
+    final isMixed = legs.length > 1;
+
+    return {
+      'id': isMixed ? first['passenger_trip_id'].toString() : first['sub_id'],
+      'created_at': first['created_at'], // Bubble up sort logic
+      'sub_ids': legs.map((l) => l['sub_id']).toList(),
+      'passenger_trip_id': first['passenger_trip_id'],
+      'trip_name': first['trip_name'],
+      'is_mixed': isMixed,
+      'pickup_location': first['pickup_location'],
+      'dropoff_location': last['dropoff_location'],
+      'pickup_time': first['pickup_time'],
+      'pass_pickup_lat': first['pass_pickup_lat'],
+      'pass_pickup_lng': first['pass_pickup_lng'],
+      'pass_dropoff_lat': first['pass_dropoff_lat'],
+      'pass_dropoff_lng': first['pass_dropoff_lng'],
+      'legs': legs,
+      if (!isMixed) ...{
+        'driver_trip_id': first['driver_trip_id'],
+        'pickup_lat': first['pickup_lat'],
+        'pickup_lng': first['pickup_lng'],
+        'dropoff_lat': first['dropoff_lat'],
+        'dropoff_lng': first['dropoff_lng'],
+        'driver_depart_lat': first['driver_depart_lat'],
+        'driver_depart_lng': first['driver_depart_lng'],
+        'driver_arrival_lat': first['driver_arrival_lat'],
+        'driver_arrival_lng': first['driver_arrival_lng'],
+        'name': first['name'],
+        'phone': first['phone'],
+        'imageUrl': first['imageUrl'],
+      },
+    };
   }
 
   List<LatLng> _getCurvedRoute(LatLng start, LatLng end, {int segments = 60}) {
@@ -1037,7 +1207,6 @@ class HomeViewModel extends ChangeNotifier {
 
   void _validateCurrentSelectedTrip() {
     if (availableTrips.isNotEmpty) {
-      // If the current selected trip is null or no longer exists in the new list, reset it to the first available trip
       if (currentSelectedTrip == null || !availableTrips.any((t) => t['id'] == currentSelectedTrip!['id'])) {
         currentSelectedTrip = availableTrips.first;
       }
@@ -1047,18 +1216,15 @@ class HomeViewModel extends ChangeNotifier {
   }
 
   Future<void> refreshHome() async {
-    // 1. Force the UI back to the Active Subscriptions view
     showMatchingUI = false;
-    selectedSubscriptionId = null; // Forces it to select the newly active subscription
-    _matchingUiEpoch++; // Lock it so background fetches don't accidentally override this
+    selectedSubscriptionId = null;
+    _matchingUiEpoch++;
 
-    // 2. Clear old matching results so they don't flash
     _hasFoundDirect = false;
     _hasFoundMixed = false;
     matchedDrivers.clear();
     mixedMatchedRoutes.clear();
 
-    // 3. Fetch the fresh data
     await fetchCurrentUser();
   }
 }
