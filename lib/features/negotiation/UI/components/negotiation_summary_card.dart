@@ -9,8 +9,9 @@ class NegotiationSummaryCard extends StatelessWidget {
   final bool isDriver;
   final bool isReadOnly;
   final bool isRejected;
+  final bool isOffline;
   final VoidCallback onReject;
-  final VoidCallback? onCancelRequest; // Add this callback
+  final VoidCallback onCancelRequest; // Added for pending passenger cancellation
   final VoidCallback onProceedToSummary;
 
   // Lifecycle Callbacks
@@ -25,8 +26,9 @@ class NegotiationSummaryCard extends StatelessWidget {
     required this.isDriver,
     this.isReadOnly = false,
     this.isRejected = false,
+    this.isOffline = false,
     required this.onReject,
-    this.onCancelRequest, // Add this
+    required this.onCancelRequest, // Added to constructor
     required this.onProceedToSummary,
     this.onRenew,
     this.onRenegotiate,
@@ -37,12 +39,16 @@ class NegotiationSummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final endDate = DateTime.tryParse(request.subscriptionEndDate.value) ?? DateTime.now();
     final now = DateTime.now();
+    // Normalize to midnight for accurate day difference
     final endDateOnly = DateTime(endDate.year, endDate.month, endDate.day);
     final nowOnly = DateTime(now.year, now.month, now.day);
 
     final isExpired = nowOnly.isAfter(endDateOnly);
     final daysSinceExpiry = isExpired ? nowOnly.difference(endDateOnly).inDays : 0;
-    final canStillExtend = isExpired && daysSinceExpiry <= 7;
+
+    // Updated to < 7 to prevent the UI from showing "0 days left" while active.
+    // This perfectly aligns the 7-day window.
+    final canStillExtend = isExpired && daysSinceExpiry < 7;
 
     return Container(
       width: double.infinity,
@@ -112,38 +118,40 @@ class NegotiationSummaryCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 16),
 
-                    ElevatedButton.icon(
-                      icon: const Icon(Icons.autorenew, color: AppColors.black),
-                      label: const Text('Continue Subscription', style: TextStyle(fontWeight: FontWeight.bold)),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primaryYellow,
-                        foregroundColor: AppColors.black,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
-                        elevation: 0,
+                    if (!isOffline) ...[
+                      ElevatedButton.icon(
+                        icon: const Icon(Icons.autorenew, color: AppColors.black),
+                        label: const Text('Continue Subscription', style: TextStyle(fontWeight: FontWeight.bold)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primaryYellow,
+                          foregroundColor: AppColors.black,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
+                          elevation: 0,
+                        ),
+                        onPressed: onRenew,
                       ),
-                      onPressed: onRenew,
-                    ),
-                    const SizedBox(height: 10),
+                      const SizedBox(height: 10),
 
-                    OutlinedButton.icon(
-                      icon: const Icon(Icons.edit_note, color: AppColors.black),
-                      label: const Text('Edit / Propose New Terms'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppColors.black,
-                        side: const BorderSide(color: AppColors.greyBorder),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
+                      OutlinedButton.icon(
+                        icon: const Icon(Icons.edit_note, color: AppColors.black),
+                        label: const Text('Edit / Propose New Terms'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppColors.black,
+                          side: const BorderSide(color: AppColors.greyBorder),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
+                        ),
+                        onPressed: onRenegotiate,
                       ),
-                      onPressed: onRenegotiate,
-                    ),
-                    const SizedBox(height: 6),
+                      const SizedBox(height: 6),
 
-                    TextButton(
-                      onPressed: onCancelSubscription,
-                      style: TextButton.styleFrom(foregroundColor: Colors.red),
-                      child: const Text('Cancel & Refund Deposit', style: TextStyle(fontWeight: FontWeight.bold)),
-                    ),
+                      TextButton(
+                        onPressed: onCancelSubscription,
+                        style: TextButton.styleFrom(foregroundColor: Colors.red),
+                        child: const Text('Cancel & Refund Deposit', style: TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                    ]
                   ] else if (isExpired) ...[
                     const Row(
                       children: [
@@ -185,25 +193,28 @@ class NegotiationSummaryCard extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 16),
-                  if (!isDriver)
-                    BaseButton(
-                      text: 'View Tumpang Summary',
-                      onPressed: onProceedToSummary,
-                    )
-                  else
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade100,
-                        borderRadius: BorderRadius.circular(8),
+
+                  if (!isOffline) ...[
+                    if (!isDriver)
+                      BaseButton(
+                        text: 'View Tumpang Summary',
+                        onPressed: onProceedToSummary,
+                      )
+                    else
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Text(
+                          'Waiting for the passenger to pay the deposit.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.grey, fontSize: 13),
+                        ),
                       ),
-                      child: const Text(
-                        'Waiting for the passenger to pay the deposit.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: Colors.grey, fontSize: 13),
-                      ),
-                    ),
+                  ]
                 ] else ...[
                   Container(
                     width: double.infinity,
@@ -221,9 +232,9 @@ class NegotiationSummaryCard extends StatelessWidget {
                   const SizedBox(height: 12),
                 ],
 
-                // Universally render Cancel/Reject button before payment is finalized
-                if (!isReadOnly && !isRejected) ...[
-                  const SizedBox(height: 12),
+                // Universally render Cancel (Passenger) or Reject (Driver) for pending requests
+                if (!isReadOnly && !isRejected && !isOffline) ...[
+                  const SizedBox(height: 4),
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton(
@@ -235,8 +246,8 @@ class NegotiationSummaryCard extends StatelessWidget {
                       ),
                       onPressed: isDriver ? onReject : onCancelRequest,
                       child: Text(
-                          isDriver ? 'Reject Request' : 'Cancel Request',
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)
+                        isDriver ? 'Reject Request' : 'Cancel Request',
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                       ),
                     ),
                   ),

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:nak_tumpang/features/negotiation/UI/screens/negotiation_screen.dart';
+import 'package:nak_tumpang/features/negotiation/UI/screens/extend_negotiation_screen.dart';
 import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/components/base_button.dart';
@@ -113,40 +113,14 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
   }
 
   Future<void> _handleExtend(BuildContext context) async {
-    final vm = context.read<SubscriptionViewModel>();
-    final currentEndDate = DateTime.tryParse(widget.subscription['subscription_end_date'] ?? '') ?? DateTime.now();
-
-    final firstValidDate = currentEndDate.add(const Duration(days: 1));
-    final defaultNewEndDate = firstValidDate.add(const Duration(days: 30));
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => const Center(child: CircularProgressIndicator(color: AppColors.primaryYellow)),
-    );
-
-    final String? newRequestId = await vm.createExtensionRequest(
-      oldSubscription: widget.subscription,
-      newStartDate: firstValidDate,
-      newEndDate: defaultNewEndDate,
-    );
-
-    if (context.mounted) Navigator.pop(context);
-
-    if (newRequestId != null && context.mounted) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => NegotiationScreen(
-            requestId: newRequestId,
-          ),
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ExtendNegotiationScreen(
+          subscriptionId: widget.subscription['id'],
         ),
-      );
-    } else if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to start extension request.'), backgroundColor: Colors.red),
-      );
-    }
+      ),
+    );
   }
 
   Future<void> _confirmCancel(BuildContext context) async {

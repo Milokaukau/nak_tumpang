@@ -23,7 +23,7 @@ void main() async {
     throw StateError('SUPABASE_URL is missing from .env');
   }
   if (supabasePublishableKey == null || supabasePublishableKey.isEmpty) {
-    throw StateError('SUPABASE_ANON_KEY is missing from .env.');
+    throw StateError('SUPABASE_PUBLISHABLE_KEY is missing from .env.');
   }
   if (stripePublishableKey == null || stripePublishableKey.isEmpty) {
     throw StateError('STRIPE_PUBLISHABLE_KEY is missing from .env.');

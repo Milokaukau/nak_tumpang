@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
+import 'package:geolocator/geolocator.dart'; // Added geolocator
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 
 /// Full-screen map, in two modes:
@@ -47,6 +48,8 @@ class _MapScreenState extends State<MapScreen> {
   bool _isSearching = false;
   Timer? _debounce;
   int _searchToken = 0;
+
+  bool _isLocating = false; // Added to track GPS fetch state
 
   @override
   void initState() {
@@ -93,6 +96,52 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
+  // Handle fetching current location via Geolocator
+  Future<void> _getCurrentLocation() async {
+    setState(() => _isLocating = true);
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        throw Exception('Location services are disabled. Please enable GPS.');
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          throw Exception('Location permissions are denied.');
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        throw Exception('Location permissions are permanently denied.');
+      }
+
+      final position = await Geolocator.getCurrentPosition();
+      final point = LatLng(position.latitude, position.longitude);
+
+      if (!mounted) return;
+      setState(() {
+        _picked = point;
+        _searchResults = [];
+        _searchController.clear();
+      });
+
+      _mapController.move(point, 16.0);
+      await _reverseGeocode(point);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString().replaceAll('Exception: ', '')),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isLocating = false);
+    }
+  }
+
   void _onSearchChanged(String query) {
     setState(() {}); // update the clear/loading icon immediately
     _debounce?.cancel();
@@ -109,8 +158,9 @@ class _MapScreenState extends State<MapScreen> {
     final int myToken = ++_searchToken;
     setState(() => _isSearching = true);
     try {
+      // Added &countrycodes=my to lock the search results entirely to Malaysia
       final uri = Uri.parse(
-        'https://nominatim.openstreetmap.org/search?format=json&q=${Uri.encodeQueryComponent(query)}&limit=6&addressdetails=0',
+        'https://nominatim.openstreetmap.org/search?format=json&q=${Uri.encodeQueryComponent(query)}&limit=6&addressdetails=0&countrycodes=my',
       );
       final response = await http.get(uri, headers: {'User-Agent': 'com.example.nak_tumpang'});
       if (myToken != _searchToken) return; // a newer search superseded this one
@@ -133,13 +183,27 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
+  // Handle keyboard "Enter/Search" submission
+  Future<void> _onSearchSubmitted(String query) async {
+    await _searchPlace(query);
+    // If the user presses enter instead of tapping the list, auto-select the best result
+    if (_searchResults.isNotEmpty) {
+      _selectSearchResult(_searchResults.first);
+    }
+  }
+
   void _selectSearchResult(Map<String, dynamic> result) {
     final point = LatLng(result['lat'], result['lon']);
+    final fullName = result['display_name'].toString();
+
+    // Extract just the specific POI name (the first segment) for cleaner text fields
+    final placeName = fullName.split(',').first.trim();
+
     setState(() {
       _picked = point;
-      _nameController.text = _shortenAddress(result['display_name']);
+      _nameController.text = placeName;
+      _searchController.text = placeName;
       _searchResults = [];
-      _searchController.text = result['display_name'];
     });
     _mapController.move(point, 16.0);
   }
@@ -148,8 +212,40 @@ class _MapScreenState extends State<MapScreen> {
     setState(() {
       _picked = point;
       _searchResults = [];
+      _searchController.clear(); // Clear the search bar if they tap elsewhere
     });
     _reverseGeocode(point);
+  }
+
+  // Highlights the matching part of the search string
+  Widget _highlightSearchText(String text, String query) {
+    if (query.trim().isEmpty) {
+      return Text(text, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14, color: AppColors.black));
+    }
+
+    final lowerText = text.toLowerCase();
+    final lowerQuery = query.toLowerCase();
+    final matchIndex = lowerText.indexOf(lowerQuery);
+
+    if (matchIndex == -1) {
+      return Text(text, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14, color: AppColors.black));
+    }
+
+    return RichText(
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+      text: TextSpan(
+        style: const TextStyle(fontSize: 14, color: AppColors.black),
+        children: [
+          TextSpan(text: text.substring(0, matchIndex)),
+          TextSpan(
+            text: text.substring(matchIndex, matchIndex + query.length),
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          TextSpan(text: text.substring(matchIndex + query.length)),
+        ],
+      ),
+    );
   }
 
   @override
@@ -232,13 +328,15 @@ class _MapScreenState extends State<MapScreen> {
                 child: Column(
                   children: [
                     Card(
+                      elevation: 4,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                       child: TextField(
                         controller: _searchController,
                         decoration: InputDecoration(
                           hintText: 'Search store or street name',
                           border: InputBorder.none,
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                          prefixIcon: const Icon(Icons.search, size: 20),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                          prefixIcon: const Icon(Icons.search, size: 22, color: Colors.black54),
                           suffixIcon: _isSearching
                               ? const Padding(
                             padding: EdgeInsets.all(12.0),
@@ -246,7 +344,7 @@ class _MapScreenState extends State<MapScreen> {
                           )
                               : (_searchController.text.isNotEmpty
                               ? IconButton(
-                            icon: const Icon(Icons.close, size: 18),
+                            icon: const Icon(Icons.close, size: 20, color: Colors.black54),
                             onPressed: () {
                               _searchController.clear();
                               setState(() => _searchResults = []);
@@ -255,28 +353,29 @@ class _MapScreenState extends State<MapScreen> {
                               : null),
                         ),
                         onChanged: _onSearchChanged,
-                        onSubmitted: _searchPlace,
+                        onSubmitted: _onSearchSubmitted,
                       ),
                     ),
                     if (_searchResults.isNotEmpty)
                       Card(
                         margin: const EdgeInsets.only(top: 4),
+                        elevation: 4,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                         child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxHeight: 220),
+                          constraints: const BoxConstraints(maxHeight: 260),
                           child: ListView.separated(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
                             shrinkWrap: true,
                             itemCount: _searchResults.length,
-                            separatorBuilder: (_, __) => const Divider(height: 1),
+                            separatorBuilder: (_, __) => const Divider(height: 1, color: Colors.black12),
                             itemBuilder: (context, index) {
                               final result = _searchResults[index];
                               return ListTile(
                                 dense: true,
-                                leading: const Icon(Icons.location_on, size: 18, color: Colors.red),
-                                title: Text(
-                                  result['display_name'],
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontSize: 13),
+                                leading: const Icon(Icons.location_on_outlined, size: 22, color: Colors.black54),
+                                title: _highlightSearchText(
+                                  result['display_name'].toString(),
+                                  _searchController.text,
                                 ),
                                 onTap: () => _selectSearchResult(result),
                               );
@@ -285,6 +384,24 @@ class _MapScreenState extends State<MapScreen> {
                         ),
                       ),
                   ],
+                ),
+              ),
+              // Floating Action Button for 'Current Location'
+              Positioned(
+                bottom: 16,
+                right: 16,
+                child: FloatingActionButton.small(
+                  heroTag: 'my_location_btn',
+                  backgroundColor: Colors.white,
+                  foregroundColor: AppColors.black,
+                  onPressed: _isLocating ? null : _getCurrentLocation,
+                  child: _isLocating
+                      ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                      : const Icon(Icons.my_location),
                 ),
               ),
             ],

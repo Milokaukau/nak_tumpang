@@ -323,61 +323,6 @@ class SubscriptionSupabaseService {
     }
   }
 
-  Future<String?> createExtensionRequest({
-    required Map<String, dynamic> oldSubscription,
-    required DateTime newStartDate,
-    required DateTime newEndDate,
-  }) async {
-    final supabase = Supabase.instance.client;
-
-    try {
-      // Generate a unique ID since the schema doesn't have a default value
-      final String newRequestId = 'REQ-${DateTime.now().millisecondsSinceEpoch}';
-
-      // Insert valid payload matching the EXACT schema of tumpang_request
-      final response = await supabase.from('tumpang_request').insert({
-        'id': newRequestId,
-        'passenger_trip_id': oldSubscription['passenger_trip_id'],
-        'driver_trip_id': oldSubscription['driver_trip_id'],
-
-        // Pickups
-        'pickup_name': oldSubscription['pickup_location'],
-        'pickup_lat': oldSubscription['pickup_lat'],
-        'pickup_lng': oldSubscription['pickup_lng'],
-
-        // Dropoffs
-        'dropoff_name': oldSubscription['dropoff_location'],
-        'dropoff_lat': oldSubscription['dropoff_lat'],
-        'dropoff_lng': oldSubscription['dropoff_lng'],
-
-        // Time & Dates
-        'pickup_time': oldSubscription['pickup_time'],
-        'sub_start_date': newStartDate.toIso8601String().split('T')[0],
-        'sub_end_date': newEndDate.toIso8601String().split('T')[0],
-
-        // Extension Data
-        'status': 'pending',
-        'is_extension': true,
-        'extends_subscription_id': oldSubscription['id'],
-        'extension_type': 'extend',
-
-        // Carry over the existing fee
-        'fee': oldSubscription['fee'],
-      }).select('id').maybeSingle();
-
-      if (response == null) {
-        print('❌ Failed to create request: No ID returned');
-        return null;
-      }
-
-      return response['id'] as String; // Return the new ID
-    } catch (e, stackTrace) {
-      print('❌ Service Extension Insert Error: $e');
-      print(stackTrace);
-      return null;
-    }
-  }
-
   Future<Map<String, dynamic>?> fetchSubscriptionById(String subscriptionId, String role) async {
     try {
       final response = await _supabase
