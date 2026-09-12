@@ -142,14 +142,14 @@ class _AppSidebarState extends State<AppSidebar> {
     // Reactively watch ViewModels if they exist in the Provider tree
     try {
       final negoVm = context.watch<NegotiationViewModel?>();
-      if (negoVm != null) {
+      if (negoVm != null && widget.pendingRequestsCount == null) {
         requestsBadge = negoVm.pendingRequests.length;
       }
     } catch (_) {}
 
     try {
       final payVm = context.watch<PaymentViewModel?>();
-      if (payVm != null) {
+      if (payVm != null && widget.pendingPaymentsCount == null) {
         paymentsBadge = payVm.pendingPayments.length;
       }
     } catch (_) {}
@@ -214,7 +214,7 @@ class _AppSidebarState extends State<AppSidebar> {
 
             _buildMenuItem(
               context,
-              index: 6, // Shifted down due to Rewards
+              index: 6,
               title: 'Sign Out',
               textColor: const Color(0xFFEF4444),
             ),

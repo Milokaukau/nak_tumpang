@@ -603,8 +603,14 @@ class HomePanel extends StatelessWidget {
     final lastDriverLat = FormatUtils.parseDouble(driverLegsData.last['dropoff_lat']);
     final lastDriverLng = FormatUtils.parseDouble(driverLegsData.last['dropoff_lng']);
 
-    final startGapDist = MatchingUtils.calculateDistance(passStart.latitude, passStart.longitude, firstDriverLat, firstDriverLng);
-    final endGapDist = MatchingUtils.calculateDistance(passEnd.latitude, passEnd.longitude, lastDriverLat, lastDriverLng);
+    // Guard missing passenger coordinates before calculating gap distances
+    final startGapDist = (passStart.latitude != 0.0 && passStart.longitude != 0.0)
+        ? MatchingUtils.calculateDistance(passStart.latitude, passStart.longitude, firstDriverLat, firstDriverLng)
+        : 0.0;
+
+    final endGapDist = (passEnd.latitude != 0.0 && passEnd.longitude != 0.0)
+        ? MatchingUtils.calculateDistance(passEnd.latitude, passEnd.longitude, lastDriverLat, lastDriverLng)
+        : 0.0;
 
     if (startGapDist > 100) {
       if (startGapDist > 1500) {

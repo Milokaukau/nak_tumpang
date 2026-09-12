@@ -1188,8 +1188,14 @@ class HomeViewModel extends ChangeNotifier {
     final firstLegStart = FormatUtils.latLngFromMap(legs.first, 'pickup_lat', 'pickup_lng');
     final lastLegEnd = FormatUtils.latLngFromMap(legs.last, 'dropoff_lat', 'dropoff_lng');
 
-    final startGapDist = MatchingUtils.calculateDistance(passStart.latitude, passStart.longitude, firstLegStart.latitude, firstLegStart.longitude);
-    final endGapDist = MatchingUtils.calculateDistance(passEnd.latitude, passEnd.longitude, lastLegEnd.latitude, lastLegEnd.longitude);
+    // Guard missing passenger coordinates before calculating gap distances
+    final startGapDist = (passStart.latitude != 0.0 && passStart.longitude != 0.0)
+        ? MatchingUtils.calculateDistance(passStart.latitude, passStart.longitude, firstLegStart.latitude, firstLegStart.longitude)
+        : 0.0;
+
+    final endGapDist = (passEnd.latitude != 0.0 && passEnd.longitude != 0.0)
+        ? MatchingUtils.calculateDistance(passEnd.latitude, passEnd.longitude, lastLegEnd.latitude, lastLegEnd.longitude)
+        : 0.0;
 
     final isMixedRoute = isMultiDriver || startGapDist > 1500 || endGapDist > 1500;
     final firstLegColor = isMixedRoute ? AppColors.primaryYellow : Colors.indigo;
