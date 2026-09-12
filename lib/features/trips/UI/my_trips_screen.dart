@@ -161,7 +161,8 @@ class _MyTripsScreenState extends State<MyTripsScreen> {
     final startStr = startLocation ?? 'Unknown Origin';
     final endStr = endLocation ?? 'Unknown Destination';
 
-    final isLocked = status == TripStatus.active;
+    // Lock the buttons if the trip is either actively subscribed OR actively negotiating
+    final isLocked = status == TripStatus.active || status == TripStatus.negotiating;
 
     return Container(
       decoration: BoxDecoration(
@@ -209,7 +210,15 @@ class _MyTripsScreenState extends State<MyTripsScreen> {
               Expanded(
                 child: BaseButton(
                   text: 'Edit',
-                  onPressed: isLocked ? null : () {
+                  // Ensure onPressed is always active to trigger the SnackBar
+                  onPressed: () {
+                    if (isLocked) {
+                      final msg = status == TripStatus.active
+                          ? 'Cannot edit a trip that is currently subscribed.'
+                          : 'Cannot edit a trip while a request is negotiating.';
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
+                      return;
+                    }
                     if (NetworkService.isOfflineNotifier.value) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(content: Text('Cannot edit trips while offline.'), backgroundColor: Colors.red),
@@ -233,7 +242,16 @@ class _MyTripsScreenState extends State<MyTripsScreen> {
               Expanded(
                 child: BaseButton(
                   text: 'Remove',
-                  onPressed: isLocked ? null : () => _confirmDelete(context, trip['id']),
+                  onPressed: () {
+                    if (isLocked) {
+                      final msg = status == TripStatus.active
+                          ? 'Cannot remove a trip that is currently subscribed.'
+                          : 'Cannot remove a trip while a request is negotiating.';
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
+                      return;
+                    }
+                    _confirmDelete(context, trip['id']);
+                  },
                   isOutlined: true,
                   height: 40,
                   foregroundColor: isLocked ? Colors.grey[400] : Colors.red,
