@@ -12,6 +12,8 @@ import 'package:nak_tumpang/features/home/UI/components/active_subscription_card
 import 'package:nak_tumpang/features/trips/UI/add_edit_trip_screen.dart';
 import 'package:nak_tumpang/features/negotiation/UI/screens/negotiation_screen.dart';
 import 'package:nak_tumpang/core/utils/url_utils.dart';
+// --- NEW IMPORT ---
+import 'package:nak_tumpang/features/negotiation/view_models/negotiation_view_model.dart';
 
 class HomePanel extends StatelessWidget {
   const HomePanel({super.key});
@@ -169,7 +171,6 @@ class HomePanel extends StatelessWidget {
       else if (viewModel.currentSelectedTrip == null)
         _buildEmptyStatePrompt(context, viewModel)
       else if (viewModel.selectedFilter == 'Direct') ...[
-          // The spinner ONLY applies to the driver search results now
           if (viewModel.isDirectLoading)
             const Center(child: CircularProgressIndicator(color: AppColors.primaryYellow))
           else if (viewModel.matchedDrivers.isEmpty)
@@ -205,7 +206,16 @@ class HomePanel extends StatelessWidget {
                         if (requestId != null) {
                           viewModel.markDriverRequestedGlobally([driver['trip_id']]);
                           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Request sent!'), backgroundColor: Colors.green));
-                          Navigator.push(context, MaterialPageRoute(builder: (_) => NegotiationScreen(requestId: requestId)));
+
+                          // --- FIXED: Force the NegotiationViewModel to refresh immediately ---
+                          try {
+                            context.read<NegotiationViewModel>().refreshRequests();
+                          } catch (_) {}
+
+                          await Navigator.push(context, MaterialPageRoute(builder: (_) => NegotiationScreen(requestId: requestId)));
+                          if (context.mounted) {
+                            await viewModel.refreshHome();
+                          }
                         } else {
                           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to send request.'), backgroundColor: Colors.red));
                         }
@@ -239,7 +249,6 @@ class HomePanel extends StatelessWidget {
                 ),
             ],
         ] else ...[
-          // The spinner ONLY applies to the mixed search results now
           if (viewModel.isMixedLoading)
             const Center(child: CircularProgressIndicator(color: AppColors.primaryYellow))
           else if (viewModel.mixedMatchedRoutes.isEmpty)
@@ -288,11 +297,6 @@ class HomePanel extends StatelessWidget {
                         final selectedTrip = viewModel.currentSelectedTrip;
                         if (selectedTrip == null) return;
 
-                        // A mixed route always has at least one driver leg
-                        // (routes where both legs are Walk are filtered out
-                        // in _findMixedRoutes), but never assume both legs
-                        // exist -- request each independently, the same way
-                        // the direct flow requests a single driver.
                         final driverATripId = route['driver_a_trip_id'] as String?;
                         final driverBTripId = route['driver_b_trip_id'] as String?;
                         final hasDriverA = route['first_mile_type'] == 'Driver' && driverATripId != null;
@@ -353,6 +357,11 @@ class HomePanel extends StatelessWidget {
                           return;
                         }
 
+                        // --- FIXED: Force the NegotiationViewModel to refresh immediately ---
+                        try {
+                          context.read<NegotiationViewModel>().refreshRequests();
+                        } catch (_) {}
+
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
                             content: Text(
@@ -363,7 +372,10 @@ class HomePanel extends StatelessWidget {
                             backgroundColor: anyFailed ? Colors.orange : Colors.green,
                           ),
                         );
-                        Navigator.push(context, MaterialPageRoute(builder: (_) => NegotiationScreen(requestId: firstRequestId!)));
+                        await Navigator.push(context, MaterialPageRoute(builder: (_) => NegotiationScreen(requestId: firstRequestId!)));
+                        if (context.mounted) {
+                          await viewModel.refreshHome();
+                        }
                       },
                     ),
                     if (index != viewModel.mixedMatchedRoutes.length - 1)

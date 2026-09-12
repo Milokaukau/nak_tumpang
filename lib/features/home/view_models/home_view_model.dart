@@ -41,6 +41,7 @@ class HomeViewModel extends ChangeNotifier {
   int _fetchId = 0;
   int _routeFetchId = 0;
   int _userFetchId = 0;
+  String? _lastLoadedUserId;
 
   int currentDirectLimit = 5;
   int currentMixedLimit = 5;
@@ -261,6 +262,19 @@ class HomeViewModel extends ChangeNotifier {
 
   Future<void> fetchCurrentUser() async {
     final requestId = ++_userFetchId;
+
+    final authUser = _auth.currentUser;
+
+    // --- FIXED: a different auth user than the one we last loaded for means
+    // this is an account switch, not just a re-fetch/reconnect for the same
+    // user. Wipe every piece of per-user state (matches, subscriptions,
+    // selected trip/subscription, map, etc.) so nothing from the previous
+    // user lingers on screen while the new user's data loads. ---
+    if (authUser != null && _lastLoadedUserId != null && _lastLoadedUserId != authUser.id) {
+      _resetForUserSwitch();
+    }
+    _lastLoadedUserId = authUser?.id;
+
     final matchingUiEpochAtStart = _matchingUiEpoch;
 
     if (_isFirstLoad) {
@@ -268,7 +282,6 @@ class HomeViewModel extends ChangeNotifier {
       notifyListeners();
     }
 
-    final authUser = _auth.currentUser;
     if (authUser == null) {
       if (requestId == _userFetchId) {
         isScreenLoading = false;
@@ -330,6 +343,46 @@ class HomeViewModel extends ChangeNotifier {
     }
   }
 
+  void _resetForUserSwitch() {
+    // Re-run the same path as a genuine first load (including the cached
+    // read in fetchCurrentUser), since the cache is keyed per-user.
+    _isFirstLoad = true;
+
+    currentUser = null;
+    currentUserRole = 'passenger';
+    currentSelectedTrip = null;
+    availableTrips = [];
+    activeSubscriptions = [];
+    selectedSubscriptionId = null;
+    showMatchingUI = false;
+    selectedFilter = 'Direct';
+
+    matchedDrivers.clear();
+    mixedMatchedRoutes.clear();
+    _hasFoundDirect = false;
+    _hasFoundMixed = false;
+
+    currentDirectLimit = 5;
+    currentMixedLimit = 5;
+    isDirectLoading = false;
+    isMixedLoading = false;
+    isDirectLoadingMore = false;
+    isMixedLoadingMore = false;
+    hasMoreDirect = false;
+    hasMoreMixed = false;
+
+    mapRoutes = [];
+    mapMarkers = [];
+    _routeCache.clear();
+
+    // Bump so any in-flight fetches from the previous user are ignored
+    // when they resolve.
+    _fetchId++;
+    _routeFetchId++;
+
+    notifyListeners();
+  }
+
   Future<void> _loadDriverData(String userId, int requestId, int matchingUiEpochAtStart) async {
     List<Map<String, dynamic>> rawSubs = [];
     List<Map<String, dynamic>> allDriverTrips = [];
@@ -360,16 +413,20 @@ class HomeViewModel extends ChangeNotifier {
 
     if (requestId != _userFetchId) return;
 
+    final previousSubCount = activeSubscriptions.length;
     activeSubscriptions = _mapSubscriptions(rawSubs, isForPassenger: false);
     final subbedTripIds = activeSubscriptions.map((s) => s['driver_trip_id']).toSet();
     availableTrips = myTrips.where((t) => !subbedTripIds.contains(t['id'])).toList();
 
-    // --- FIXED: Use the new validation helper ---
     _validateCurrentSelectedTrip();
 
     if (activeSubscriptions.isNotEmpty) {
       selectedSubscriptionId ??= activeSubscriptions.first['id'];
-      if (_isFirstLoad && _matchingUiEpoch == matchingUiEpochAtStart) showMatchingUI = false;
+      // If a new subscription was created or it's first load, force subscriptions view
+      if (activeSubscriptions.length > previousSubCount || (_isFirstLoad && _matchingUiEpoch == matchingUiEpochAtStart)) {
+        showMatchingUI = false;
+        selectedSubscriptionId = activeSubscriptions.first['id'];
+      }
     } else {
       showMatchingUI = true;
     }
@@ -403,16 +460,20 @@ class HomeViewModel extends ChangeNotifier {
 
     if (requestId != _userFetchId) return;
 
+    final previousSubCount = activeSubscriptions.length;
     activeSubscriptions = _mapSubscriptions(rawSubs, isForPassenger: true);
     final subbedTripIds = activeSubscriptions.map((s) => s['passenger_trip_id']).toSet();
     availableTrips = trips.where((t) => !subbedTripIds.contains(t['id'])).toList();
 
-    // --- FIXED: Use the new validation helper ---
     _validateCurrentSelectedTrip();
 
     if (activeSubscriptions.isNotEmpty) {
       selectedSubscriptionId ??= activeSubscriptions.first['id'];
-      if (_isFirstLoad && _matchingUiEpoch == matchingUiEpochAtStart) showMatchingUI = false;
+      // If a new subscription was created or it's first load, force subscriptions view
+      if (activeSubscriptions.length > previousSubCount || (_isFirstLoad && _matchingUiEpoch == matchingUiEpochAtStart)) {
+        showMatchingUI = false;
+        selectedSubscriptionId = activeSubscriptions.first['id'];
+      }
     } else {
       showMatchingUI = true;
     }
@@ -983,5 +1044,21 @@ class HomeViewModel extends ChangeNotifier {
     } else {
       currentSelectedTrip = null;
     }
+  }
+
+  Future<void> refreshHome() async {
+    // 1. Force the UI back to the Active Subscriptions view
+    showMatchingUI = false;
+    selectedSubscriptionId = null; // Forces it to select the newly active subscription
+    _matchingUiEpoch++; // Lock it so background fetches don't accidentally override this
+
+    // 2. Clear old matching results so they don't flash
+    _hasFoundDirect = false;
+    _hasFoundMixed = false;
+    matchedDrivers.clear();
+    mixedMatchedRoutes.clear();
+
+    // 3. Fetch the fresh data
+    await fetchCurrentUser();
   }
 }

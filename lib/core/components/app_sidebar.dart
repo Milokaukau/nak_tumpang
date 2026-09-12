@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
@@ -67,6 +68,16 @@ class _AppSidebarState extends State<AppSidebar> {
   void initState() {
     super.initState();
     _loadFallbackCounts();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      try {
+        context.read<NegotiationViewModel?>()?.refreshRequests();
+      } catch (_) {}
+      try {
+        context.read<PaymentViewModel?>()?.fetchAllPayments();
+      } catch (_) {}
+    });
   }
 
   Future<void> _loadFallbackCounts() async {
@@ -210,7 +221,10 @@ class _AppSidebarState extends State<AppSidebar> {
     );
   }
 
-  void _handleItemTap(BuildContext context, int index) {
+  void _handleItemTap(BuildContext context, int index) async {
+    // --- FIXED: Capture the ViewModel BEFORE the drawer closes and destroys the context ---
+    final homeViewModel = context.read<HomeViewModel>();
+
     Navigator.pop(context);
 
     if (index == widget.selectedIndex) return;
@@ -245,10 +259,17 @@ class _AppSidebarState extends State<AppSidebar> {
         return;
     }
 
-    Navigator.push(
+    await Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => nextScreen),
     );
+
+    // --- FIXED: Safely refresh the Home screen using the captured ViewModel ---
+    try {
+      await homeViewModel.refreshHome();
+    } catch (e) {
+      debugPrint('Sidebar refresh error: $e');
+    }
   }
 
   Widget _buildMenuItem(
