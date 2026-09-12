@@ -138,6 +138,7 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
 
       await _supabase.from('tumpang_request').update({
         'status': 'completed',
+        'subscription_id': subId,
       }).eq('id', request.id);
 
       if (!mounted) return;

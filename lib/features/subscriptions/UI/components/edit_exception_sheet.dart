@@ -8,6 +8,7 @@ import 'package:nak_tumpang/features/subscriptions/view_models/subscription_view
 class EditExceptionSheet extends StatefulWidget {
   final Map<String, dynamic> exception;
   final VoidCallback onChanged;
+  final String otherUserId; // 👈 ADDED THIS
   final DateTime? minDate;
   final DateTime? maxDate;
 
@@ -15,6 +16,7 @@ class EditExceptionSheet extends StatefulWidget {
     super.key,
     required this.exception,
     required this.onChanged,
+    required this.otherUserId, // 👈 ADDED THIS
     this.minDate,
     this.maxDate,
   });
@@ -60,11 +62,14 @@ class _EditExceptionSheetState extends State<EditExceptionSheet> {
 
     final reasonText = reason == 'Others' ? customReasonController.text.trim() : reason!;
     final vm = context.read<SubscriptionViewModel>();
+
     final success = await vm.updateException(
       exceptionId: widget.exception['id'],
       startDate: startDate!,
       endDate: endDate!,
       reason: reasonText,
+      otherUserId: widget.otherUserId,
+      subscriptionId: widget.exception['tumpang_subscription_id']?.toString(),
     );
 
     setState(() => isSubmitting = false);

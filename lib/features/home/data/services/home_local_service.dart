@@ -7,7 +7,12 @@ class HomeLocalService {
   Future<String?> getUserRole(String userId) async {
     final db = await _dbService.database;
     final results = await db.query('users', columns: ['role'], where: 'id = ?', whereArgs: [userId]);
-    if (results.isNotEmpty) return results.first['role'] as String;
+
+    if (results.isNotEmpty) {
+      // Cast as String? to prevent null subtype errors
+      return results.first['role'] as String?;
+    }
+
     return null;
   }
 
@@ -38,37 +43,51 @@ class HomeLocalService {
         'status': 'active',
       }, conflictAlgorithm: ConflictAlgorithm.ignore);
 
-      // 3. Insert User's own trips
+      // 3. Insert User's own trips (FIXED: Separated columns based on role)
       for (final t in trips) {
-        batch.insert(table, {
-          'id': t['id'],
-          'user_id': t['user_id'] ?? currentUserId,
-          'trip_name': t['trip_name'] ?? 'My Trip',
-          'depart_time': t['depart_time'] ?? '00:00:00',
-          'arrival_time': t['arrival_time'] ?? '00:00:00',
-          'desired_pickup_time': t['desired_pickup_time'] ?? '00:00:00',
-          'desired_dropoff_time': t['desired_dropoff_time'] ?? '00:00:00',
-          'depart_lat': t['depart_lat'] ?? 0.0,
-          'depart_lng': t['depart_lng'] ?? 0.0,
-          'depart_name': t['depart_name'] ?? '',
-          'arrival_lat': t['arrival_lat'] ?? 0.0,
-          'arrival_lng': t['arrival_lng'] ?? 0.0,
-          'arrival_name': t['arrival_name'] ?? '',
-          'pickup_lat': t['pickup_lat'] ?? 0.0,
-          'pickup_lng': t['pickup_lng'] ?? 0.0,
-          'pickup_name': t['pickup_name'] ?? '',
-          'dropoff_lat': t['dropoff_lat'] ?? 0.0,
-          'dropoff_lng': t['dropoff_lng'] ?? 0.0,
-          'dropoff_name': t['dropoff_name'] ?? '',
-          // Store recurrence flags securely as integers
-          'active_monday': t['active_monday'] == true || t['active_monday'] == 1 ? 1 : 0,
-          'active_tuesday': t['active_tuesday'] == true || t['active_tuesday'] == 1 ? 1 : 0,
-          'active_wednesday': t['active_wednesday'] == true || t['active_wednesday'] == 1 ? 1 : 0,
-          'active_thursday': t['active_thursday'] == true || t['active_thursday'] == 1 ? 1 : 0,
-          'active_friday': t['active_friday'] == true || t['active_friday'] == 1 ? 1 : 0,
-          'active_saturday': t['active_saturday'] == true || t['active_saturday'] == 1 ? 1 : 0,
-          'active_sunday': t['active_sunday'] == true || t['active_sunday'] == 1 ? 1 : 0,
-        }, conflictAlgorithm: ConflictAlgorithm.replace);
+        if (isForPassenger) {
+          batch.insert('passenger_trips', {
+            'id': t['id'],
+            'user_id': t['user_id'] ?? currentUserId,
+            'trip_name': t['trip_name'] ?? 'My Trip',
+            'desired_pickup_time': t['desired_pickup_time'] ?? '00:00:00',
+            'desired_dropoff_time': t['desired_dropoff_time'] ?? '00:00:00',
+            'pickup_lat': t['pickup_lat'] ?? 0.0,
+            'pickup_lng': t['pickup_lng'] ?? 0.0,
+            'pickup_name': t['pickup_name'] ?? '',
+            'dropoff_lat': t['dropoff_lat'] ?? 0.0,
+            'dropoff_lng': t['dropoff_lng'] ?? 0.0,
+            'dropoff_name': t['dropoff_name'] ?? '',
+            'active_monday': t['active_monday'] == true || t['active_monday'] == 1 ? 1 : 0,
+            'active_tuesday': t['active_tuesday'] == true || t['active_tuesday'] == 1 ? 1 : 0,
+            'active_wednesday': t['active_wednesday'] == true || t['active_wednesday'] == 1 ? 1 : 0,
+            'active_thursday': t['active_thursday'] == true || t['active_thursday'] == 1 ? 1 : 0,
+            'active_friday': t['active_friday'] == true || t['active_friday'] == 1 ? 1 : 0,
+            'active_saturday': t['active_saturday'] == true || t['active_saturday'] == 1 ? 1 : 0,
+            'active_sunday': t['active_sunday'] == true || t['active_sunday'] == 1 ? 1 : 0,
+          }, conflictAlgorithm: ConflictAlgorithm.replace);
+        } else {
+          batch.insert('driver_trips', {
+            'id': t['id'],
+            'user_id': t['user_id'] ?? currentUserId,
+            'trip_name': t['trip_name'] ?? 'My Trip',
+            'depart_time': t['depart_time'] ?? '00:00:00',
+            'arrival_time': t['arrival_time'] ?? '00:00:00',
+            'depart_lat': t['depart_lat'] ?? 0.0,
+            'depart_lng': t['depart_lng'] ?? 0.0,
+            'depart_name': t['depart_name'] ?? '',
+            'arrival_lat': t['arrival_lat'] ?? 0.0,
+            'arrival_lng': t['arrival_lng'] ?? 0.0,
+            'arrival_name': t['arrival_name'] ?? '',
+            'active_monday': t['active_monday'] == true || t['active_monday'] == 1 ? 1 : 0,
+            'active_tuesday': t['active_tuesday'] == true || t['active_tuesday'] == 1 ? 1 : 0,
+            'active_wednesday': t['active_wednesday'] == true || t['active_wednesday'] == 1 ? 1 : 0,
+            'active_thursday': t['active_thursday'] == true || t['active_thursday'] == 1 ? 1 : 0,
+            'active_friday': t['active_friday'] == true || t['active_friday'] == 1 ? 1 : 0,
+            'active_saturday': t['active_saturday'] == true || t['active_saturday'] == 1 ? 1 : 0,
+            'active_sunday': t['active_sunday'] == true || t['active_sunday'] == 1 ? 1 : 0,
+          }, conflictAlgorithm: ConflictAlgorithm.replace);
+        }
       }
 
       // 4. Insert Subscriptions and partner details

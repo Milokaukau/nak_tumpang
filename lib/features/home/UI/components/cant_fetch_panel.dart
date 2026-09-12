@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/components/base_profile_card.dart';
 import 'package:nak_tumpang/features/home/UI/components/exception_request_form/exception_request_form.dart';
@@ -8,6 +9,7 @@ import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
 class CantFetchPanel extends StatelessWidget {
   final String tumpangSubscriptionId;
   final String driverId;
+  final String passengerId;
   final String passengerName;
   final String? passengerImageUrl;
   final String pickupName;
@@ -22,6 +24,7 @@ class CantFetchPanel extends StatelessWidget {
     super.key,
     required this.tumpangSubscriptionId,
     required this.driverId,
+    required this.passengerId,
     required this.passengerName,
     this.passengerImageUrl,
     required this.pickupName,
@@ -114,7 +117,7 @@ class CantFetchPanel extends StatelessWidget {
           infoBoxColor: AppColors.warningAmberBg,
           infoBoxTextColor: AppColors.warningAmberText,
           infoBoxText:
-          '$passengerName will be notified immediately and can look for another driver for these dates. Your regular tumpang schedule resumes automatically after.',
+          '$passengerName will be notified and can look for another driver for these dates. Your regular tumpang schedule resumes automatically after.',
           confirmLabel: 'Confirm',
           isSubmitting: vm.isSubmittingException,
           minDate: minDate,
@@ -127,6 +130,26 @@ class CantFetchPanel extends StatelessWidget {
               initiatedByRole: 'driver',
             );
             if (success) {
+              debugPrint('🔔 CantFetchPanel notify check — passengerId="$passengerId"');
+              if (passengerId.isNotEmpty) {
+                try {
+                  await Supabase.instance.client.from('tumpang_notifications').insert({
+                    'id': 'NOTIF-${DateTime.now().millisecondsSinceEpoch}',
+                    'target_user_id': passengerId,
+                    'title': 'New Schedule Exception',
+                    'message': 'Your driver submitted a schedule exception request.',
+                    'type': 'exception',
+                    'is_read': false,
+                    'subscription_id': tumpangSubscriptionId,
+                  });
+                  debugPrint('✅ Notification inserted for passenger $passengerId');
+                } catch (e) {
+                  debugPrint('🚨 Error sending notification: $e');
+                }
+              } else {
+                debugPrint('🚨 Skipped notification — passengerId is empty!');
+              }
+
               vm.closeExceptionPanel();
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(

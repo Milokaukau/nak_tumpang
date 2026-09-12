@@ -4,32 +4,82 @@ import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/components/base_button.dart';
 import 'package:nak_tumpang/features/subscriptions/view_models/subscription_view_model.dart';
-import 'package:nak_tumpang/features/subscriptions/UI/components/exception_list_section.dart';
 import 'package:nak_tumpang/features/home/UI/components/cant_fetch_panel.dart';
 import 'package:nak_tumpang/features/home/UI/components/no_need_fetch_panel.dart';
 import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
+import 'package:nak_tumpang/features/negotiation/UI/components/route_map_header.dart';
+import 'package:nak_tumpang/features/subscriptions/UI/components/edit_exception_sheet.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class SubscriptionDetailScreen extends StatefulWidget {
   final Map<String, dynamic> subscription;
   final String currentUserId;
   final String role; // 'passenger' or 'driver'
+  final int initialTabIndex;
 
   const SubscriptionDetailScreen({
     super.key,
     required this.subscription,
     required this.currentUserId,
     required this.role,
+    this.initialTabIndex = 0,
   });
 
   @override
   State<SubscriptionDetailScreen> createState() => _SubscriptionDetailScreenState();
 }
 
-class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen> {
+class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabController;
   Key _exceptionListKey = UniqueKey();
+  List<Map<String, dynamic>> _exceptions = [];
+  bool _isLoadingExceptions = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(
+      length: 2,
+      vsync: this,
+      initialIndex: widget.initialTabIndex,
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _fetchExceptions();
+    });
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _fetchExceptions() async {
+    setState(() => _isLoadingExceptions = true);
+    try {
+      final subscriptionId = widget.subscription['id'];
+      final response = await Supabase.instance.client
+          .from('tumpang_exception') // <-- Match singular table name
+          .select('*')
+          .eq('tumpang_subscription_id', subscriptionId) // <-- Match column name
+          .order('start_date', ascending: false);
+
+      if (mounted) {
+        setState(() {
+          _exceptions = List<Map<String, dynamic>>.from(response);
+          _isLoadingExceptions = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error fetching exceptions: $e');
+      if (mounted) setState(() => _isLoadingExceptions = false);
+    }
+  }
 
   void _refreshExceptions() {
     setState(() => _exceptionListKey = UniqueKey());
+    _fetchExceptions();
   }
 
   bool _isWithinExtendWindow() {
@@ -45,46 +95,56 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen> {
     return daysPastExpiry >= 0 && daysPastExpiry <= 7;
   }
 
+  /// The counterpart's user id — driver's id if I'm the passenger, and vice
+  /// versa. Used to target notifications (exception submitted/edited, etc.)
+  /// at the correct person.
+  String _otherUserId() {
+    final driverTrips = widget.subscription['driver_trips'] as Map<String, dynamic>?;
+    final passengerTrips = widget.subscription['passenger_trips'] as Map<String, dynamic>?;
+    final driverUser = driverTrips?['users'] as Map<String, dynamic>?;
+    final passengerUser = passengerTrips?['users'] as Map<String, dynamic>?;
+
+    final driverId = widget.subscription['driver_id'] ??
+        (widget.role == 'driver' ? widget.currentUserId : (driverUser?['id'] ?? ''));
+    final passengerId = widget.subscription['passenger_id'] ??
+        (widget.role == 'passenger' ? widget.currentUserId : (passengerUser?['id'] ?? ''));
+
+    return widget.role == 'driver' ? (passengerId ?? '') : (driverId ?? '');
+  }
+
   Future<void> _handleExtend(BuildContext context) async {
     final vm = context.read<SubscriptionViewModel>();
     final currentEndDate = DateTime.tryParse(widget.subscription['subscription_end_date'] ?? '') ?? DateTime.now();
 
-    // 1. Create a default proposal (e.g., extend by 30 days)
     final firstValidDate = currentEndDate.add(const Duration(days: 1));
     final defaultNewEndDate = firstValidDate.add(const Duration(days: 30));
 
-    // Show a quick loading indicator
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => const Center(child: CircularProgressIndicator()),
+      builder: (ctx) => const Center(child: CircularProgressIndicator(color: AppColors.primaryYellow)),
     );
 
-    // 2. Generate the request in the background
     final String? newRequestId = await vm.createExtensionRequest(
       oldSubscription: widget.subscription,
       newStartDate: firstValidDate,
       newEndDate: defaultNewEndDate,
     );
 
-    if (context.mounted) Navigator.pop(context); // Close loading dialog
+    if (context.mounted) Navigator.pop(context);
 
     if (newRequestId != null && context.mounted) {
-      // 3. Success! Navigate straight to the Negotiation Screen
       Navigator.push(
         context,
         MaterialPageRoute(
           builder: (context) => NegotiationScreen(
-            requestId: newRequestId, // Pass the ID generated from Supabase
+            requestId: newRequestId,
           ),
         ),
       );
     } else if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Failed to start extension request.'),
-          backgroundColor: Colors.red,
-        ),
+        const SnackBar(content: Text('Failed to start extension request.'), backgroundColor: Colors.red),
       );
     }
   }
@@ -105,7 +165,8 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen> {
       builder: (ctx) => StatefulBuilder(
         builder: (context, setDialogState) {
           return AlertDialog(
-            title: const Text('Cancel Subscription'),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: const Text('Cancel Subscription', style: TextStyle(fontWeight: FontWeight.bold)),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -114,17 +175,12 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen> {
                 const SizedBox(height: 12),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12),
-                  decoration: BoxDecoration(
-                    color: AppColors.lightYellow,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
+                  decoration: BoxDecoration(color: AppColors.lightYellow, borderRadius: BorderRadius.circular(8)),
                   child: DropdownButtonHideUnderline(
                     child: DropdownButton<String>(
                       isExpanded: true,
                       value: selectedReason,
-                      items: cancelReasons
-                          .map((r) => DropdownMenuItem(value: r, child: Text(r)))
-                          .toList(),
+                      items: cancelReasons.map((r) => DropdownMenuItem(value: r, child: Text(r))).toList(),
                       onChanged: (val) {
                         if (val != null) setDialogState(() => selectedReason = val);
                       },
@@ -139,20 +195,17 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen> {
                       hintText: 'Enter reason',
                       filled: true,
                       fillColor: AppColors.lightYellow,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide: BorderSide.none,
-                      ),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
                     ),
                   ),
                 ],
               ],
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Back')),
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Back', style: TextStyle(color: Colors.grey))),
               TextButton(
                 onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Confirm Cancel', style: TextStyle(color: Colors.red)),
+                child: const Text('Confirm Cancel', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
               ),
             ],
           );
@@ -161,10 +214,12 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen> {
     );
 
     if (confirmed == true && context.mounted) {
-      final reasonText =
-      selectedReason == 'Others' ? customReasonController.text.trim() : selectedReason;
-
+      final reasonText = selectedReason == 'Others' ? customReasonController.text.trim() : selectedReason;
       final vm = context.read<SubscriptionViewModel>();
+
+      // Notification to the other party is handled inside
+      // SubscriptionSupabaseService.cancelSubscription (target_user_id) —
+      // no need to send a second one manually here.
       final success = await vm.cancelSubscription(
         subscriptionId: widget.subscription['id'],
         cancelledByRole: widget.role,
@@ -172,9 +227,7 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen> {
       );
 
       if (success && context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Subscription cancelled successfully.')),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Subscription cancelled successfully.')));
         context.read<HomeViewModel>().fetchCurrentUser();
         Navigator.of(context).pop(true);
       }
@@ -187,14 +240,12 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen> {
     final driverUser = driverTrips?['users'] as Map<String, dynamic>?;
     final passengerUser = passengerTrips?['users'] as Map<String, dynamic>?;
 
-    final driverId = widget.subscription['driver_id'] ??
-        (widget.role == 'driver' ? widget.currentUserId : (driverUser?['id'] ?? ''));
-    final passengerId = widget.subscription['passenger_id'] ??
-        (widget.role == 'passenger' ? widget.currentUserId : (passengerUser?['id'] ?? ''));
+    final driverId = widget.subscription['driver_id'] ?? (widget.role == 'driver' ? widget.currentUserId : (driverUser?['id'] ?? ''));
+    final passengerId = widget.subscription['passenger_id'] ?? (widget.role == 'passenger' ? widget.currentUserId : (passengerUser?['id'] ?? ''));
     final driverName = widget.subscription['driver_name'] ?? driverUser?['name'] ?? widget.subscription['name'] ?? 'Driver';
     final passengerName = widget.subscription['passenger_name'] ?? passengerUser?['name'] ?? widget.subscription['name'] ?? 'Passenger';
     final driverPhone = widget.subscription['driver_phone'] ?? driverUser?['phone'] ?? widget.subscription['phone'] ?? '';
-    final passengerPhone = widget.subscription['passenger_phone'] ?? passengerUser?['phone'] ?? passengerUser?['phone'] ?? '';
+    final passengerPhone = widget.subscription['passenger_phone'] ?? passengerUser?['phone'] ?? '';
 
     showModalBottomSheet(
       context: context,
@@ -217,18 +268,15 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen> {
                 Center(
                   child: Container(
                     margin: const EdgeInsets.only(bottom: 24),
-                    height: 4,
-                    width: 40,
-                    decoration: BoxDecoration(
-                      color: AppColors.greyBorder,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
+                    height: 4, width: 40,
+                    decoration: BoxDecoration(color: AppColors.greyBorder, borderRadius: BorderRadius.circular(2)),
                   ),
                 ),
                 if (widget.role == 'driver')
                   CantFetchPanel(
                     tumpangSubscriptionId: widget.subscription['id'],
                     driverId: driverId,
+                    passengerId: passengerId,
                     passengerName: passengerName,
                     pickupName: widget.subscription['pickup_location'] ?? '',
                     dropoffName: widget.subscription['dropoff_location'] ?? '',
@@ -236,15 +284,33 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen> {
                     minDate: DateTime.tryParse(widget.subscription['subscription_start_date'] ?? ''),
                     maxDate: DateTime.tryParse(widget.subscription['subscription_end_date'] ?? ''),
                     passengerPhone: passengerPhone,
-                    onSubmitted: () {
+                    onSubmitted: () async {
                       Navigator.of(context).pop();
                       _refreshExceptions();
+                      // Notify other side
+                      final otherUserId = passengerId;
+                      if (otherUserId != null && otherUserId.toString().isNotEmpty) {
+                        try {
+                          await Supabase.instance.client.from('tumpang_notifications').insert({
+                            'id': 'NOTIF-${DateTime.now().millisecondsSinceEpoch}',
+                            'target_user_id': otherUserId,
+                            'title': 'New Schedule Exception Request',
+                            'message': 'Driver submitted a schedule exception request.',
+                            'type': 'exception',
+                            'is_read': false,
+                            'subscription_id': widget.subscription['id'],
+                          });
+                        } catch (e) {
+                          debugPrint('Error notifying exception: $e');
+                        }
+                      }
                     },
                   )
                 else
                   NoNeedFetchPanel(
                     tumpangSubscriptionId: widget.subscription['id'],
                     passengerId: passengerId,
+                    driverId: driverId,
                     driverName: driverName,
                     pickupName: widget.subscription['pickup_location'] ?? '',
                     dropoffName: widget.subscription['dropoff_location'] ?? '',
@@ -252,9 +318,26 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen> {
                     driverPhone: driverPhone,
                     minDate: DateTime.tryParse(widget.subscription['subscription_start_date'] ?? ''),
                     maxDate: DateTime.tryParse(widget.subscription['subscription_end_date'] ?? ''),
-                    onSubmitted: () {
+                    onSubmitted: () async {
                       Navigator.of(context).pop();
                       _refreshExceptions();
+                      // Notify other side
+                      final otherUserId = driverId;
+                      if (otherUserId != null && otherUserId.toString().isNotEmpty) {
+                        try {
+                          await Supabase.instance.client.from('tumpang_notifications').insert({
+                            'id': 'NOTIF-${DateTime.now().millisecondsSinceEpoch}',
+                            'target_user_id': otherUserId,
+                            'title': 'New Schedule Exception Request',
+                            'message': 'Passenger submitted a schedule exception request.',
+                            'type': 'exception',
+                            'is_read': false,
+                            'subscription_id': widget.subscription['id'],
+                          });
+                        } catch (e) {
+                          debugPrint('Error notifying exception: $e');
+                        }
+                      }
                     },
                   ),
               ],
@@ -265,149 +348,432 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final isActive = widget.subscription['status'] == 'active';
-    final deposit = widget.subscription['deposit'] ?? '0';
-    final depositRefunded = widget.subscription['deposit_refunded'] == true;
-
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: AppColors.primaryYellow,
-        elevation: 0,
-        foregroundColor: AppColors.black,
-        title: const Text('Tumpang Details', style: TextStyle(fontWeight: FontWeight.bold)),
-        centerTitle: true,
+  void _openEditException(Map<String, dynamic> exception) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => EditExceptionSheet(
+        exception: exception,
+        otherUserId: _otherUserId(),
+        onChanged: _refreshExceptions,
+        minDate: DateTime.tryParse(widget.subscription['subscription_start_date'] ?? ''),
+        maxDate: DateTime.tryParse(widget.subscription['subscription_end_date'] ?? ''),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    );
+  }
+
+  String _formatAmPm(String dbTime) {
+    if (dbTime.isEmpty) return dbTime;
+    try {
+      final parts = dbTime.split(':');
+      final hour = int.parse(parts[0]);
+      final minute = parts[1];
+      final displayHour = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
+      return '$displayHour:$minute';
+    } catch (e) {
+      return dbTime;
+    }
+  }
+
+  Widget _buildReadOnlyField({required String title, required String value, Widget? topWidget}) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.greyBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (topWidget != null) topWidget,
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
               children: [
-                Text(widget.subscription['name'] ?? 'Unknown',
-                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: isActive ? Colors.green.shade100 : Colors.grey.shade300,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    isActive ? 'ACTIVE' : 'INACTIVE',
-                    style: TextStyle(
-                      color: isActive ? Colors.green.shade800 : Colors.grey.shade800,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
-                    ),
+                const Icon(Icons.lock, size: 16, color: Colors.grey),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                      const SizedBox(height: 4),
+                      Text(value, style: const TextStyle(fontSize: 14, color: AppColors.black)),
+                    ],
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 4),
-            Text('${widget.subscription['pickup_location']} → ${widget.subscription['dropoff_location']}',
-                style: const TextStyle(color: AppColors.greyText)),
-            Text('Pickup: ${widget.subscription['pickup_time']}',
-                style: const TextStyle(color: AppColors.greyText)),
-            if (widget.subscription['fee'] != null)
-              Text('Daily fee: RM ${widget.subscription['fee']}',
-                  style: const TextStyle(color: AppColors.greyText)),
-            const SizedBox(height: 12),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOverviewTab(BuildContext context, bool isActive) {
+    final endedBy = widget.subscription['ended_by'];
+    final cancelReason = widget.subscription['cancellation_reason'];
+
+    final otherUserName = widget.subscription['name'] ?? 'User';
+    final pickupName = widget.subscription['pickup_location'] ?? 'Unknown';
+    final dropoffName = widget.subscription['dropoff_location'] ?? 'Unknown';
+    final startDate = widget.subscription['subscription_start_date'] ?? '';
+    final endDate = widget.subscription['subscription_end_date'] ?? '';
+    final pickupTime = widget.subscription['pickup_time'] ?? '';
+
+    final fee = double.tryParse(widget.subscription['fee']?.toString() ?? '0') ?? 0.0;
+    int days = 1;
+    final startDt = DateTime.tryParse(startDate);
+    final endDt = DateTime.tryParse(endDate);
+    if (startDt != null && endDt != null) {
+      days = endDt.difference(startDt).inDays + 1;
+    }
+    final totalFee = fee * days;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          if (!isActive)
             Container(
-              padding: const EdgeInsets.all(12),
+              width: double.infinity,
+              margin: const EdgeInsets.only(bottom: 20),
+              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: AppColors.lightYellow,
-                borderRadius: BorderRadius.circular(8),
+                color: Colors.red.shade50,
+                border: Border.all(color: Colors.red.shade200),
+                borderRadius: BorderRadius.circular(12),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Deposit: RM $deposit',
-                      style: const TextStyle(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 4),
-                  Text(
-                    isActive
-                        ? 'Held until subscription ends.'
-                        : (depositRefunded ? 'Refunded to passenger.' : 'Forfeited to driver.'),
-                    style: const TextStyle(color: AppColors.greyText, fontSize: 13),
+                  Row(
+                    children: [
+                      const Icon(Icons.info_outline, color: Colors.red, size: 20),
+                      const SizedBox(width: 8),
+                      const Text('Subscription Inactive', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 16)),
+                    ],
                   ),
+                  if (endedBy != null && endedBy != 'natural') ...[
+                    const SizedBox(height: 8),
+                    Text('Cancelled by: ${endedBy.toString().toUpperCase()}', style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.black)),
+                    if (cancelReason != null && cancelReason.toString().isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text('Reason: $cancelReason', style: const TextStyle(fontStyle: FontStyle.italic, color: AppColors.greyText)),
+                      ),
+                  ],
                 ],
               ),
             ),
-            const SizedBox(height: 24),
 
-            // ONLY DISPLAY CRUD ACTION BUTTONS IF SUBSCRIPTION IS ACTIVE
-            if (isActive) ...[
-              SizedBox(
-                width: double.infinity,
-                child: BaseButton(
-                  text: widget.role == 'driver' ? "Can't fetch" : 'No need fetch',
-                  onPressed: () => _openExceptionPanel(context),
-                ),
+          // Profile Header
+          Container(
+            width: 80, height: 80,
+            decoration: BoxDecoration(
+              color: AppColors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.greyBorder, width: 1),
+              boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, 2))],
+            ),
+            child: const Icon(Icons.person, size: 44, color: Colors.grey),
+          ),
+          const SizedBox(height: 10),
+          Text(otherUserName, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 20),
+
+          // Stacked Locked Cards
+          _buildReadOnlyField(
+            title: 'Pickup Location',
+            value: pickupName,
+            topWidget: RouteMapHeader(
+              label: pickupName,
+              lat: double.tryParse(widget.subscription['pickup_lat']?.toString() ?? '0') ?? 0.0,
+              lng: double.tryParse(widget.subscription['pickup_lng']?.toString() ?? '0') ?? 0.0,
+            ),
+          ),
+
+          _buildReadOnlyField(
+            title: 'Dropoff Location',
+            value: dropoffName,
+            topWidget: RouteMapHeader(
+              label: dropoffName,
+              lat: double.tryParse(widget.subscription['dropoff_lat']?.toString() ?? '0') ?? 0.0,
+              lng: double.tryParse(widget.subscription['dropoff_lng']?.toString() ?? '0') ?? 0.0,
+            ),
+          ),
+
+          _buildReadOnlyField(
+            title: 'Tumpang Dates',
+            value: '$startDate to $endDate',
+          ),
+
+          _buildReadOnlyField(
+            title: 'Pickup Time',
+            value: _formatAmPm(pickupTime),
+          ),
+
+          _buildReadOnlyField(
+            title: 'Tumpang Fee',
+            value: 'RM ${fee.toStringAsFixed(2)}',
+            topWidget: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+              decoration: const BoxDecoration(
+                color: AppColors.lightYellow,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
               ),
+              child: Column(
+                children: [
+                  Text('RM ${fee.toStringAsFixed(2)}/day  x  $days day${days == 1 ? '' : 's'}', style: const TextStyle(fontSize: 13, color: AppColors.black)),
+                  const SizedBox(height: 4),
+                  Text('Total: RM ${totalFee.toStringAsFixed(2)}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.black)),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 20),
+
+          // Action Buttons
+          if (isActive) ...[
+            SizedBox(
+              width: double.infinity,
+              child: BaseButton(
+                text: widget.role == 'driver' ? "Can't fetch" : 'No need fetch',
+                onPressed: () => _openExceptionPanel(context),
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                onPressed: () => _confirmCancel(context),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  side: const BorderSide(color: Colors.red),
+                ),
+                child: const Text('Cancel Subscription', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+              ),
+            ),
+          ] else if (_isWithinExtendWindow()) ...[
+            SizedBox(
+              width: double.infinity,
+              child: BaseButton(
+                text: 'Extend Your Journey?',
+                onPressed: () => _handleExtend(context),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '${7 - DateTime.now().difference(DateTime.tryParse(widget.subscription['subscription_end_date'] ?? '') ?? DateTime.now()).inDays} day(s) left to extend',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 12, color: AppColors.greyText),
+            ),
+          ],
+
+          const SizedBox(height: 32),
+        ],
+      ),
+    );
+  }
+
+  // Schedule Changes Tab Split into Two Sub-Tabs (My Changes & Other Side Changes)
+  Widget _buildScheduleChangesTab(bool isActive) {
+    if (_isLoadingExceptions) {
+      return const Center(child: CircularProgressIndicator(color: AppColors.primaryYellow));
+    }
+
+    final myUserId = widget.currentUserId.toString();
+    final myRole = widget.role.toLowerCase();
+
+    // Filter strictly based on roles / initiator
+    final driverChanges = _exceptions.where((e) {
+      final role = e['initiated_by_role']?.toString().toLowerCase();
+      final userId = e['initiated_by']?.toString();
+      return role == 'driver' || (myRole == 'driver' && userId == myUserId);
+    }).toList();
+
+    final passengerChanges = _exceptions.where((e) {
+      final role = e['initiated_by_role']?.toString().toLowerCase();
+      final userId = e['initiated_by']?.toString();
+      return role == 'passenger' || (myRole == 'passenger' && userId == myUserId);
+    }).toList();
+
+    // Determine which list belongs to "me" based on my role
+    final isDriver = myRole == 'driver';
+    final myItems = isDriver ? driverChanges : passengerChanges;
+    final otherItems = isDriver ? passengerChanges : driverChanges;
+
+    return DefaultTabController(
+      length: 2,
+      child: Column(
+        children: [
+          Container(
+            color: AppColors.lightYellow.withOpacity(0.4),
+            child: TabBar(
+              labelColor: AppColors.black,
+              unselectedLabelColor: AppColors.greyText,
+              indicatorColor: AppColors.primaryYellow,
+              indicatorWeight: 3,
+              tabs: [
+                Tab(text: isDriver ? 'Driver Changes' : 'Passenger Changes'),
+                Tab(text: isDriver ? 'Passenger Changes' : 'Driver Changes'),
+              ],
+            ),
+          ),
+          Expanded(
+            child: TabBarView(
+              children: [
+                _buildExceptionList(myItems, isMyChanges: true, isActive: isActive),
+                _buildExceptionList(otherItems, isMyChanges: false, isActive: isActive),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildExceptionList(List<Map<String, dynamic>> items, {required bool isMyChanges, required bool isActive}) {
+    if (items.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.event_note_outlined, size: 48, color: Colors.grey.shade400),
               const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton(
-                  onPressed: () => _confirmCancel(context),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    side: const BorderSide(color: Colors.red),
-                  ),
-                  child: const Text('Cancel Subscription', style: TextStyle(color: Colors.red)),
-                ),
+              Text(
+                isMyChanges ? 'You have not created any exception requests.' : 'No exception requests from the other party.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: AppColors.greyText, fontSize: 14),
               ),
-            ] else ...[
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade200,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Text(
-                  'This subscription is inactive. Modifications are disabled.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: AppColors.greyText, fontStyle: FontStyle.italic),
-                ),
-              ),
+            ],
+          ),
+        ),
+      );
+    }
 
-              // Only naturally-ended subscriptions can be extended within 7 days
-              if (_isWithinExtendWindow()) ...[
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: BaseButton(
-                    text: 'Extend Your Journey?',
-                    onPressed: () => _handleExtend(context),
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: items.length,
+      itemBuilder: (context, index) {
+        final item = items[index];
+        final status = item['status'] ?? 'pending';
+        final reason = item['reason'] ?? item['note'] ?? 'Schedule exception';
+
+        final startDate = item['start_date'] ?? '';
+        final endDate = item['end_date'] ?? '';
+        final dateText = (endDate.isNotEmpty && endDate != startDate)
+            ? '$startDate → $endDate'
+            : startDate;
+
+        Color statusColor = Colors.orange;
+        if (status == 'approved' || status == 'accepted' || status == 'active') statusColor = Colors.green;
+        if (status == 'rejected') statusColor = Colors.red;
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppColors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppColors.greyBorder),
+            boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, 2))],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Date: $dateText',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '${7 - DateTime.now().difference(DateTime.parse(widget.subscription['subscription_end_date'])).inDays} day(s) left to extend',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 11, color: AppColors.greyText),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: statusColor.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      status.toUpperCase(),
+                      style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 11),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text('Reason: $reason', style: const TextStyle(color: AppColors.black, fontSize: 13)),
+
+              // Only your own pending requests, on an active subscription,
+              // can be edited (or cancelled from inside the edit sheet).
+              // The other party's requests remain view-only.
+              if (isMyChanges && status == 'active' && isActive) ...[
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: SizedBox(
+                        height: 40,
+                        child: BaseButton(
+                          text: 'Edit',
+                          onPressed: () => _openEditException(item),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ],
+          ),
+        );
+      },
+    );
+  }
 
-            const SizedBox(height: 24),
-            const Text('Schedule Changes',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
-            ExceptionListSection(
-              key: _exceptionListKey,
-              subscriptionId: widget.subscription['id'],
-              currentUserRole: widget.role,
-              fee: double.tryParse(widget.subscription['fee']?.toString() ?? ''),
-              isActive: isActive,
-              minDate: DateTime.tryParse(widget.subscription['subscription_start_date'] ?? ''),
-              maxDate: DateTime.tryParse(widget.subscription['subscription_end_date'] ?? ''),
-            ),
+  @override
+  @override
+  Widget build(BuildContext context) {
+    final isActive = widget.subscription['status'] == 'active';
+
+    return Scaffold(
+      backgroundColor: AppColors.white,
+      appBar: AppBar(
+        backgroundColor: AppColors.primaryYellow,
+        elevation: 0,
+        foregroundColor: AppColors.black,
+        centerTitle: true,
+        title: const Text('Tumpang Details', style: TextStyle(fontWeight: FontWeight.bold)),
+        bottom: TabBar(
+          controller: _tabController,
+          labelColor: AppColors.black,
+          unselectedLabelColor: AppColors.greyText,
+          indicatorColor: AppColors.black,
+          indicatorWeight: 3,
+          labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+          tabs: const [
+            Tab(text: 'Overview'),
+            Tab(text: 'Schedule Changes'),
           ],
         ),
+      ),
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          _buildOverviewTab(context, isActive),
+          _buildScheduleChangesTab(isActive),
+        ],
       ),
     );
   }

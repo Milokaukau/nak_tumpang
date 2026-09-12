@@ -38,23 +38,39 @@ class SubscriptionViewModel extends ChangeNotifier {
     required String subscriptionId,
     required String cancelledByRole,
     String? reason,
+    String? otherUserId, // 👈 Optional override if passed directly from UI
   }) async {
     try {
-      isLoading = true; // Fixed: removed underscore
+      isLoading = true;
       notifyListeners();
 
-      // Fixed: Delegating to your service layer to match your architecture
+      // 1. Resolve the target user ID (from parameter or local list)
+      String targetUserId = otherUserId ?? '';
+
+      if (targetUserId.isEmpty) {
+        final sub = subscriptions.firstWhere(
+              (s) => s['id'] == subscriptionId,
+          orElse: () => <String, dynamic>{},
+        );
+
+        targetUserId = (cancelledByRole == 'driver'
+            ? sub['passenger_id']
+            : sub['driver_id']) ?? '';
+      }
+
+      // 2. Pass it to the service
       final success = await _service.cancelSubscription(
         subscriptionId: subscriptionId,
         cancelledByRole: cancelledByRole,
+        otherUserId: targetUserId,
         reason: reason,
       );
 
-      isLoading = false; // Fixed: removed underscore
+      isLoading = false;
       notifyListeners();
       return success;
     } catch (e) {
-      isLoading = false; // Fixed: removed underscore
+      isLoading = false;
       notifyListeners();
       debugPrint('Error cancelling subscription: $e');
       return false;
@@ -66,12 +82,16 @@ class SubscriptionViewModel extends ChangeNotifier {
     required DateTime startDate,
     required DateTime endDate,
     required String reason,
+    required String otherUserId,
+    String? subscriptionId, // NEW
   }) {
     return _service.updateException(
       exceptionId: exceptionId,
       startDate: startDate,
       endDate: endDate,
       reason: reason,
+      otherUserId: otherUserId,
+      subscriptionId: subscriptionId, // NEW
     );
   }
 
@@ -95,4 +115,3 @@ class SubscriptionViewModel extends ChangeNotifier {
     return newRequestId; // Will be null if it failed, or the ID if it succeeded
   }
 }
-

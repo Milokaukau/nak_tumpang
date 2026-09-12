@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/entities/tumpang_request.dart';
+import 'package:nak_tumpang/core/components/base_button.dart';
 import 'package:nak_tumpang/features/negotiation/view_models/negotiation_view_model.dart';
 import 'package:nak_tumpang/features/negotiation/UI/components/propose_value_bottom_sheet.dart';
 import 'package:nak_tumpang/features/negotiation/UI/components/date_range_proposal_bottom_sheet.dart';
@@ -12,6 +13,8 @@ import 'package:nak_tumpang/features/negotiation/UI/components/negotiation_summa
 import 'package:nak_tumpang/features/negotiation/UI/components/route_map_header.dart';
 import 'package:nak_tumpang/features/negotiation/UI/screens/tumpang_summary_screen.dart';
 import 'package:nak_tumpang/features/negotiation/utils/negotiation_error.dart';
+import 'package:nak_tumpang/features/subscriptions/data/services/subscription_supabase_service.dart';
+import 'package:nak_tumpang/features/subscriptions/UI/screens/subscription_detail_screen.dart';
 
 class NegotiationScreen extends StatefulWidget {
   final String requestId;
@@ -26,6 +29,8 @@ class NegotiationScreen extends StatefulWidget {
 }
 
 class _NegotiationScreenState extends State<NegotiationScreen> {
+  final SubscriptionSupabaseService _subscriptionService = SubscriptionSupabaseService();
+
   String _formatAmPm(String dbTime) {
     if (dbTime.isEmpty) return dbTime;
     try {
@@ -195,7 +200,6 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
     if (confirmed != true) return;
 
     try {
-      // Call cancelRequest instead of rejectEntireRequest
       await controller.cancelRequest(widget.requestId);
       if (mounted) Navigator.pop(context);
     } on NegotiationException catch (e) {
@@ -209,6 +213,93 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
         const SnackBar(content: Text(kDefaultNegotiationErrorMessage), backgroundColor: Colors.red),
       );
     }
+  }
+
+  Widget _buildSubscriptionLinkCard(String? subscriptionId, bool isDriver, String currentUserId) {
+    if (subscriptionId == null) {
+      return const SizedBox.shrink(); // older completed requests with no linked subscription
+    }
+
+    return FutureBuilder<Map<String, dynamic>?>(
+      key: ValueKey(subscriptionId), // rebuild if id changes
+      future: _subscriptionService.fetchSubscriptionById(
+        subscriptionId,
+        isDriver ? 'driver' : 'passenger',
+      ),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 24),
+            child: Center(child: CircularProgressIndicator(color: AppColors.primaryYellow)),
+          );
+        }
+
+        final subscription = snapshot.data;
+        if (subscription == null) {
+          return const SizedBox.shrink();
+        }
+
+        return Container(
+          margin: const EdgeInsets.only(top: 32),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppColors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppColors.greyBorder),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.check_circle, color: AppColors.successGreenText, size: 24),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'Negotiation Successful',
+                    style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.successGreenText
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'This request is now a subscription. You can manage your schedule, report exceptions, or cancel from the subscription details.',
+                style: TextStyle(color: AppColors.greyText, fontSize: 13, height: 1.4),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: BaseButton(
+                  text: 'View Subscription Details',
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => SubscriptionDetailScreen(
+                          subscription: subscription,
+                          currentUserId: currentUserId,
+                          role: isDriver ? 'driver' : 'passenger',
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -356,6 +447,14 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                         );
                       },
                     ),
+
+                    if (isCompleted)
+                      _buildSubscriptionLinkCard(
+                        request.subscriptionId,
+                        isDriver,
+                        controller.currentUserId ?? '',
+                      ),
+
                     const SizedBox(height: 40),
                   ],
                 ),

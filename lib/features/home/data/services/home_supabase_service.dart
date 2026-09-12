@@ -44,9 +44,9 @@ class HomeSupabaseService {
             ),
             passenger_trips!inner(user_id, trip_name),
             tumpang_trip_log ( id, trip_date ) 
-          ''') // <-- Changed to trip_date
+          ''')
           .eq('passenger_trips.user_id', userId)
-          .eq('status', 'active');
+          .ilike('status', 'active'); // <-- FIX: Case-insensitive 'active'
 
       final rawList = (response as List).map((e) => e as Map<String, dynamic>).toList();
       final List<Map<String, dynamic>> validActiveList = [];
@@ -55,11 +55,11 @@ class HomeSupabaseService {
       final todayDateOnly = DateTime(now.year, now.month, now.day);
 
       for (var sub in rawList) {
-        if (sub['status'] == 'active' && sub['subscription_end_date'] != null) {
+        // <-- FIX: Case-insensitive check in dart
+        if (sub['status']?.toString().toLowerCase() == 'active' && sub['subscription_end_date'] != null) {
           final endDate = DateTime.tryParse(sub['subscription_end_date']);
 
           if (endDate != null && endDate.isBefore(todayDateOnly)) {
-            // Expire it in DB and skip adding it to our UI list!
             await _checkAndAutoExpire(sub['id'], sub['subscription_end_date']);
             continue;
           }
@@ -103,9 +103,9 @@ class HomeSupabaseService {
               arrival_lat, arrival_lng
             ),
             tumpang_trip_log ( id, trip_date ) 
-          ''') // <-- Changed to trip_date
+          ''')
           .eq('driver_trips.user_id', userId)
-          .eq('status', 'active');
+          .ilike('status', 'active'); // <-- FIX: Case-insensitive 'active'
 
       final rawList = (response as List).map((e) => e as Map<String, dynamic>).toList();
       final List<Map<String, dynamic>> validActiveList = [];
@@ -114,7 +114,8 @@ class HomeSupabaseService {
       final todayDateOnly = DateTime(now.year, now.month, now.day);
 
       for (var sub in rawList) {
-        if (sub['status'] == 'active' && sub['subscription_end_date'] != null) {
+        // <-- FIX: Case-insensitive check in dart
+        if (sub['status']?.toString().toLowerCase() == 'active' && sub['subscription_end_date'] != null) {
           final endDate = DateTime.tryParse(sub['subscription_end_date']);
 
           if (endDate != null && endDate.isBefore(todayDateOnly)) {
@@ -169,14 +170,13 @@ class HomeSupabaseService {
     }
   }
 
-  // --- NEW: Fetch existing requests so buttons stay disabled on reload ---
   Future<Set<String>> fetchRequestedDriverTripIds(String passengerTripId) async {
     try {
       final response = await _supabase
           .from('tumpang_request')
           .select('driver_trip_id')
           .eq('passenger_trip_id', passengerTripId)
-          .or('status.eq.pending,status.eq.negotiating'); // Look for active requests
+          .or('status.eq.pending,status.eq.negotiating');
 
       return (response as List).map((row) => row['driver_trip_id'].toString()).toSet();
     } catch (e) {
@@ -201,7 +201,7 @@ class HomeSupabaseService {
         'start_date': _formatDate(startDate),
         'end_date': _formatDate(endDate),
         'reason': reason,
-        'status': 'active',
+        'status': 'active', // Safe to insert as lowercase
       });
       return true;
     } catch (e) {
@@ -245,13 +245,11 @@ class HomeSupabaseService {
     required double dropoffLat,
     required double dropoffLng,
   }) async {
-    // 1. GUARD: Prevent empty strings from crashing PostgreSQL
     if (subscriptionId.trim().isEmpty) {
       print('Error: subscriptionId is empty.');
       return false;
     }
 
-    // 🔒 2. SECURITY GUARD: Only the assigned driver can complete the trip
     final currentUserId = _supabase.auth.currentUser?.id;
     if (currentUserId == null || currentUserId != driverId) {
       print('⚠️ Access denied: Only the driver can complete this trip.');
@@ -262,7 +260,6 @@ class HomeSupabaseService {
       final now = DateTime.now();
       final today = _formatDate(now);
 
-      // 3. Check existing log
       final existing = await _supabase
           .from('tumpang_trip_log')
           .select('id')
@@ -277,7 +274,6 @@ class HomeSupabaseService {
       final distanceKm = _calculateDistance(pickupLat, pickupLng, dropoffLat, dropoffLng) / 1000;
       final tripLogId = 'log_${now.millisecondsSinceEpoch}';
 
-      // 4. Insert Trip Log
       await _supabase.from('tumpang_trip_log').insert({
         'id': tripLogId,
         'tumpang_subscription_id': subscriptionId,
@@ -287,7 +283,6 @@ class HomeSupabaseService {
         'status': 'completed',
       });
 
-      // 5. Distribute Points Safely
       final points = _calculatePoints(distanceKm);
       final uniqueUserIds = {driverId, passengerId}.where((id) => id.trim().isNotEmpty).toSet();
 
@@ -300,51 +295,31 @@ class HomeSupabaseService {
           'obtained_points': points,
           'avai_points': points,
           'obtained_at': now.toIso8601String(),
-          'expired_at': now.add(const Duration(days: 365)).toIso8601String(),
-          'tumpang_trip_log_id': tripLogId,
-        });
-
-        await _supabase.from('points_ledger').insert({
-          'id': 'pl_${now.millisecondsSinceEpoch}_$userId',
-          'user_id': userId,
-          'change_amount': points,
-          'reason': 'trip_completed',
-          'reference_id': tripLogId,
-          'description': 'Earned from completed trip (${distanceKm.toStringAsFixed(1)}km)',
-          'created_at': now.toIso8601String(),
+          'expiration_date': _formatDate(now.add(const Duration(days: 90))),
+          'reason': 'Trip Completion',
+          'source_id': tripLogId,
+          'status': 'active'
         });
       }
-
       return true;
-    } on PostgrestException catch (e) {
-      print('❌ Supabase Error in completeTrip: ${e.message} (code: ${e.code})');
-      return false;
     } catch (e) {
-      print('❌ General Error in completeTrip: $e');
+      print('⚠️ Error in completeTrip: $e');
       return false;
     }
   }
 
-  double _calculateDistance(double lat1, double lng1, double lat2, double lng2) {
-    // Haversine formula, returns meters
-    const R = 6371000.0;
-    final dLat = _degToRad(lat2 - lat1);
-    final dLng = _degToRad(lng2 - lng1);
-    final a = (sin(dLat / 2) * sin(dLat / 2)) +
-        (cos(_degToRad(lat1)) * cos(_degToRad(lat2)) * sin(dLng / 2) * sin(dLng / 2));
-    final c = 2 * atan2(sqrt(a), sqrt(1 - a));
-    return R * c;
-  }
+  String _formatDate(DateTime date) => "${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}";
 
-  double _degToRad(double deg) => deg * (pi / 180);
+  double _calculateDistance(double lat1, double lon1, double lat2, double lon2) {
+    const p = 0.017453292519943295;
+    final a = 0.5 - cos((lat2 - lat1) * p) / 2 + cos(lat1 * p) * cos(lat2 * p) * (1 - cos((lon2 - lon1) * p)) / 2;
+    return 12742 * asin(sqrt(a)) * 1000;
+  }
 
   int _calculatePoints(double distanceKm) {
-    const basePoints = 5;
-    const bonusCap = 10;
-    final bonus = (distanceKm / 2).floor().clamp(0, bonusCap);
-    return basePoints + bonus;
+    if (distanceKm < 5) return 5;
+    if (distanceKm < 15) return 10;
+    if (distanceKm < 30) return 20;
+    return 30;
   }
-
-  String _formatDate(DateTime d) =>
-      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 }

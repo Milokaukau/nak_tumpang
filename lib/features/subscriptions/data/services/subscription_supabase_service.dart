@@ -13,7 +13,7 @@ class SubscriptionSupabaseService {
     return null;
   }
 
-  Map<String, dynamic> _normalizeSubscription(Map<String, dynamic> sub, String currentRole) {
+  Map<String, dynamic> normalizeSubscription(Map<String, dynamic> sub, String currentRole) {
     final passengerTrip = _asMap(sub['passenger_trips']);
     final driverTrip = _asMap(sub['driver_trips']);
     final passengerUser = _asMap(passengerTrip?['users']);
@@ -158,7 +158,7 @@ class SubscriptionSupabaseService {
           .inFilter(tripIdField, tripIds);
 
       final refreshedList = List<Map<String, dynamic>>.from(refreshedResponse);
-      return refreshedList.map((sub) => _normalizeSubscription(sub, role)).toList();
+      return refreshedList.map((sub) => normalizeSubscription(sub, role)).toList();
     } catch (e) {
       print("Error in fetchSubscriptions: $e");
       return [];
@@ -204,11 +204,16 @@ class SubscriptionSupabaseService {
     }
   }
 
+  // 1. UPDATE your existing cancelSubscription method to accept 'otherUserId'
   Future<bool> cancelSubscription({
     required String subscriptionId,
     required String cancelledByRole,
+    required String otherUserId,
     String? reason,
   }) async {
+    // ==========================================
+    // 1. UPDATE THE SUBSCRIPTION STATUS
+    // ==========================================
     try {
       final updateData = {
         'status': 'inactive',
@@ -220,15 +225,68 @@ class SubscriptionSupabaseService {
         updateData['cancellation_reason'] = reason;
       }
 
-      await Supabase.instance.client
-          .from('tumpang_subscription')
-          .update(updateData)
-          .eq('id', subscriptionId);
+      await _supabase.from('tumpang_subscription').update(updateData).eq('id', subscriptionId);
 
-      return true;
     } catch (e) {
-      debugPrint('Supabase Error cancelling subscription: $e');
-      return false;
+      debugPrint('🚨 Supabase Error cancelling subscription: $e');
+      return false; // If the cancel fails, stop here
+    }
+
+    // ==========================================
+    // 2. INSERT THE NOTIFICATION
+    // ==========================================
+    try {
+      if (otherUserId.isEmpty) {
+        debugPrint('🚨 NOTIF ERROR: otherUserId is empty! Supabase will reject this because it needs a valid UUID.');
+      } else {
+        // Generate a unique string ID for the notification
+        final String notifId = 'NOTIF-${DateTime.now().millisecondsSinceEpoch}';
+
+        await _supabase.from('tumpang_notifications').insert({
+          'id': notifId,
+          'target_user_id': otherUserId,
+          'title': 'Subscription Cancelled',
+          'message': 'Your Tumpang subscription has been cancelled by the ${cancelledByRole.toLowerCase()}.',
+          'type': 'cancellation',
+          'is_read': false,
+          'subscription_id': subscriptionId,
+        });
+
+        debugPrint('✅ NOTIF SUCCESS: Notification inserted for user: $otherUserId with subscription_id: $subscriptionId');
+      }
+    } catch (e) {
+      debugPrint('🚨 NOTIF INSERT ERROR: $e');
+    }
+
+    return true;
+  }
+
+  // 2. ADD THIS METHOD to fetch unread alerts
+  Future<List<Map<String, dynamic>>> fetchUnreadNotifications(String userId) async {
+    try {
+      final response = await _supabase
+          .from('tumpang_notifications')
+          .select()
+          .eq('target_user_id', userId)
+          .eq('is_read', false)
+          .order('created_at', ascending: false);
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      print("Error fetching notifications: $e");
+      return [];
+    }
+  }
+
+  // 3. ADD THIS METHOD to mark them as read so they don't show twice
+  Future<void> markNotificationsAsRead(List<String> notificationIds) async {
+    if (notificationIds.isEmpty) return;
+    try {
+      await _supabase
+          .from('tumpang_notifications')
+          .update({'is_read': true})
+          .inFilter('id', notificationIds);
+    } catch (e) {
+      print("Error marking notifications read: $e");
     }
   }
 
@@ -237,6 +295,8 @@ class SubscriptionSupabaseService {
     required DateTime startDate,
     required DateTime endDate,
     required String reason,
+    required String otherUserId,
+    String? subscriptionId, // NEW
   }) async {
     try {
       await _supabase.from('tumpang_exception').update({
@@ -244,6 +304,18 @@ class SubscriptionSupabaseService {
         'end_date': _formatDate(endDate),
         'reason': reason,
       }).eq('id', exceptionId);
+
+      final String notifId = 'NOTIF-${DateTime.now().millisecondsSinceEpoch}';
+      await _supabase.from('tumpang_notifications').insert({
+        'id': notifId,
+        'target_user_id': otherUserId,
+        'title': 'Schedule Change Updated',
+        'message': 'A schedule exception has been modified for dates ${_formatDate(startDate)} to ${_formatDate(endDate)}.',
+        'type': 'exception',
+        'is_read': false,
+        'subscription_id': subscriptionId, // NEW
+      });
+
       return true;
     } catch (e) {
       print("Error in updateException: $e");
@@ -302,6 +374,26 @@ class SubscriptionSupabaseService {
     } catch (e, stackTrace) {
       print('❌ Service Extension Insert Error: $e');
       print(stackTrace);
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>?> fetchSubscriptionById(String subscriptionId, String role) async {
+    try {
+      final response = await _supabase
+          .from('tumpang_subscription')
+          .select('''
+          *,
+          passenger_trips:passenger_trip_id (*, users (*)),
+          driver_trips:driver_trip_id (*, users (*))
+        ''')
+          .eq('id', subscriptionId)
+          .maybeSingle();
+
+      if (response == null) return null;
+      return normalizeSubscription(response, role);
+    } catch (e) {
+      print('Error in fetchSubscriptionById: $e');
       return null;
     }
   }

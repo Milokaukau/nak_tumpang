@@ -56,6 +56,7 @@ class HomePanel extends StatelessWidget {
                 CantFetchPanel(
                   tumpangSubscriptionId: viewModel.selectedSubscription!['id'] ?? '',
                   driverId: viewModel.currentUserId ?? '',
+                  passengerId: viewModel.selectedSubscription!['passenger_id'] ?? '',
                   passengerName: viewModel.selectedSubscription!['name'] ?? '',
                   passengerImageUrl: viewModel.selectedSubscription!['imageUrl'],
                   pickupName: viewModel.selectedSubscription!['pickup_location'] ?? '',
@@ -69,6 +70,7 @@ class HomePanel extends StatelessWidget {
                 NoNeedFetchPanel(
                   tumpangSubscriptionId: viewModel.selectedSubscription!['id'] ?? '',
                   passengerId: viewModel.currentUserId ?? '',
+                  driverId: viewModel.selectedSubscription!['driver_id'] ?? '',
                   driverName: viewModel.selectedSubscription!['name'] ?? '',
                   driverImageUrl: viewModel.selectedSubscription!['imageUrl'],
                   pickupName: viewModel.selectedSubscription!['pickup_location'] ?? '',

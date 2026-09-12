@@ -54,10 +54,10 @@ class ExceptionRequestForm extends StatelessWidget {
     );
 
     if (picked != null) {
-      // If a minimum and maximum date exist (subscription period)
+      final purePicked = DateTime(picked.year, picked.month, picked.day);
+
+      // validation: subscription period bounds check
       if (minDate != null && maxDate != null) {
-        // Strip time to only compare dates
-        final purePicked = DateTime(picked.year, picked.month, picked.day);
         final pureMin = DateTime(minDate!.year, minDate!.month, minDate!.day);
         final pureMax = DateTime(maxDate!.year, maxDate!.month, maxDate!.day);
 
@@ -70,11 +70,26 @@ class ExceptionRequestForm extends StatelessWidget {
               ),
             );
           }
-          return; // Stop here, do not update the date
+          return;
         }
       }
 
-      // Update if valid
+      // validation:end date can't be before the chosen start date
+      if (!isStart && startDate != null) {
+        final pureStart = DateTime(startDate!.year, startDate!.month, startDate!.day);
+        if (purePicked.isBefore(pureStart)) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Not allowed: End date cannot be before the start date.'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+          return;
+        }
+      }
+
       isStart ? onStartDateChanged(picked) : onEndDateChanged(picked);
     }
   }
