@@ -3,7 +3,8 @@ import 'package:nak_tumpang/features/rewards/data/services/rewards_supabase_serv
 
 class RewardsViewModel extends ChangeNotifier {
   final RewardsSupabaseService _service = RewardsSupabaseService();
-
+  bool isGoyangAvailableToday = true;
+  bool isClaimingGoyang = false;
   bool isLoading = false;
   Map<String, dynamic> summary = {
     'obtained_points': 0,
@@ -35,5 +36,27 @@ class RewardsViewModel extends ChangeNotifier {
       await loadAll(userId); // refresh everything after a successful redemption
     }
     return success;
+  }
+
+  Future<void> checkGoyangAvailability(String userId) async {
+    final claimed = await _service.hasClaimedGoyangToday(userId);
+    isGoyangAvailableToday = !claimed;
+    notifyListeners();
+  }
+
+  Future<Map<String, dynamic>> playGoyang(String userId) async {
+    if (isClaimingGoyang || !isGoyangAvailableToday) return {'type': 'unavailable'};
+    isClaimingGoyang = true;
+    notifyListeners();
+
+    final result = await _service.playGoyang(userId);
+    if (result['type'] == 'points' || result['type'] == 'voucher') {
+      isGoyangAvailableToday = false;
+      await loadAll(userId); // refresh summary + history + vouchers
+    }
+
+    isClaimingGoyang = false;
+    notifyListeners();
+    return result;
   }
 }

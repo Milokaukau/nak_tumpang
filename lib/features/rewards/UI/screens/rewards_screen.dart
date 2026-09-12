@@ -6,6 +6,10 @@ import 'package:nak_tumpang/features/rewards/UI/components/points_summary_card.d
 import 'package:nak_tumpang/features/rewards/UI/components/voucher_card.dart';
 import 'voucher_detail_screen.dart';
 import 'my_reward_detail_screen.dart';
+import 'dart:async';
+import 'package:flutter/services.dart';
+import 'package:nak_tumpang/core/services/goyang_detector.dart';
+import 'goyang_screen.dart';
 
 class RewardsScreen extends StatefulWidget {
   final String userId;
@@ -22,9 +26,13 @@ class _RewardsScreenState extends State<RewardsScreen> {
   @override
   void initState() {
     super.initState();
-    // This correctly fetches the fresh data when the screen opens
-    Future.microtask(() => context.read<RewardsViewModel>().loadAll(widget.userId));
+    Future.microtask(() async {
+      final vm = context.read<RewardsViewModel>();
+      await vm.loadAll(widget.userId);
+      await vm.checkGoyangAvailability(widget.userId);
+    });
   }
+
 
   bool _isExpired(DateTime? expiredAt) {
     if (expiredAt == null) return false;
@@ -45,37 +53,84 @@ class _RewardsScreenState extends State<RewardsScreen> {
       ),
       body: vm.isLoading
           ? const Center(child: CircularProgressIndicator(color: AppColors.primaryYellow))
-          : RefreshIndicator(
-        color: AppColors.primaryYellow,
-        onRefresh: () => vm.loadAll(widget.userId),
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            PointsSummaryCard(
-              availablePoints: vm.summary['available_points'] ?? 0,
-              usedPoints: vm.summary['used_points'] ?? 0,
-              voucherCount: vm.summary['voucher_count'] ?? 0,
-              nearestExpiry: vm.summary['nearest_expiry'],
+          : Stack(
+        children: [
+          RefreshIndicator(
+            color: AppColors.primaryYellow,
+            onRefresh: () async {
+              await vm.loadAll(widget.userId);
+              await vm.checkGoyangAvailability(widget.userId);
+            },
+            child: ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                PointsSummaryCard(
+                  availablePoints: vm.summary['available_points'] ?? 0,
+                  usedPoints: vm.summary['used_points'] ?? 0,
+                  voucherCount: vm.summary['voucher_count'] ?? 0,
+                  nearestExpiry: vm.summary['nearest_expiry'],
+                ),
+                const SizedBox(height: 20),
+                IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(child: _tabButton('Points\nHistory', 0)),
+                      const SizedBox(width: 8),
+                      Expanded(child: _tabButton('Reward\nRedemption', 1)),
+                      const SizedBox(width: 8),
+                      Expanded(child: _tabButton('My\nRewards', 2)),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+                if (selectedTab == 0) ..._buildHistoryTab(vm),
+                if (selectedTab == 1) ..._buildRedemptionTab(vm),
+                if (selectedTab == 2) ..._buildMyRewardsTab(vm),
+                const SizedBox(height: 80), // keeps content clear of the bubble
+              ],
             ),
-            const SizedBox(height: 20),
-            IntrinsicHeight(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(child: _tabButton('Points\nHistory', 0)),
-                  const SizedBox(width: 8),
-                  Expanded(child: _tabButton('Reward\nRedemption', 1)),
-                  const SizedBox(width: 8),
-                  Expanded(child: _tabButton('My\nRewards', 2)),
-                ],
+          ),
+
+          // Floating "Goyang N Win!" bubble — only visible if not yet played today.
+          if (vm.isGoyangAvailableToday)
+            Positioned(
+              right: 16,
+              bottom: 24,
+              child: GestureDetector(
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => GoyangScreen(userId: widget.userId)),
+                ).then((_) {
+                  // Re-check in case a play happened and we came back.
+                  context.read<RewardsViewModel>().checkGoyangAvailability(widget.userId);
+                }),
+                child: Container(
+                  width: 72,
+                  height: 72,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: AppColors.primaryYellow,
+                    border: Border.all(color: AppColors.black, width: 1.5),
+                    boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 8, offset: Offset(0, 4))],
+                  ),
+                  alignment: Alignment.center,
+                  child: const Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.vibration, color: AppColors.black, size: 20),
+                      SizedBox(height: 2),
+                      Text(
+                        'Goyang\nN Win!',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: AppColors.black, height: 1.1),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
-            const SizedBox(height: 20),
-            if (selectedTab == 0) ..._buildHistoryTab(vm),
-            if (selectedTab == 1) ..._buildRedemptionTab(vm),
-            if (selectedTab == 2) ..._buildMyRewardsTab(vm),
-          ],
-        ),
+        ],
       ),
     );
   }
@@ -99,7 +154,11 @@ class _RewardsScreenState extends State<RewardsScreen> {
   }
 
   List<Widget> _buildHistoryTab(RewardsViewModel vm) {
-    if (vm.pointsHistory.isEmpty) {
+    final displayableHistory = vm.pointsHistory
+        .where((entry) => entry['reason'] != 'goyang_voucher')
+        .toList();
+
+    if (displayableHistory.isEmpty) {
       return [
         const Padding(
           padding: EdgeInsets.symmetric(vertical: 32),
@@ -107,7 +166,7 @@ class _RewardsScreenState extends State<RewardsScreen> {
         )
       ];
     }
-    return vm.pointsHistory.map((entry) {
+    return displayableHistory.map((entry) {
       final isEarn = (entry['change_amount'] as num) > 0;
       final date = DateTime.tryParse(entry['created_at'] ?? '');
       return Container(
@@ -155,19 +214,27 @@ class _RewardsScreenState extends State<RewardsScreen> {
     final available = vm.summary['available_points'] ?? 0;
     return vm.availableVouchers.map((voucher) {
       final reqPoints = (voucher['req_points'] as num).toInt();
-      final canRedeem = available >= reqPoints;
+      final isRedeemed = voucher['is_redeemed'] == true;
+      final canRedeem = !isRedeemed && available >= reqPoints;
       return VoucherCard(
         captionText: 'Point Voucher',
         title: voucher['name'] ?? '',
         subtitle: 'Redeem with $reqPoints points',
+        isDisabled: isRedeemed,
         statusBadge: Text(
-          canRedeem ? 'Tap to redeem' : 'Need ${reqPoints - available} more pts',
+          isRedeemed
+              ? 'Redeemed'
+              : (canRedeem ? 'Tap to redeem' : 'Need ${reqPoints - available} more pts'),
           style: TextStyle(
             fontWeight: FontWeight.bold,
-            color: canRedeem ? AppColors.successGreenText : AppColors.warningAmberText,
+            color: isRedeemed
+                ? AppColors.greyText
+                : (canRedeem ? AppColors.successGreenText : AppColors.warningAmberText),
           ),
         ),
-        onTap: () {
+        onTap: isRedeemed
+            ? () {} // no-op — card is visually disabled via isDisabled, so this shouldn't be reachable anyway, but the callback still needs a value
+            : () {
           Navigator.push(
             context,
             MaterialPageRoute(
