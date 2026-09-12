@@ -41,7 +41,10 @@ class NetworkService {
             children: [
               Icon(Icons.wifi_off, color: Colors.white),
               SizedBox(width: 12),
-              Text('You are offline. Showing local cache.'),
+              // Wrapped in Expanded to allow text wrapping and prevent overflow
+              Expanded(
+                child: Text('You are offline. Showing local cache.'),
+              ),
             ],
           ),
           duration: Duration(days: 365),

@@ -38,7 +38,7 @@ class HomeLocalService {
         'status': 'active',
       }, conflictAlgorithm: ConflictAlgorithm.ignore);
 
-      // 3. Insert User's own trips (Fixed for SQLite compatibility)
+      // 3. Insert User's own trips
       for (final t in trips) {
         if (isForPassenger) {
           batch.insert('passenger_trips', {

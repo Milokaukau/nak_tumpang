@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/components/base_button.dart';
+import 'package:nak_tumpang/core/services/network_service.dart';
 import 'package:nak_tumpang/features/trips/view_models/my_trips_view_model.dart';
 import 'package:nak_tumpang/features/trips/UI/add_edit_trip_screen.dart';
 import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
@@ -33,11 +34,18 @@ class _MyTripsScreenState extends State<MyTripsScreen> {
           TextButton(
             onPressed: () async {
               Navigator.pop(ctx);
+
+              if (NetworkService.isOfflineNotifier.value) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Cannot remove trips while offline.'), backgroundColor: Colors.red),
+                );
+                return;
+              }
+
               final success = await context.read<MyTripsViewModel>().removeTrip(tripId);
               if (!context.mounted) return;
 
               if (success) {
-                // --- OPTIMIZED: Update home screen locally instead of heavy API refetch ---
                 context.read<HomeViewModel>().removeLocalTrip(tripId);
               }
               ScaffoldMessenger.of(context).showSnackBar(
@@ -83,6 +91,12 @@ class _MyTripsScreenState extends State<MyTripsScreen> {
       floatingActionButton: FloatingActionButton.extended(
         backgroundColor: AppColors.primaryYellow,
         onPressed: () {
+          if (NetworkService.isOfflineNotifier.value) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Cannot create trips while offline.'), backgroundColor: Colors.red),
+            );
+            return;
+          }
           Navigator.push(
             context,
             MaterialPageRoute(builder: (_) => const AddEditTripScreen()),
@@ -196,6 +210,12 @@ class _MyTripsScreenState extends State<MyTripsScreen> {
                 child: BaseButton(
                   text: 'Edit',
                   onPressed: isLocked ? null : () {
+                    if (NetworkService.isOfflineNotifier.value) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Cannot edit trips while offline.'), backgroundColor: Colors.red),
+                      );
+                      return;
+                    }
                     Navigator.push(
                       context,
                       MaterialPageRoute(

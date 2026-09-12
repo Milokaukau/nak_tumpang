@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/components/base_filter_options.dart';
+import 'package:nak_tumpang/core/services/network_service.dart';
 import 'package:nak_tumpang/features/home/UI/components/back_to_subscriptions_button.dart';
 import 'package:nak_tumpang/features/home/UI/components/direct_route_option_card.dart';
 import 'package:nak_tumpang/features/home/UI/components/empty_state_message.dart';
@@ -9,10 +10,6 @@ import 'package:nak_tumpang/features/home/UI/components/mixed_route_option_card.
 import 'package:nak_tumpang/features/home/UI/components/trip_selection_dropdown.dart';
 import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
 
-/// The "find a driver / mixed route" matching experience shown to
-/// passengers. Pulled out of home_panel.dart (which was mixing layout,
-/// driver views, and this logic in one 300+ line file) so it can be read,
-/// tested, and changed independently.
 class PassengerMatchingView extends StatelessWidget {
   const PassengerMatchingView({super.key});
 
@@ -40,16 +37,23 @@ class PassengerMatchingView extends StatelessWidget {
           BackToSubscriptionsButton(onPressed: () => viewModel.toggleMatchingUI(false)),
 
         const TripSelectionDropdown(),
-        const SizedBox(height: 24),
-        const Text('Available options', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
         const SizedBox(height: 16),
+        const Text('Available options', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 12),
         BaseFilterOptions(
           options: const ['Direct', 'Mixed'],
           selectedOption: viewModel.selectedFilter,
           onSelectionChanged: (option) => viewModel.setFilter(option),
         ),
-        const SizedBox(height: 24),
-        if (viewModel.selectedFilter == 'Direct')
+        const SizedBox(height: 16),
+
+        // --- NEW: Immediately show offline message instead of searching ---
+        if (NetworkService.isOfflineNotifier.value)
+          const EmptyStateMessage(
+            message: 'Connect to the internet to find drivers.',
+            topSpacing: 24,
+          )
+        else if (viewModel.selectedFilter == 'Direct')
           _DirectResults(viewModel: viewModel)
         else
           _MixedResults(viewModel: viewModel),
@@ -70,12 +74,12 @@ class _DirectResults extends StatelessWidget {
     final drivers = viewModel.matchedDrivers;
     if (drivers.isEmpty) {
       return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 32),
+        padding: EdgeInsets.symmetric(vertical: 24),
         child: Center(
           child: Text(
             'No direct drivers found for this route.\nTry selecting "Mixed".',
             textAlign: TextAlign.center,
-            style: TextStyle(color: AppColors.greyText, height: 1.5),
+            style: TextStyle(color: AppColors.greyText, height: 1.4, fontSize: 13),
           ),
         ),
       );
@@ -86,9 +90,6 @@ class _DirectResults extends StatelessWidget {
         for (var index = 0; index < drivers.length; index++) ...[
           Builder(builder: (context) {
             final driver = drivers[index];
-            // driver_profile can be missing/null depending on how the
-            // driver record was joined — guard instead of letting a bad
-            // record crash the whole list.
             final driverProfile = driver['driver_profile'] as Map<String, dynamic>?;
             return DirectRouteOptionCard(
               key: ValueKey(driver['id'] ?? index),
@@ -101,7 +102,7 @@ class _DirectResults extends StatelessWidget {
           }),
           if (index != drivers.length - 1)
             const Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
+              padding: EdgeInsets.symmetric(vertical: 16),
               child: Divider(height: 1, thickness: 1, color: AppColors.greyBorder),
             ),
         ],
@@ -122,12 +123,12 @@ class _MixedResults extends StatelessWidget {
     final routes = viewModel.mixedMatchedRoutes;
     if (routes.isEmpty) {
       return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 32),
+        padding: EdgeInsets.symmetric(vertical: 24),
         child: Center(
           child: Text(
             'No mixed routes available. Try selecting "Direct".',
             textAlign: TextAlign.center,
-            style: TextStyle(color: AppColors.greyText, height: 1.5),
+            style: TextStyle(color: AppColors.greyText, height: 1.4, fontSize: 13),
           ),
         ),
       );
@@ -153,8 +154,6 @@ class _MixedResults extends StatelessWidget {
               isInterchange: route['is_interchange'],
               boardLineName: route['board_line_name'],
               boardLineShortName: route['board_line_short_name'],
-              // Cast defensively -- a null or malformed color here used to
-              // crash the whole matching list.
               boardLineColor: route['board_line_color'] as Color? ?? AppColors.greyBorder,
               alightLineName: route['alight_line_name'],
               alightLineShortName: route['alight_line_short_name'],
@@ -170,7 +169,7 @@ class _MixedResults extends StatelessWidget {
           }),
           if (index != routes.length - 1)
             const Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
+              padding: EdgeInsets.symmetric(vertical: 16),
               child: Divider(height: 1, thickness: 1, color: AppColors.greyBorder),
             ),
         ],
