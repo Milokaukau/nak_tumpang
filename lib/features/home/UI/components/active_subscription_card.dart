@@ -126,7 +126,7 @@ class ActiveSubscriptionCard extends StatelessWidget {
         children: [
           Container(
             padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(color: Colors.teal.withOpacity(0.1), shape: BoxShape.circle),
+            decoration: BoxDecoration(color: Colors.teal.withValues(alpha: 0.1), shape: BoxShape.circle),
             child: const Icon(Icons.train, color: Colors.teal, size: 18),
           ),
           const SizedBox(width: 12),
@@ -152,7 +152,7 @@ class ActiveSubscriptionCard extends StatelessWidget {
         children: [
           Container(
             padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(color: Colors.blueGrey.withOpacity(0.1), shape: BoxShape.circle),
+            decoration: BoxDecoration(color: Colors.blueGrey.withValues(alpha: 0.1), shape: BoxShape.circle),
             child: const Icon(Icons.directions_walk, color: Colors.blueGrey, size: 18),
           ),
           const SizedBox(width: 12),
