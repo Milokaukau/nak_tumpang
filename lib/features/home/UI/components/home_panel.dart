@@ -279,7 +279,87 @@ class HomePanel extends StatelessWidget {
                       walkToDestMeters: route['walk_to_dest_meters'],
                       walkToDestMins: route['walk_to_dest_mins'],
                       isRequested: route['is_requested'] ?? false,
-                      onRequestTumpang: () async {},
+                      onRequestTumpang: () async {
+                        final selectedTrip = viewModel.currentSelectedTrip;
+                        if (selectedTrip == null) return;
+
+                        // A mixed route always has at least one driver leg
+                        // (routes where both legs are Walk are filtered out
+                        // in _findMixedRoutes), but never assume both legs
+                        // exist -- request each independently, the same way
+                        // the direct flow requests a single driver.
+                        final driverATripId = route['driver_a_trip_id'] as String?;
+                        final driverBTripId = route['driver_b_trip_id'] as String?;
+                        final hasDriverA = route['first_mile_type'] == 'Driver' && driverATripId != null;
+                        final hasDriverB = route['last_mile_type'] == 'Driver' && driverBTripId != null;
+
+                        String? firstRequestId;
+                        final requestedTripIds = <String>[];
+                        var anyFailed = false;
+
+                        if (hasDriverA) {
+                          final requestId = await viewModel.requestTumpang(
+                            driverTripId: driverATripId,
+                            passengerTripId: selectedTrip['id'],
+                            overridePickupLat: selectedTrip['pickup_lat'],
+                            overridePickupLng: selectedTrip['pickup_lng'],
+                            overridePickupName: selectedTrip['pickup_name'],
+                            overrideDropoffLat: route['board_station_lat'],
+                            overrideDropoffLng: route['board_station_lng'],
+                            overrideDropoffName: route['board_station'],
+                          );
+                          if (requestId != null) {
+                            requestedTripIds.add(driverATripId);
+                            firstRequestId ??= requestId;
+                          } else {
+                            anyFailed = true;
+                          }
+                        }
+
+                        if (hasDriverB) {
+                          final requestId = await viewModel.requestTumpang(
+                            driverTripId: driverBTripId,
+                            passengerTripId: selectedTrip['id'],
+                            overridePickupLat: route['alight_station_lat'],
+                            overridePickupLng: route['alight_station_lng'],
+                            overridePickupName: route['alight_station'],
+                            overrideDropoffLat: selectedTrip['dropoff_lat'],
+                            overrideDropoffLng: selectedTrip['dropoff_lng'],
+                            overrideDropoffName: selectedTrip['dropoff_name'],
+                          );
+                          if (requestId != null) {
+                            requestedTripIds.add(driverBTripId);
+                            firstRequestId ??= requestId;
+                          } else {
+                            anyFailed = true;
+                          }
+                        }
+
+                        if (!context.mounted) return;
+
+                        if (requestedTripIds.isNotEmpty) {
+                          viewModel.markDriverRequestedGlobally(requestedTripIds);
+                        }
+
+                        if (firstRequestId == null) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Failed to send request.'), backgroundColor: Colors.red),
+                          );
+                          return;
+                        }
+
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              anyFailed
+                                  ? 'Request sent for one leg -- the other driver could not be reached. Please retry.'
+                                  : 'Request sent!',
+                            ),
+                            backgroundColor: anyFailed ? Colors.orange : Colors.green,
+                          ),
+                        );
+                        Navigator.push(context, MaterialPageRoute(builder: (_) => NegotiationScreen(requestId: firstRequestId!)));
+                      },
                     ),
                     if (index != viewModel.mixedMatchedRoutes.length - 1)
                       const Padding(

@@ -37,10 +37,19 @@ class MyTripsViewModel extends ChangeNotifier {
     }
 
     String? role;
-    if (NetworkService.isOfflineNotifier.value) {
-      role = await HomeLocalService().getUserRole(user.id);
-    } else {
-      role = await _tripService.getUserRole(user.id);
+    try {
+      if (NetworkService.isOfflineNotifier.value) {
+        role = await HomeLocalService().getUserRole(user.id);
+      } else {
+        role = await _tripService.getUserRole(user.id);
+      }
+    } catch (e) {
+      debugPrint('⚠️ MyTrips role fetch error: $e');
+      if (requestId == _loadId) {
+        isLoading = false;
+        notifyListeners();
+      }
+      return;
     }
 
     if (requestId != _loadId) return;
