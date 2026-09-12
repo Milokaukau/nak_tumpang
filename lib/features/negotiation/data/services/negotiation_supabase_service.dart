@@ -286,4 +286,6 @@ class NegotiationSupabaseService {
 
     return activeSubscriptionId;
   }
+
+
 }

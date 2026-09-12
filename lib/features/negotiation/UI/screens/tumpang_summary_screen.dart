@@ -7,6 +7,8 @@ import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/entities/tumpang_request.dart';
 import 'package:nak_tumpang/features/negotiation/view_models/negotiation_view_model.dart';
 import 'package:nak_tumpang/features/negotiation/UI/components/summary_route_map.dart';
+// NOTE: adjust this path to match where HomeViewModel actually lives in your project.
+import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
 
 class TumpangSummaryScreen extends StatefulWidget {
   final String requestId;
@@ -97,11 +99,11 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
           billingDetails: const BillingDetails(
             address: Address(
               country: 'MY',
-              city: '',
-              line1: '',
-              line2: '',
-              postalCode: '',
-              state: '',
+              city: null,
+              line1: null,
+              line2: null,
+              postalCode: null,
+              state: null,
             ),
           ),
         ),
@@ -109,9 +111,13 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
 
       await Stripe.instance.presentPaymentSheet();
 
+      // Widget may have been disposed while the Stripe sheet was open.
+      if (!mounted) return;
+
       // 3. Backend Finalization
       if (request.isExtension) {
-        // Route to the Extension logic
+        // Route to the Extension logic. finalizeExtensionRequest is expected to
+        // update the underlying request/subscription status itself.
         await Provider.of<NegotiationViewModel>(context, listen: false)
             .finalizeExtensionRequest(
           extensionRequestId: request.id,
@@ -157,7 +163,17 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
 
         await _supabase.from('tumpang_request').update({
           'status': 'completed',
+          'subscription_id': subId,
         }).eq('id', request.id);
+      }
+
+      // --- Shared success path for BOTH extension and fresh-subscription flows ---
+      if (!mounted) return;
+
+      try {
+        await context.read<HomeViewModel>().fetchCurrentUser();
+      } catch (e) {
+        debugPrint('⚠️ Error refreshing HomeViewModel: $e');
       }
 
       if (!mounted) return;
@@ -165,7 +181,6 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
         const SnackBar(content: Text('Payment Successful!'), backgroundColor: Colors.green),
       );
       Navigator.of(context).popUntil((route) => route.isFirst);
-
     } on StripeException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -219,8 +234,8 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
           final bool depositCapped = request.subscriptionDays > 60;
 
           // Calculate "Top-Up" for extensions
-          final additionalDeposit = request.isExtension
-              ? (targetTotalDeposit - oldDeposit).clamp(0.0, double.infinity)
+          final double additionalDeposit = request.isExtension
+              ? (targetTotalDeposit - oldDeposit).clamp(0.0, double.infinity).toDouble()
               : targetTotalDeposit;
 
           final invoicePeriods = NegotiationViewModel.calculateInvoicePeriods(

@@ -12,10 +12,13 @@ import 'package:nak_tumpang/features/home/data/services/home_local_service.dart'
 import 'package:nak_tumpang/core/utils/format_utils.dart';
 import 'package:nak_tumpang/core/services/network_service.dart';
 
+enum HomePanelMode { none, cantFetch, noNeedFetch }
+
 class HomeViewModel extends ChangeNotifier {
   String selectedFilter = 'Direct';
   String currentUserRole = 'passenger';
   String? selectedSubscriptionId;
+  String? get currentUserId => _auth.currentUser?.id;
 
   Map<String, dynamic>? currentUser;
   Map<String, dynamic>? currentSelectedTrip;
@@ -27,6 +30,8 @@ class HomeViewModel extends ChangeNotifier {
   bool isDirectLoading = false;
   bool isMixedLoading = false;
   bool isRouteLoading = false;
+  bool _isCompletingTrip = false;
+  bool get isCompletingTrip => _isCompletingTrip;
 
   bool isDirectLoadingMore = false;
   bool isMixedLoadingMore = false;
@@ -37,6 +42,7 @@ class HomeViewModel extends ChangeNotifier {
 
   bool _hasFoundDirect = false;
   bool _hasFoundMixed = false;
+  bool hasExceptedTripsToday = false;
 
   int _fetchId = 0;
   int _routeFetchId = 0;
@@ -60,14 +66,127 @@ class HomeViewModel extends ChangeNotifier {
 
   final Map<String, List<LatLng>> _routeCache = {};
 
+  // ==========================================
+  // EXCEPTION PANEL (can't fetch / no need fetch)
+  // ==========================================
+
+  HomePanelMode panelMode = HomePanelMode.none;
+
+  DateTime? exceptionStartDate;
+  DateTime? exceptionEndDate;
+  String? exceptionReason;
+  final TextEditingController exceptionCustomReasonController = TextEditingController();
+  bool isSubmittingException = false;
+
+  static const List<String> driverReasons = [
+    'Sick / Not feeling well',
+    'Vehicle issue',
+    'Personal emergency',
+    'Others',
+  ];
+
+  static const List<String> passengerReasons = [
+    'Working from home',
+    'On leave',
+    'Personal emergency',
+    'Others',
+  ];
+
+  Map<String, dynamic>? selectedSubscription;
+
   HomeViewModel() {
     NetworkService.isOfflineNotifier.addListener(_onNetworkChange);
   }
 
   @override
   void dispose() {
+    exceptionCustomReasonController.dispose();
     NetworkService.isOfflineNotifier.removeListener(_onNetworkChange);
     super.dispose();
+  }
+
+  void openCantFetchPanel([Map<String, dynamic>? sub]) {
+    selectedSubscription = sub;
+    panelMode = HomePanelMode.cantFetch;
+    _resetExceptionForm();
+    notifyListeners();
+  }
+
+  void openNoNeedFetchPanel([Map<String, dynamic>? sub]) {
+    selectedSubscription = sub;
+    panelMode = HomePanelMode.noNeedFetch;
+    _resetExceptionForm();
+    notifyListeners();
+  }
+
+  void closeExceptionPanel() {
+    selectedSubscription = null;
+    panelMode = HomePanelMode.none;
+    _resetExceptionForm();
+    notifyListeners();
+  }
+
+  void _resetExceptionForm() {
+    exceptionStartDate = null;
+    exceptionEndDate = null;
+    exceptionReason = null;
+    exceptionCustomReasonController.clear();
+  }
+
+  void setExceptionStartDate(DateTime date) {
+    exceptionStartDate = date;
+    if (exceptionEndDate != null && exceptionEndDate!.isBefore(date)) {
+      exceptionEndDate = date;
+    }
+    notifyListeners();
+  }
+
+  void setExceptionEndDate(DateTime date) {
+    exceptionEndDate = date;
+    notifyListeners();
+  }
+
+  void setExceptionReason(String? reason) {
+    exceptionReason = reason;
+    if (reason != 'Others') {
+      exceptionCustomReasonController.clear();
+    }
+    notifyListeners();
+  }
+
+  Future<bool> submitException({
+    required String tumpangSubscriptionId,
+    required String initiatedBy,
+    required String initiatedByRole,
+  }) async {
+    if (exceptionStartDate == null || exceptionEndDate == null || exceptionReason == null) {
+      return false;
+    }
+
+    isSubmittingException = true;
+    notifyListeners();
+
+    final reasonText = exceptionReason == 'Others'
+        ? exceptionCustomReasonController.text.trim()
+        : exceptionReason!;
+
+    try {
+      final success = await _homeService.createException(
+        tumpangSubscriptionId: tumpangSubscriptionId,
+        initiatedBy: initiatedBy,
+        initiatedByRole: initiatedByRole,
+        startDate: exceptionStartDate!,
+        endDate: exceptionEndDate!,
+        reason: reasonText,
+      );
+      return success;
+    } catch (e) {
+      debugPrint('⚠️ Error submitting exception: $e');
+      return false;
+    } finally {
+      isSubmittingException = false;
+      notifyListeners();
+    }
   }
 
   void _onNetworkChange() {
@@ -95,6 +214,37 @@ class HomeViewModel extends ChangeNotifier {
     isMixedLoadingMore = true;
     notifyListeners();
     _findMixedRoutes();
+  }
+
+  Future<bool> completeTrip({
+    required String subscriptionId,
+    required String driverId,
+    required String passengerId,
+    required double pickupLat,
+    required double pickupLng,
+    required double dropoffLat,
+    required double dropoffLng,
+  }) async {
+    if (_isCompletingTrip) return false;
+
+    _isCompletingTrip = true;
+    notifyListeners();
+
+    try {
+      final success = await _homeService.completeTrip(
+        subscriptionId: subscriptionId,
+        driverId: driverId,
+        passengerId: passengerId,
+        pickupLat: pickupLat,
+        pickupLng: pickupLng,
+        dropoffLat: dropoffLat,
+        dropoffLng: dropoffLng,
+      );
+      return success;
+    } finally {
+      _isCompletingTrip = false;
+      notifyListeners();
+    }
   }
 
   Future<String?> requestTumpang({
@@ -293,13 +443,13 @@ class HomeViewModel extends ChangeNotifier {
 
       if (cachedSubs.isNotEmpty) {
         activeSubscriptions = _mapSubscriptions(cachedSubs, isForPassenger: isPassengerRole);
-        selectedSubscriptionId = activeSubscriptions.first['id'];
-        showMatchingUI = false;
+        selectedSubscriptionId = activeSubscriptions.isEmpty ? null : activeSubscriptions.first['id'];
+        showMatchingUI = activeSubscriptions.isEmpty;
       } else {
         showMatchingUI = true;
       }
 
-      final subbedIds = activeSubscriptions.map((s) => s[isPassengerRole ? 'passenger_trip_id' : 'driver_trip_id']).toSet();
+      final subbedIds = cachedSubs.map((s) => s[isPassengerRole ? 'passenger_trip_id' : 'driver_trip_id']).toSet();
       availableTrips = cachedTrips.where((t) => !subbedIds.contains(t['id'])).toList();
 
       _validateCurrentSelectedTrip();
@@ -351,6 +501,7 @@ class HomeViewModel extends ChangeNotifier {
     mixedMatchedRoutes.clear();
     _hasFoundDirect = false;
     _hasFoundMixed = false;
+    hasExceptedTripsToday = false;
 
     currentDirectLimit = 5;
     currentMixedLimit = 5;
@@ -368,6 +519,30 @@ class HomeViewModel extends ChangeNotifier {
     _fetchId++;
     _routeFetchId++;
     notifyListeners();
+  }
+
+  Future<Set<String>> _getExceptedSubIds(List<Map<String, dynamic>> subs) async {
+    if (subs.isEmpty || NetworkService.isOfflineNotifier.value) return {};
+    try {
+      final subIds = subs.map((s) => s['id']).toList();
+      final today = DateTime.now();
+      final todayStr = "${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}";
+
+      final exceptions = await _auth.currentSession != null
+          ? await Supabase.instance.client
+          .from('tumpang_exception')
+          .select('tumpang_subscription_id')
+          .inFilter('tumpang_subscription_id', subIds)
+          .eq('status', 'active')
+          .lte('start_date', todayStr)
+          .gte('end_date', todayStr)
+          : [];
+
+      return exceptions.map((e) => e['tumpang_subscription_id'].toString()).toSet();
+    } catch (e) {
+      debugPrint('Error fetching exceptions: $e');
+      return {};
+    }
   }
 
   Future<void> _loadDriverData(String userId, int requestId, int matchingUiEpochAtStart) async {
@@ -400,10 +575,15 @@ class HomeViewModel extends ChangeNotifier {
 
     if (requestId != _userFetchId) return;
 
+    final exceptedSubIds = await _getExceptedSubIds(rawSubs);
+    hasExceptedTripsToday = exceptedSubIds.isNotEmpty;
+    final activeTodaySubs = rawSubs.where((s) => !exceptedSubIds.contains(s['id'])).toList();
+
     final previousSubCount = activeSubscriptions.length;
-    activeSubscriptions = _mapSubscriptions(rawSubs, isForPassenger: false);
-    final subbedTripIds = activeSubscriptions.map((s) => s['driver_trip_id']).toSet();
-    availableTrips = myTrips.where((t) => !subbedTripIds.contains(t['id'])).toList();
+    activeSubscriptions = _mapSubscriptions(activeTodaySubs, isForPassenger: false);
+
+    final allSubbedTripIds = rawSubs.map((s) => s['driver_trip_id']).toSet();
+    availableTrips = myTrips.where((t) => !allSubbedTripIds.contains(t['id'])).toList();
 
     _validateCurrentSelectedTrip();
 
@@ -454,10 +634,21 @@ class HomeViewModel extends ChangeNotifier {
       }
     }
 
+    final exceptedSubIds = await _getExceptedSubIds(rawSubs);
+    hasExceptedTripsToday = exceptedSubIds.isNotEmpty;
+
+    final exceptedPassengerTripIds = rawSubs
+        .where((s) => exceptedSubIds.contains(s['id']))
+        .map((s) => s['passenger_trip_id'])
+        .toSet();
+
+    final activeTodaySubs = rawSubs.where((s) => !exceptedPassengerTripIds.contains(s['passenger_trip_id'])).toList();
+
     final previousSubCount = activeSubscriptions.length;
-    activeSubscriptions = _mapSubscriptions(rawSubs, isForPassenger: true);
-    final subbedTripIds = activeSubscriptions.map((s) => s['passenger_trip_id']).toSet();
-    availableTrips = trips.where((t) => !subbedTripIds.contains(t['id'])).toList();
+    activeSubscriptions = _mapSubscriptions(activeTodaySubs, isForPassenger: true);
+
+    final allSubbedTripIds = rawSubs.map((s) => s['passenger_trip_id']).toSet();
+    availableTrips = trips.where((t) => !allSubbedTripIds.contains(t['id'])).toList();
 
     _validateCurrentSelectedTrip();
 
@@ -966,7 +1157,6 @@ class HomeViewModel extends ChangeNotifier {
     }
   }
 
-  // --- BUG FIX: Implement safe > 1500m gap checks for map paths ---
   Future<({List<({List<LatLng> points, Color color, bool isTransit})> routes, List<({LatLng point, Color color, bool isSmallNode})> markers})?> _buildSubscriptionRoute(
       Map<String, dynamic> sub,
       ) async {
@@ -1069,7 +1259,6 @@ class HomeViewModel extends ChangeNotifier {
     return (routes: routes, markers: markers);
   }
 
-  // --- BUG FIX: Add `created_at` sorting so the freshest subscription is rendered on top ---
   List<Map<String, dynamic>> _mapSubscriptions(List<Map<String, dynamic>> rawSubs, {required bool isForPassenger}) {
     final legs = rawSubs.map((sub) => _mapSubscriptionLeg(sub, isForPassenger: isForPassenger)).toList();
 
@@ -1097,7 +1286,7 @@ class HomeViewModel extends ChangeNotifier {
     result.sort((a, b) {
       final dateA = DateTime.tryParse(a['created_at'] ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
       final dateB = DateTime.tryParse(b['created_at'] ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
-      return dateB.compareTo(dateA); // Descending (newest first)
+      return dateB.compareTo(dateA);
     });
 
     return result;
@@ -1112,12 +1301,18 @@ class HomeViewModel extends ChangeNotifier {
     final user = trip['users'] ?? {};
     final driverTrip = isForPassenger ? trip : (sub['driver_trips'] ?? {});
 
+    final driverId = sub['driver_id'] ?? (isForPassenger ? user['id'] : myTrip['user_id']);
+    final passengerId = sub['passenger_id'] ?? (isForPassenger ? myTrip['user_id'] : user['id']);
+
     return {
       'sub_id': sub['id'],
-      'created_at': sub['created_at'], // Added to fuel descending sort
+      'created_at': sub['created_at'],
+      'is_completed_today': sub['is_completed_today'] ?? false,
       'trip_name': myTrip['trip_name'] ?? 'My Trip',
       'passenger_trip_id': sub['passenger_trip_id'],
       'driver_trip_id': sub['driver_trip_id'],
+      'driver_id': driverId,
+      'passenger_id': passengerId,
       'pickup_lat': sub['pickup_lat'],
       'pickup_lng': sub['pickup_lng'],
       'dropoff_lat': sub['dropoff_lat'],
@@ -1141,7 +1336,7 @@ class HomeViewModel extends ChangeNotifier {
   }
 
   int _safeSqlTimeToMinutes(dynamic sqlTime) {
-    if (sqlTime == null) return 1 << 30; // unknown time sorts last
+    if (sqlTime == null) return 1 << 30;
     try {
       return FormatUtils.sqlTimeToMinutes(sqlTime);
     } catch (_) {
@@ -1156,7 +1351,7 @@ class HomeViewModel extends ChangeNotifier {
 
     return {
       'id': isMixed ? first['passenger_trip_id'].toString() : first['sub_id'],
-      'created_at': first['created_at'], // Bubble up sort logic
+      'created_at': first['created_at'],
       'sub_ids': legs.map((l) => l['sub_id']).toList(),
       'passenger_trip_id': first['passenger_trip_id'],
       'trip_name': first['trip_name'],
@@ -1171,6 +1366,9 @@ class HomeViewModel extends ChangeNotifier {
       'legs': legs,
       if (!isMixed) ...{
         'driver_trip_id': first['driver_trip_id'],
+        'driver_id': first['driver_id'],
+        'passenger_id': first['passenger_id'],
+        'is_completed_today': first['is_completed_today'],
         'pickup_lat': first['pickup_lat'],
         'pickup_lng': first['pickup_lng'],
         'dropoff_lat': first['dropoff_lat'],
@@ -1222,6 +1420,7 @@ class HomeViewModel extends ChangeNotifier {
 
     _hasFoundDirect = false;
     _hasFoundMixed = false;
+    hasExceptedTripsToday = false;
     matchedDrivers.clear();
     mixedMatchedRoutes.clear();
 

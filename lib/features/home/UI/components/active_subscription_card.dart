@@ -16,6 +16,8 @@ class ActiveSubscriptionLeg {
   final VoidCallback? onCallPressed;
   final VoidCallback? onDetailsPressed;
   final VoidCallback? onExceptionPressed;
+  final VoidCallback? onCompleteTripPressed;
+  final bool isCompletedToday;
 
   const ActiveSubscriptionLeg({
     required this.type,
@@ -28,6 +30,8 @@ class ActiveSubscriptionLeg {
     this.onCallPressed,
     this.onDetailsPressed,
     this.onExceptionPressed,
+    this.onCompleteTripPressed,
+    this.isCompletedToday = false,
   });
 }
 
@@ -233,6 +237,17 @@ class ActiveSubscriptionCard extends StatelessWidget {
               textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
             ),
           const SizedBox(height: 6),
+          if (leg.onCompleteTripPressed != null || leg.isCompletedToday) ...[
+            const SizedBox(height: 10),
+            BaseButton(
+              text: leg.isCompletedToday ? 'Trip Today Completed' : 'Complete Trip Today',
+              onPressed: leg.isCompletedToday ? null : leg.onCompleteTripPressed,
+              isOutlined: true,
+              height: 44,
+              textStyle: const TextStyle(fontWeight: FontWeight.normal, fontSize: 14),
+            ),
+            const SizedBox(height: 12),
+          ],
           Row(
             children: [
               if (leg.onDetailsPressed != null)

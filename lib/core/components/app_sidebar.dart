@@ -14,6 +14,8 @@ import 'package:nak_tumpang/features/negotiation/data/services/negotiation_local
 import 'package:nak_tumpang/features/profile/UI/screens/profile_screen.dart';
 import 'package:nak_tumpang/features/auth/UI/screens/login_screen.dart';
 import 'package:nak_tumpang/features/trips/UI/my_trips_screen.dart';
+import 'package:nak_tumpang/features/subscriptions/UI/screens/subscription_list_screen.dart';
+import 'package:nak_tumpang/features/rewards/UI/screens/rewards_screen.dart';
 
 class HamburgerButton extends StatelessWidget {
   const HamburgerButton({super.key});
@@ -206,12 +208,13 @@ class _AppSidebarState extends State<AppSidebar> {
               title: _isDriver ? 'My Earnings' : 'Payment',
               badgeCount: _isDriver ? 0 : paymentsBadge,
             ),
+            _buildMenuItem(context, index: 5, title: 'My Rewards'),
 
             const SizedBox(height: 8),
 
             _buildMenuItem(
               context,
-              index: 5,
+              index: 6, // Shifted down due to Rewards
               title: 'Sign Out',
               textColor: const Color(0xFFEF4444),
             ),
@@ -222,14 +225,14 @@ class _AppSidebarState extends State<AppSidebar> {
   }
 
   void _handleItemTap(BuildContext context, int index) async {
-    // --- FIXED: Capture the ViewModel BEFORE the drawer closes and destroys the context ---
+    // Capture the ViewModel BEFORE the drawer closes and destroys the context
     final homeViewModel = context.read<HomeViewModel>();
 
     Navigator.pop(context);
 
     if (index == widget.selectedIndex) return;
 
-    if (index == 5) {
+    if (index == 6) {
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(builder: (context) => const LoginScreen()),
@@ -247,13 +250,19 @@ class _AppSidebarState extends State<AppSidebar> {
         nextScreen = const MyTripsScreen();
         break;
       case 2:
-        nextScreen = const ProfileScreen();
+        nextScreen = SubscriptionListScreen(
+          userId: homeViewModel.currentUserId ?? '',
+          role: homeViewModel.currentUserRole,
+        );
         break;
       case 3:
         nextScreen = const RequestListScreen();
         break;
       case 4:
         nextScreen = _isDriver ? const DriverBalanceScreen() : const PaymentScreen();
+        break;
+      case 5:
+        nextScreen = RewardsScreen(userId: homeViewModel.currentUserId ?? '');
         break;
       default:
         return;
@@ -264,7 +273,7 @@ class _AppSidebarState extends State<AppSidebar> {
       MaterialPageRoute(builder: (context) => nextScreen),
     );
 
-    // --- FIXED: Safely refresh the Home screen using the captured ViewModel ---
+    // Safely refresh the Home screen using the captured ViewModel
     try {
       await homeViewModel.refreshHome();
     } catch (e) {
