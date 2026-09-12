@@ -79,7 +79,13 @@ class _MyTripsScreenState extends State<MyTripsScreen> {
           : viewModel.myTrips.isEmpty
           ? const Center(child: Text('You have no trips yet.', style: TextStyle(color: AppColors.greyText, fontSize: 16)))
           : ListView.separated(
-        padding: const EdgeInsets.all(16),
+        // Added dynamic bottom padding to clear the Floating Action Button
+        padding: EdgeInsets.only(
+          left: 16,
+          right: 16,
+          top: 16,
+          bottom: MediaQuery.of(context).padding.bottom + 88,
+        ),
         itemCount: viewModel.myTrips.length,
         separatorBuilder: (_, __) => const SizedBox(height: 16),
         itemBuilder: (context, index) {
@@ -137,9 +143,9 @@ class _MyTripsScreenState extends State<MyTripsScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
+        color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: color.withOpacity(0.3)),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Text(
         text,
