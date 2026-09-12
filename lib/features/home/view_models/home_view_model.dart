@@ -12,10 +12,13 @@ import 'package:nak_tumpang/features/home/data/services/home_local_service.dart'
 import 'package:nak_tumpang/core/utils/format_utils.dart';
 import 'package:nak_tumpang/core/services/network_service.dart';
 
+enum HomePanelMode { none, cantFetch, noNeedFetch }
+
 class HomeViewModel extends ChangeNotifier {
   String selectedFilter = 'Direct';
   String currentUserRole = 'passenger';
   String? selectedSubscriptionId;
+  String? get currentUserId => _auth.currentUser?.id;
 
   Map<String, dynamic>? currentUser;
   Map<String, dynamic>? currentSelectedTrip;
@@ -27,6 +30,8 @@ class HomeViewModel extends ChangeNotifier {
   bool isDirectLoading = false;
   bool isMixedLoading = false;
   bool isRouteLoading = false;
+  bool _isCompletingTrip = false;
+  bool get isCompletingTrip => _isCompletingTrip;
 
   bool isDirectLoadingMore = false;
   bool isMixedLoadingMore = false;
@@ -54,10 +59,33 @@ class HomeViewModel extends ChangeNotifier {
   List<Map<String, dynamic>> matchedDrivers = [];
   List<Map<String, dynamic>> mixedMatchedRoutes = [];
 
-  List<({List<LatLng> points, Color color})> mapRoutes = [];
-  List<({LatLng point, Color color})> mapMarkers = [];
+  // ==========================================
+  // EXCEPTION PANEL (can't fetch / no need fetch)
+  // ==========================================
 
-  final Map<String, List<LatLng>> _routeCache = {};
+  HomePanelMode panelMode = HomePanelMode.none;
+
+  DateTime? exceptionStartDate;
+  DateTime? exceptionEndDate;
+  String? exceptionReason;
+  final TextEditingController exceptionCustomReasonController = TextEditingController();
+  bool isSubmittingException = false;
+
+  static const List<String> driverReasons = [
+    'Sick / Not feeling well',
+    'Vehicle issue',
+    'Personal emergency',
+    'Others',
+  ];
+
+  static const List<String> passengerReasons = [
+    'Working from home',
+    'On leave',
+    'Personal emergency',
+    'Others',
+  ];
+
+  Map<String, dynamic>? selectedSubscription;
 
   HomeViewModel() {
     NetworkService.isOfflineNotifier.addListener(_onNetworkChange);
@@ -65,9 +93,100 @@ class HomeViewModel extends ChangeNotifier {
 
   @override
   void dispose() {
+    exceptionCustomReasonController.dispose();
     NetworkService.isOfflineNotifier.removeListener(_onNetworkChange);
     super.dispose();
   }
+
+
+  void openCantFetchPanel([Map<String, dynamic>? sub]) {
+    selectedSubscription = sub;
+    panelMode = HomePanelMode.cantFetch;
+    _resetExceptionForm();
+    notifyListeners();
+  }
+
+  void openNoNeedFetchPanel([Map<String, dynamic>? sub]) {
+    selectedSubscription = sub;
+    panelMode = HomePanelMode.noNeedFetch;
+    _resetExceptionForm();
+    notifyListeners();
+  }
+
+  void closeExceptionPanel() {
+    selectedSubscription = null;
+    panelMode = HomePanelMode.none;
+    _resetExceptionForm();
+    notifyListeners();
+  }
+
+  void _resetExceptionForm() {
+    exceptionStartDate = null;
+    exceptionEndDate = null;
+    exceptionReason = null;
+    exceptionCustomReasonController.clear();
+  }
+
+  void setExceptionStartDate(DateTime date) {
+    exceptionStartDate = date;
+    if (exceptionEndDate != null && exceptionEndDate!.isBefore(date)) {
+      exceptionEndDate = date;
+    }
+    notifyListeners();
+  }
+
+  void setExceptionEndDate(DateTime date) {
+    exceptionEndDate = date;
+    notifyListeners();
+  }
+
+  void setExceptionReason(String? reason) {
+    exceptionReason = reason;
+    if (reason != 'Others') {
+      exceptionCustomReasonController.clear();
+    }
+    notifyListeners();
+  }
+
+  Future<bool> submitException({
+    required String tumpangSubscriptionId,
+    required String initiatedBy,
+    required String initiatedByRole,
+  }) async {
+    if (exceptionStartDate == null || exceptionEndDate == null || exceptionReason == null) {
+      return false;
+    }
+
+    isSubmittingException = true;
+    notifyListeners();
+
+    final reasonText = exceptionReason == 'Others'
+        ? exceptionCustomReasonController.text.trim()
+        : exceptionReason!;
+
+    try {
+      final success = await _homeService.createException(
+        tumpangSubscriptionId: tumpangSubscriptionId,
+        initiatedBy: initiatedBy,
+        initiatedByRole: initiatedByRole,
+        startDate: exceptionStartDate!,
+        endDate: exceptionEndDate!,
+        reason: reasonText,
+      );
+      return success;
+    } catch (e) {
+      debugPrint('⚠️ Error submitting exception: $e');
+      return false;
+    } finally {
+      isSubmittingException = false;
+      notifyListeners();
+    }
+  }
+
+  List<({List<LatLng> points, Color color})> mapRoutes = [];
+  List<({LatLng point, Color color})> mapMarkers = [];
+
+  final Map<String, List<LatLng>> _routeCache = {};
 
   void _onNetworkChange() {
     if (!NetworkService.isOfflineNotifier.value) {
@@ -120,6 +239,7 @@ class HomeViewModel extends ChangeNotifier {
     final dropoffName = overrideDropoffName ?? currentSelectedTrip!['dropoff_name'];
 
     final pickupTime = overridePickupTime ?? currentSelectedTrip!['desired_pickup_time'];
+
     final requestId = const Uuid().v4();
 
     final payload = {
@@ -127,16 +247,19 @@ class HomeViewModel extends ChangeNotifier {
       'passenger_trip_id': passengerTripId,
       'driver_trip_id': driverTripId,
       'status': 'negotiating',
+
       'pickup_lat': pickupLat,
       'pickup_lng': pickupLng,
       'pickup_name': pickupName,
       'pickup_requested_by': authUser.id,
       'pickup_is_accepted': false,
+
       'dropoff_lat': dropoffLat,
       'dropoff_lng': dropoffLng,
       'dropoff_name': dropoffName,
       'dropoff_requested_by': authUser.id,
       'dropoff_is_accepted': false,
+
       'pickup_time': pickupTime,
       'pickup_time_requested_by': authUser.id,
       'pickup_time_is_accepted': false,
@@ -558,6 +681,37 @@ class HomeViewModel extends ChangeNotifier {
     }
   }
 
+  Future<bool> completeTrip({
+    required String subscriptionId,
+    required String driverId,
+    required String passengerId,
+    required double pickupLat,
+    required double pickupLng,
+    required double dropoffLat,
+    required double dropoffLng,
+  }) async {
+    if (_isCompletingTrip) return false;
+
+    _isCompletingTrip = true;
+    notifyListeners();
+
+    try {
+      final success = await _homeService.completeTrip(
+        subscriptionId: subscriptionId,
+        driverId: driverId,
+        passengerId: passengerId,
+        pickupLat: pickupLat,
+        pickupLng: pickupLng,
+        dropoffLat: dropoffLat,
+        dropoffLng: dropoffLng,
+      );
+      return success;
+    } finally {
+      _isCompletingTrip = false;
+      notifyListeners();
+    }
+  }
+
   Future<void> _findMixedRoutes() async {
     if (currentSelectedTrip == null) return;
     final currentFetchId = ++_fetchId;
@@ -913,7 +1067,7 @@ class HomeViewModel extends ChangeNotifier {
         }
       }
     } catch (e) {
-      debugPrint('⚠️ Error updating map route: $e');
+      debugPrint('Error updating map route: $e');
     } finally {
       if (requestId == _routeFetchId) {
         isRouteLoading = false;
@@ -932,11 +1086,19 @@ class HomeViewModel extends ChangeNotifier {
       final user = trip['users'] ?? {};
       final driverTrip = isForPassenger ? trip : (sub['driver_trips'] ?? {});
 
+      // NEW: the "other party" trip only carries a nested users.id (no
+      // top-level user_id in these queries), while "my" trip does carry
+      // user_id directly since it's the !inner-joined, filtered side.
+      final driverId = sub['driver_id'] ?? (isForPassenger ? user['id'] : myTrip['user_id']);
+      final passengerId = sub['passenger_id'] ?? (isForPassenger ? myTrip['user_id'] : user['id']);
+
       return {
         'id': sub['id'],
         'trip_name': myTrip['trip_name'] ?? 'My Trip',
         'passenger_trip_id': sub['passenger_trip_id'],
         'driver_trip_id': sub['driver_trip_id'],
+        'driver_id': driverId,       // NEW
+        'passenger_id': passengerId, // NEW
         'pickup_lat': sub['pickup_lat'],
         'pickup_lng': sub['pickup_lng'],
         'dropoff_lat': sub['dropoff_lat'],

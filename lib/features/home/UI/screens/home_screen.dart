@@ -5,10 +5,13 @@ import 'package:geolocator/geolocator.dart';
 import 'package:nak_tumpang/core/components/map_pin.dart';
 import 'package:nak_tumpang/core/services/network_service.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nak_tumpang/core/components/app_sidebar.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/features/home/UI/components/home_panel.dart';
 import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
+import 'package:nak_tumpang/features/subscriptions/data/services/subscription_supabase_service.dart';
+import 'package:nak_tumpang/features/subscriptions/UI/screens/subscription_detail_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -19,6 +22,8 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final MapController _mapController = MapController();
+  final SubscriptionSupabaseService _subscriptionService = SubscriptionSupabaseService();
+
   String? _lastRouteSignature;
 
   // Added state for user location
@@ -31,6 +36,177 @@ class _HomeScreenState extends State<HomeScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<HomeViewModel>().fetchCurrentUser();
       _fetchUserLocation(centerMap: false); // Fetch quietly on load
+      _initializeNotifications();
+    });
+  }
+
+  Future<void> _initializeNotifications() async {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId != null) {
+      await _checkCrossSideNotifications(userId);
+    }
+  }
+
+  Future<void> _checkCrossSideNotifications(String userId) async {
+    final notifications = await _subscriptionService.fetchUnreadNotifications(userId);
+
+    if (notifications.isEmpty || !mounted) return;
+
+    List<String> idsToMarkRead = [];
+    final viewModel = context.read<HomeViewModel>();
+    final userRole = viewModel.currentUserRole == 'driver' ? 'driver' : 'passenger';
+
+    for (var notif in notifications) {
+      idsToMarkRead.add(notif['id']);
+
+      await Future.delayed(const Duration(milliseconds: 300));
+      if (!mounted) break;
+
+      _showTopNotification(notif, userRole);
+    }
+
+    if (idsToMarkRead.isNotEmpty) {
+      await _subscriptionService.markNotificationsAsRead(idsToMarkRead);
+    }
+  }
+
+  void _showTopNotification(Map<String, dynamic> notif, String role) {
+    final title = notif['title'] ?? 'Notification';
+    final message = notif['message'] ?? '';
+    final subscriptionId = notif['subscription_id'];
+
+    final overlay = Overlay.of(context);
+    OverlayEntry? entry;
+
+    entry = OverlayEntry(
+      builder: (overlayContext) => Positioned(   // renamed from `context`
+        top: MediaQuery.of(overlayContext).padding.top + 16,
+        left: 16,
+        right: 16,
+        child: Material(
+          color: Colors.transparent,
+          child: GestureDetector(
+            onTap: () async {
+              entry?.remove();
+
+              if (subscriptionId == null || subscriptionId.toString().isEmpty) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Error: No subscription ID attached to this notification in Supabase.'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+                return;
+              }
+
+              if (!mounted) return;
+              showDialog(
+                context: context,               // now the State's own context
+                barrierDismissible: false,
+                builder: (ctx) => const Center(
+                  child: CircularProgressIndicator(color: AppColors.primaryYellow),
+                ),
+              );
+
+              try {
+                final rawSubscriptionData = await Supabase.instance.client
+                    .from('tumpang_subscription')
+                    .select('''
+      *,
+      driver_trips(*, users(*)),
+      passenger_trips(*, users(*))
+    ''')
+                    .eq('id', subscriptionId)
+                    .single()
+                    .timeout(const Duration(seconds: 5));
+
+                final currentUserId = Supabase.instance.client.auth.currentUser?.id ?? '';
+
+                final subscriptionData = _subscriptionService.normalizeSubscription(
+                  rawSubscriptionData,
+                  role,
+                );
+                final initialTab = (notif['type'] == 'exception') ? 1 : 0;
+
+                if (mounted) {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => SubscriptionDetailScreen(
+                        subscription: subscriptionData,
+                        currentUserId: currentUserId,
+                        role: role,
+                        initialTabIndex: initialTab,
+                      ),
+                    ),
+                  );
+                }
+              } catch (e) {
+                debugPrint('🚨 NOTIF FETCH ERROR: $e');
+                if (mounted) {
+                  Navigator.pop(context); // Close loading indicator
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Failed to load subscription: $e'),
+                      backgroundColor: Colors.red,
+                      duration: const Duration(seconds: 4),
+                    ),
+                  );
+                }
+              }
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: AppColors.primaryYellow,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: const [
+                  BoxShadow(color: Colors.black26, blurRadius: 10, offset: Offset(0, 4)),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.notifications_active, color: Colors.black87, size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(message, style: const TextStyle(color: Colors.black87, fontSize: 13)),
+                  const SizedBox(height: 8),
+                  const Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      Text('Tap to view', style: TextStyle(fontWeight: FontWeight.w700, color: Colors.black54, fontSize: 12)),
+                      Icon(Icons.chevron_right, size: 16, color: Colors.black54),
+                    ],
+                  )
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    overlay.insert(entry!);
+
+    // Auto-dismiss duration
+    Future.delayed(const Duration(seconds: 20), () {
+      if (entry?.mounted ?? false) {
+        entry?.remove();
+      }
     });
   }
 

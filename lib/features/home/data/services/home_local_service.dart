@@ -7,7 +7,12 @@ class HomeLocalService {
   Future<String?> getUserRole(String userId) async {
     final db = await _dbService.database;
     final results = await db.query('users', columns: ['role'], where: 'id = ?', whereArgs: [userId]);
-    if (results.isNotEmpty) return results.first['role'] as String;
+
+    if (results.isNotEmpty) {
+      // Cast as String? to prevent null subtype errors
+      return results.first['role'] as String?;
+    }
+
     return null;
   }
 
@@ -38,7 +43,7 @@ class HomeLocalService {
         'status': 'active',
       }, conflictAlgorithm: ConflictAlgorithm.ignore);
 
-      // 3. Insert User's own trips
+      // 3. Insert User's own trips (FIXED: Separated columns based on role)
       for (final t in trips) {
         if (isForPassenger) {
           batch.insert('passenger_trips', {

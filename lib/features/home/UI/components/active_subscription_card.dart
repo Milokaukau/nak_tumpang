@@ -17,6 +17,8 @@ class ActiveSubscriptionCard extends StatelessWidget {
   final VoidCallback onCallPressed;
   final VoidCallback onDetailsPressed;
   final VoidCallback onExceptionPressed;
+  final VoidCallback? onCompleteTripPressed;
+  final bool isCompletedToday; // NEW: Controls the button state
 
   const ActiveSubscriptionCard({
     super.key,
@@ -32,6 +34,8 @@ class ActiveSubscriptionCard extends StatelessWidget {
     required this.onCallPressed,
     required this.onDetailsPressed,
     required this.onExceptionPressed,
+    this.onCompleteTripPressed,
+    this.isCompletedToday = false,
   });
 
   @override
@@ -132,6 +136,19 @@ class ActiveSubscriptionCard extends StatelessWidget {
                       textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13), // Scaled text
                     ),
                     const SizedBox(height: 6), // Very tight spacing
+                    if (onCompleteTripPressed != null || isCompletedToday) ...[
+                      const SizedBox(height: 10,),
+                      BaseButton(
+                        // Changes text dynamically
+                        text: isCompletedToday ? 'Trip Today Completed' : 'Complete Trip Today',
+                        // Null disables the button
+                        onPressed: isCompletedToday ? null : onCompleteTripPressed,
+                        isOutlined: true,
+                        height: 44,
+                        textStyle: const TextStyle(fontWeight: FontWeight.normal, fontSize: 14),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
                     Row(
                       children: [
                         Expanded(
