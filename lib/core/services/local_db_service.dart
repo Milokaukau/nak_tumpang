@@ -32,9 +32,12 @@ class LocalDbService {
     if (oldVersion < 2) {
       // Widen points_ledger's reason CHECK to match the Supabase migration
       // (added 'goyang_points'/'goyang_voucher'). SQLite can't ALTER a
-      // CHECK constraint in place, so recreate the table — safe, since
-      // this is purely a local cache, not the source of truth.
-      await db.execute('DROP TABLE IF EXISTS points_ledger');
+      // CHECK constraint in place, so rename the old table, create the new
+      // one with the updated constraint, copy the existing rows across,
+      // then drop the old table — preserves cached history instead of
+      // wiping it on upgrade.
+      await db.execute('ALTER TABLE points_ledger RENAME TO points_ledger_old');
+
       await db.execute('''
       CREATE TABLE points_ledger (
         id TEXT PRIMARY KEY,
@@ -47,6 +50,14 @@ class LocalDbService {
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
       )
     ''');
+
+      await db.execute('''
+      INSERT INTO points_ledger (id, user_id, change_amount, reason, reference_id, description, created_at)
+      SELECT id, user_id, change_amount, reason, reference_id, description, created_at
+      FROM points_ledger_old
+    ''');
+
+      await db.execute('DROP TABLE points_ledger_old');
     }
   }
 
