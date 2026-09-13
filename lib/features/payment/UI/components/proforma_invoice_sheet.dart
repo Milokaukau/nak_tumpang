@@ -57,10 +57,12 @@ class _ProformaInvoiceSheetState extends State<ProformaInvoiceSheet> {
         final startStr = start.toIso8601String().split('T').first;
         final endStr = end.toIso8601String().split('T').first;
 
+        // FIXED: Only count exceptions reported by the DRIVER for deductions!
         final exceptions = await _supabase
             .from('tumpang_exception')
             .select('start_date, end_date, reason')
             .eq('tumpang_subscription_id', widget.payment.subscriptionId)
+            .eq('reported_by_role', 'driver') // Passenger "no need fetch" is ignored
             .lte('start_date', endStr)
             .gte('end_date', startStr);
 
