@@ -6,7 +6,6 @@ import 'package:nak_tumpang/core/services/ors_service.dart';
 import 'package:nak_tumpang/features/home/data/services/home_supabase_service.dart';
 import 'package:nak_tumpang/core/services/gtfs_service.dart';
 import 'package:nak_tumpang/core/utils/transit_utils.dart';
-import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:uuid/uuid.dart';
 import 'package:nak_tumpang/features/home/data/services/home_local_service.dart';
 import 'package:nak_tumpang/core/utils/format_utils.dart';
