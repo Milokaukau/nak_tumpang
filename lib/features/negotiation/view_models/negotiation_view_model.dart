@@ -46,6 +46,7 @@ class NegotiationViewModel extends ChangeNotifier {
         }
         _userCache.clear();
         currentUserRole = null;
+        currentUserId = null;
       }
 
       await _initSession();
@@ -60,6 +61,10 @@ class NegotiationViewModel extends ChangeNotifier {
     }
     _userCache.clear();
     currentUserRole = null;
+    currentUserId = null;
+    pendingRequests.clear();
+    completedRequests.clear();
+    notifyListeners();
   }
 
   Future<void> _persistRole(String userId, String role) async {
@@ -89,8 +94,9 @@ class NegotiationViewModel extends ChangeNotifier {
 
   Future<void> _initSession() async {
     final user = _supabase.auth.currentUser;
+    currentUserId = user?.id;
+
     if (user != null) {
-      currentUserId = user.id;
       currentUserRole ??= await _readCachedRole(currentUserId!);
 
       try {
@@ -109,6 +115,11 @@ class NegotiationViewModel extends ChangeNotifier {
 
       currentUserRole ??= 'passenger';
       await fetchRequests();
+    } else {
+      currentUserRole = null;
+      pendingRequests.clear();
+      completedRequests.clear();
+      notifyListeners();
     }
   }
 
@@ -118,7 +129,7 @@ class NegotiationViewModel extends ChangeNotifier {
     notifyListeners();
 
     try {
-      currentUserId = _supabase.auth.currentUser?.id ?? currentUserId;
+      currentUserId = _supabase.auth.currentUser?.id;
       if (currentUserId == null) {
         isLoading = false;
         notifyListeners();
@@ -280,8 +291,8 @@ class NegotiationViewModel extends ChangeNotifier {
     double? lng,
   }) {
     if (isOffline) throw NegotiationException('You cannot propose terms while offline.');
-    final activeUserId = _supabase.auth.currentUser?.id ?? currentUserId;
-    if (activeUserId == null) return Future.value();
+    final activeUserId = _supabase.auth.currentUser?.id;
+    if (activeUserId == null) throw NegotiationException('You must be signed in to propose terms.');
 
     return runNegotiationAction(() async {
       await _service.updateNegotiationField(
@@ -303,8 +314,8 @@ class NegotiationViewModel extends ChangeNotifier {
     required String endDate,
   }) {
     if (isOffline) throw NegotiationException('You cannot propose terms while offline.');
-    final activeUserId = _supabase.auth.currentUser?.id ?? currentUserId;
-    if (activeUserId == null) return Future.value();
+    final activeUserId = _supabase.auth.currentUser?.id;
+    if (activeUserId == null) throw NegotiationException('You must be signed in to propose dates.');
 
     return runNegotiationAction(() async {
       final start = DateTime.tryParse(startDate);
@@ -408,7 +419,7 @@ class NegotiationViewModel extends ChangeNotifier {
   }) {
     if (isOffline) throw NegotiationException('You cannot request an extension while offline.');
 
-    final activeUserId = _supabase.auth.currentUser?.id ?? currentUserId;
+    final activeUserId = _supabase.auth.currentUser?.id;
     if (activeUserId == null) throw NegotiationException('You must be signed in to request an extension.');
     currentUserId = activeUserId;
 
