@@ -397,13 +397,20 @@ class HomeViewModel extends ChangeNotifier {
     final cacheKey = '${profile}_${start.latitude},${start.longitude}-${end.latitude},${end.longitude}';
     if (_routeCache.containsKey(cacheKey)) return _routeCache[cacheKey]!;
 
-    try {
-      final route = await _orsService.getRoute(start, end, profile: profile);
-      _routeCache[cacheKey] = route;
-      return route;
-    } catch (e) {
-      debugPrint('⚠️ Route fetch failed for $profile: $e');
-      return [start, end]; // Fallback to a straight line on failure so map doesn't crash
+    while (true) {
+      if (NetworkService.isOfflineNotifier.value) {
+        // Genuinely offline — don't spin forever, use the straight-line fallback.
+        return [start, end];
+      }
+
+      try {
+        final route = await _orsService.getRoute(start, end, profile: profile);
+        _routeCache[cacheKey] = route;
+        return route;
+      } catch (e) {
+        debugPrint('⚠️ Route fetch failed for $profile: $e — retrying...');
+        await Future.delayed(const Duration(milliseconds: 800));
+      }
     }
   }
 
