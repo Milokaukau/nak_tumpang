@@ -3,6 +3,7 @@ import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/components/base_button.dart';
 
 class SubscriptionCard extends StatelessWidget {
+  final String tripName;
   final String name;
   final String phone;
   final String? imageUrl;
@@ -17,6 +18,7 @@ class SubscriptionCard extends StatelessWidget {
 
   const SubscriptionCard({
     super.key,
+    required this.tripName,
     required this.name,
     required this.phone,
     this.imageUrl,
@@ -48,7 +50,18 @@ class SubscriptionCard extends StatelessWidget {
         ],
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Text(
+            tripName,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.black),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Divider(height: 1, thickness: 1, color: AppColors.greyBorder),
+          ),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
