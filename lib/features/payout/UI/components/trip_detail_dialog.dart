@@ -49,7 +49,7 @@ class TripDetailDialog extends StatelessWidget {
                   child: Text('Earned', style: TextStyle(fontWeight: FontWeight.w600)),
                 ),
                 Text(
-                  '+${trip.points.toStringAsFixed(0)} pts',
+                  '+${pointsLabel(trip.points)} pts',
                   style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 18),
                 ),
               ],

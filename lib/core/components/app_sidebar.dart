@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/features/payout/UI/screens/driver_balance_screen.dart';
 import 'package:nak_tumpang/features/profile/UI/screens/profile_screen.dart';
@@ -104,7 +105,7 @@ class AppSidebar extends StatelessWidget {
   }
 
   // Handle routing internally
-  void _handleItemTap(BuildContext context, int index) {
+  void _handleItemTap(BuildContext context, int index) async {
     Navigator.pop(context); // Always close the drawer first
 
     // Prevent routing if the user is already on this screen
@@ -112,10 +113,14 @@ class AppSidebar extends StatelessWidget {
 
     // Handle Sign Out Logic completely separately
     if (index == 4) {
-      // 1. TODO: Call your auth provider to clear session here
-      // e.g., await FirebaseAuth.instance.signOut();
+      // Clear the Supabase session — without this, AuthGate still sees
+      // a valid currentSession and would send the user right back to
+      // HomeScreen the next time it rebuilds, even though they just hit
+      // "Sign Out".
+      await Supabase.instance.client.auth.signOut();
+      if (!context.mounted) return;
 
-      // 2. Route to Login and DESTROY the navigation history
+      // Route to Login and DESTROY the navigation history
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(builder: (context) => const LoginScreen()),

@@ -45,13 +45,39 @@ class Validators {
     return null;
   }
 
+  // Driving license numbers don't follow one official public format the
+  // way the IC does, so this is a light sanity check rather than a
+  // strict pattern: letters, digits, spaces and dashes only, no
+  // emoji/junk paste, at least 4 characters, and — since every real
+  // license number Malaysia issues contains digits — at least one digit,
+  // so a value like "AAAA" (all letters, clearly not a real number) no
+  // longer sails through just for being non-empty and long enough.
+  static final RegExp licenseNumberRegex = RegExp(r'^[A-Z0-9](?:[A-Z0-9\s-]*[A-Z0-9])?$');
+
+  static String? licenseNumber(String? v) {
+    final trimmed = v?.trim() ?? '';
+    if (trimmed.isEmpty) return 'Driving license number is required';
+    if (trimmed.length < 4) return 'Please enter a valid driver license number';
+    if (!licenseNumberRegex.hasMatch(trimmed)) {
+      return 'Letters, numbers, spaces and dashes only';
+    }
+    if (!RegExp(r'[0-9]').hasMatch(trimmed)) {
+      return 'License number must include at least one digit';
+    }
+    return null;
+  }
+
+  static final RegExp _specialCharRegex = RegExp(r'[!@#$%^&*(),.?":{}|<>_\-\[\]/\\+=~`]');
+
   static String? password(String? v, {bool optional = false}) {
     if (v == null || v.isEmpty) {
       return optional ? null : 'Password is required';
     }
     if (v.length < 6) return 'At least 6 characters';
-    if (!RegExp(r'[A-Za-z]').hasMatch(v) || !RegExp(r'[0-9]').hasMatch(v)) {
-      return 'Include at least one letter and one number';
+    if (!RegExp(r'[A-Z]').hasMatch(v) ||
+        !RegExp(r'[0-9]').hasMatch(v) ||
+        !_specialCharRegex.hasMatch(v)) {
+      return 'Include an uppercase letter, a number, and a special character';
     }
     return null;
   }

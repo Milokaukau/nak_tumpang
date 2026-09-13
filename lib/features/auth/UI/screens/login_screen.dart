@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 import 'package:nak_tumpang/features/home/UI/screens/home_screen.dart';
 import 'package:nak_tumpang/features/profile/UI/components/role_selection_dialog.dart';
 import 'package:nak_tumpang/features/profile/UI/screens/register_screen.dart';
-import 'package:nak_tumpang/features/profile/UI/screens/post_signup_driver_screen.dart';
 import 'package:nak_tumpang/features/auth/view_models/login_view_model.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 
@@ -33,31 +32,28 @@ class _LoginViewState extends State<_LoginView> {
     final result = await vm.submit();
     if (!mounted || result == null) return;
 
-    if (result == LoginResult.needsDriverSetup) {
-      if (vm.driverLicenseNeedsReupload) {
-        await showDialog<void>(
-          context: context,
-          builder: (_) => AlertDialog(
-            title: const Text('Welcome back!'),
-            content: const Text(
-              "Let's finish setting up your route. You'll also need to "
-                  're-add your driving license from your profile — it '
-                  "wasn't saved before your email was confirmed.",
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('OK'),
-              ),
-            ],
+    // A driver's account (and driver_profiles) always exists by login
+    // time now — nudge for a license re-upload if that was the one
+    // thing that had to be backfilled (see LoginViewModel.submit()).
+    if (vm.driverLicenseNeedsReupload) {
+      await showDialog<void>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('One more thing'),
+          content: const Text(
+            "We had to re-create your wallet profile — could you re-add "
+                'your driving license from your profile page? It looks '
+                "like it didn't save last time.",
           ),
-        );
-        if (!mounted) return;
-      }
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const PostSignupDriverScreen()),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
       );
-      return;
+      if (!mounted) return;
     }
 
     Navigator.of(context).pushReplacement(

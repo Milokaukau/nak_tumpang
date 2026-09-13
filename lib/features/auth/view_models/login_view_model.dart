@@ -5,12 +5,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 enum LoginResult {
   /// Go straight to the home screen as normal.
   home,
-
-  /// Signed in fine, but this driver still needs to finish the
-  /// route/days/time setup that `RegisterViewModel` normally does right
-  /// after signup — see the comment on [submit] for why that can be
-  /// deferred all the way to here.
-  needsDriverSetup,
 }
 
 /// Holds all state and logic for the login form. The screen only reads
@@ -98,15 +92,18 @@ class LoginViewModel extends ChangeNotifier {
       final userId = response.user?.id;
       if (userId == null) return LoginResult.home;
 
-      final existingRow = await _supabase.from('users').select('role').eq('id', userId).maybeSingle();
+      final existingRow = await _supabase
+          .from('users')
+          .select('role, name, phone, email')
+          .eq('id', userId)
+          .maybeSingle();
 
-      // First login after confirming their email: signUp() deliberately
-      // skipped writing the `users` (and, for a driver, `driver_profiles`)
-      // row, because there was no session/auth.uid() yet for RLS to allow
-      // it — see the comment in RegisterViewModel.submit(). That moment
-      // has now arrived, so backfill from the metadata signUp() stashed
-      // on the auth user. This only ever runs once per account — after
-      // this, the row exists and every future login skips straight past.
+      // RegisterViewModel writes `users` (and `driver_profiles`, for
+      // drivers) immediately once a session exists. The one case that's
+      // deferred all the way to here is a confirm-your-email signup:
+      // there's no session at signup time, so nothing was written yet —
+      // write it now, on this first login, same as RegisterViewModel
+      // would have.
       if (existingRow == null) {
         final meta = response.user?.userMetadata;
         final role = meta?['role'] as String? ?? 'passenger';
@@ -120,10 +117,9 @@ class LoginViewModel extends ChangeNotifier {
         });
 
         if (role == 'driver') {
-          // The license they picked during registration only ever lived
-          // in memory on that screen — there was nothing to attach it to
-          // yet, so it's gone. Zero-balance wallet row now; they'll need
-          // to re-add the license from their profile.
+          // The license was never uploaded (registration only uploads
+          // it once a session exists, and a confirm-your-email account
+          // had none yet), so nudge them to add it from their profile.
           await _supabase.from('driver_profiles').upsert({
             'user_id': userId,
             'total_earnings': 0,
@@ -131,11 +127,29 @@ class LoginViewModel extends ChangeNotifier {
             'total_withdrawn': 0,
           });
           driverLicenseNeedsReupload = true;
-          // Same driver_trips step registration would have sent them to
-          // immediately after signing up — just resumed here instead,
-          // since signup couldn't do it yet. Not re-checked on later
-          // logins.
-          return LoginResult.needsDriverSetup;
+        }
+      } else if (existingRow['role'] == 'driver') {
+        // Self-heal: a driver's `users` and `driver_profiles` rows are
+        // always written together (RegisterViewModel, or the backfill
+        // above), so a `users` row should mean `driver_profiles` exists
+        // too. This only catches the rare case where that didn't fully
+        // commit (e.g. the network dropped mid-write). Checked on every
+        // login, not just the first, since a driver could go a while
+        // without noticing a missing wallet.
+        final driverProfile = await _supabase
+            .from('driver_profiles')
+            .select('license_number, license_url')
+            .eq('user_id', userId)
+            .maybeSingle();
+
+        if (driverProfile == null) {
+          await _supabase.from('driver_profiles').upsert({
+            'user_id': userId,
+            'total_earnings': 0,
+            'available_balance': 0,
+            'total_withdrawn': 0,
+          });
+          driverLicenseNeedsReupload = true;
         }
       }
 

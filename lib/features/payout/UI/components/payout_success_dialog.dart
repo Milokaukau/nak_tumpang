@@ -28,6 +28,8 @@ class _PayoutSuccessDialogState extends State<PayoutSuccessDialog> {
   @override
   Widget build(BuildContext context) {
     final vm = context.watch<PayoutViewModel>();
+    final netAmount = payoutNetAmount(widget.amount, vm.selectedMethod, vm.bankTransferFee);
+    final isBank = vm.selectedMethod == PayoutMethod.bankTransfer;
 
     return Dialog(
       backgroundColor: AppColors.white,
@@ -50,8 +52,10 @@ class _PayoutSuccessDialogState extends State<PayoutSuccessDialog> {
             ),
             const SizedBox(height: 8),
             Text(
-              'RM${widget.amount.toStringAsFixed(2)} will be transferred to your account '
-                  'within 3-5 working days.\nYour points balance is now updated.',
+              isBank
+                  ? 'RM${netAmount.toStringAsFixed(2)} has been transferred to your bank account.\nYour points balance is now updated.'
+                  : 'RM${widget.amount.toStringAsFixed(2)} is on its way to your Touch \'n Go '
+                  'eWallet.\nYour points balance is now updated.',
               textAlign: TextAlign.center,
               style: const TextStyle(color: AppColors.greyText),
             ),
@@ -76,52 +80,84 @@ class _PayoutSuccessDialogState extends State<PayoutSuccessDialog> {
   }
 }
 
-class _PayoutStatusIndicator extends StatelessWidget {
+class _PayoutStatusIndicator extends StatefulWidget {
   final String status;
   const _PayoutStatusIndicator({required this.status});
 
   @override
-  Widget build(BuildContext context) {
-    final Color color;
-    final String label;
-    switch (status) {
-      case 'paid':
-        color = Colors.green;
-        label = 'Paid';
-        break;
-      case 'processing':
-        color = Colors.orange;
-        label = 'Processing';
-        break;
-      default:
-        color = AppColors.greyText;
-        label = 'Pending';
+  State<_PayoutStatusIndicator> createState() => _PayoutStatusIndicatorState();
+}
+
+class _PayoutStatusIndicatorState extends State<_PayoutStatusIndicator>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulseController;
+
+  @override
+  void initState() {
+    super.initState();
+    // Loops only while status == 'pending' — that's now just the brief
+    // moment before runPayoutStatusAnimation's mocked gateway resolves
+    // to 'completed' (both payment methods), not an indefinite wait.
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
+    _syncPulse();
+  }
+
+  @override
+  void didUpdateWidget(covariant _PayoutStatusIndicator oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.status != widget.status) _syncPulse();
+  }
+
+  void _syncPulse() {
+    if (widget.status == 'pending') {
+      _pulseController.repeat(reverse: true);
+    } else {
+      _pulseController.stop();
+      _pulseController.value = 1.0;
     }
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = payoutStatusColor(widget.status);
+    final label = payoutStatusLabel(widget.status);
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 250),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
+        color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withOpacity(0.4)),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (status == 'paid')
+          if (widget.status == 'completed')
             Icon(Icons.check_circle, color: color, size: 14)
-          else if (status == 'processing')
+          else if (widget.status == 'processing')
             SizedBox(
               width: 12,
               height: 12,
               child: CircularProgressIndicator(strokeWidth: 2, color: color),
             )
           else
-            Container(
-              width: 8,
-              height: 8,
-              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            FadeTransition(
+              opacity: Tween(begin: 0.35, end: 1.0).animate(_pulseController),
+              child: Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+              ),
             ),
           const SizedBox(width: 6),
           Text(

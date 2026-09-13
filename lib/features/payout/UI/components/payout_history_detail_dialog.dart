@@ -36,6 +36,20 @@ class PayoutHistoryDetailDialog extends StatelessWidget {
               label: 'Amount',
               value: 'RM${entry.amount.toStringAsFixed(2)}',
             ),
+            if (entry.resolvedFee > 0) ...[
+              const SizedBox(height: 12),
+              _DetailRow(
+                icon: Icons.remove_circle_outline,
+                label: 'Processing fee',
+                value: '-RM${entry.resolvedFee.toStringAsFixed(2)}',
+              ),
+              const SizedBox(height: 12),
+              _DetailRow(
+                icon: Icons.check_circle_outline,
+                label: 'Net received',
+                value: 'RM${entry.netAmount.toStringAsFixed(2)}',
+              ),
+            ],
             const SizedBox(height: 12),
             _DetailRow(
               icon: entry.isEwallet ? Icons.account_balance_wallet_outlined : Icons.account_balance_outlined,
@@ -50,7 +64,7 @@ class PayoutHistoryDetailDialog extends StatelessWidget {
             _DetailRow(
               icon: Icons.tag,
               label: entry.isEwallet ? 'Phone number' : 'Account number',
-              value: entry.bankAccNo,
+              value: entry.maskedDestination,
             ),
             const SizedBox(height: 12),
             _DetailRow(icon: Icons.calendar_today_outlined, label: 'Requested', value: _formatDate(entry.requestedAt)),
@@ -82,11 +96,7 @@ class _StatusPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = switch (status) {
-      'paid' => Colors.green,
-      'processing' => Colors.orange,
-      _ => AppColors.greyText,
-    };
+    final color = payoutStatusColor(status);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
@@ -95,7 +105,7 @@ class _StatusPill extends StatelessWidget {
         border: Border.all(color: color.withValues(alpha: 0.4)),
       ),
       child: Text(
-        status[0].toUpperCase() + status.substring(1),
+        payoutStatusLabel(status),
         style: TextStyle(color: color, fontWeight: FontWeight.w600, fontSize: 12),
       ),
     );

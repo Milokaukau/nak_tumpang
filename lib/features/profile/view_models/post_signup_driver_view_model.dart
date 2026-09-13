@@ -3,7 +3,20 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'package:nak_tumpang/core/entities/geocoded_place.dart';
 
+/// Collects a driver's route/schedule — offered right after signup, if
+/// they choose "Add trip" on the get-started dialog. The driver's
+/// account (`users` + `driver_profiles`) already exists by the time
+/// this screen is reached (RegisterViewModel writes it immediately,
+/// same as passengers), so [submit] only ever needs to write a
+/// `driver_trips` row. There's currently no way to reach this screen
+/// again later (e.g. choosing "Later" here means no route until one is
+/// added some other way) — if that's needed, it'll need its own entry
+/// point elsewhere.
 class PostSignupDriverViewModel extends ChangeNotifier {
+  PostSignupDriverViewModel({required this.userId});
+
+  final String userId;
+
   final fromController = TextEditingController();
   final toController = TextEditingController();
 
@@ -22,16 +35,39 @@ class PostSignupDriverViewModel extends ChangeNotifier {
   bool isSubmitting = false;
   String? errorMessage;
   String? timeError;
-  String? dayError;
 
   // only shows error after they tried to submit once
   bool _autoValidateTime = false;
 
   int _minutesOf(TimeOfDay t) => t.hour * 60 + t.minute;
 
-  void _revalidateDays() {
+  /// Days can now wrap across the week boundary (e.g. Friday -> Monday,
+  /// for a weekend-crossing commute) — [_activeDaysMap] below already
+  /// walks forward with wraparound, so there's nothing to block here
+  /// anymore. Kept as a preview instead of a hard error: a wraparound
+  /// range is easy to select by accident (picking the wrong "from" day),
+  /// so rather than forbidding it outright, the screen shows exactly
+  /// which days it resolves to and lets the driver visually confirm
+  /// that's actually what they meant before submitting.
+  List<String> get activeDaysPreview {
+    const names = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    final active = _activeDaysSet();
+    return [
+      for (var d = DateTime.monday; d <= DateTime.sunday; d++)
+        if (active.contains(d)) names[d],
+    ];
+  }
+
+  void _revalidateTime() {
     if (!_autoValidateTime) return;
-    dayError = fromDay > toDay ? 'Must be later than starting day' : null;
+    // Same-day trip only — depart_time/arrival_time are bare TIME values
+    // with no date attached, so there's no way to record "arrives the
+    // next day". Equal or earlier arrival is therefore always either a
+    // mistake or something this schema can't represent, never a
+    // legitimate multi-day trip.
+    timeError = _minutesOf(arriveTime) <= _minutesOf(departTime)
+        ? 'Arrival time must be after departure time'
+        : null;
   }
 
   void setFromPlace(GeocodedPlace place) {
@@ -60,23 +96,23 @@ class PostSignupDriverViewModel extends ChangeNotifier {
 
   void setFromDay(int day) {
     fromDay = day;
-    _revalidateDays();
     notifyListeners();
   }
 
   void setToDay(int day) {
     toDay = day;
-    _revalidateDays();
     notifyListeners();
   }
 
   void setDepartTime(TimeOfDay time) {
     departTime = time;
+    _revalidateTime();
     notifyListeners();
   }
 
   void setArriveTime(TimeOfDay time) {
     arriveTime = time;
+    _revalidateTime();
     notifyListeners();
   }
 
@@ -87,7 +123,13 @@ class PostSignupDriverViewModel extends ChangeNotifier {
     super.dispose();
   }
 
-  Map<String, bool> _activeDaysMap() {
+  /// Walks from [fromDay] to [toDay] inclusive, wrapping past Sunday
+  /// back to Monday if [toDay] comes "before" [fromDay] in the week —
+  /// e.g. Friday -> Monday resolves to {Fri, Sat, Sun, Mon}. Shared by
+  /// [_activeDaysMap] (what gets written to the DB) and
+  /// [activeDaysPreview] (what the driver sees before submitting), so
+  /// the two can never disagree about which days a range covers.
+  Set<int> _activeDaysSet() {
     final active = <int>{};
     var day = fromDay;
     while (true) {
@@ -95,6 +137,11 @@ class PostSignupDriverViewModel extends ChangeNotifier {
       if (day == toDay) break;
       day = day == DateTime.sunday ? DateTime.monday : day + 1;
     }
+    return active;
+  }
+
+  Map<String, bool> _activeDaysMap() {
+    final active = _activeDaysSet();
     return {
       'active_monday': active.contains(DateTime.monday),
       'active_tuesday': active.contains(DateTime.tuesday),
@@ -112,19 +159,24 @@ class PostSignupDriverViewModel extends ChangeNotifier {
       '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}:00';
 
   Future<bool> submit() async {
+    // Guards against a second call landing while one is already in
+    // flight (e.g. a double-tap before the UI rebuilds with isSubmitting
+    // disabling the button) — don't rely on the button's disabled state
+    // alone.
+    if (isSubmitting) return false;
+
     _autoValidateTime = true;
     fromError = fromPlace == null ? 'Please pick a location' : null;
     toError = toPlace == null ? 'Please pick a location' : null;
-    _revalidateDays();
-    notifyListeners();
-    if (fromError != null || toError != null || timeError != null || dayError != null) return false;
-
-    final userId = Supabase.instance.client.auth.currentUser?.id;
-    if (userId == null) {
-      errorMessage = 'Not signed in.';
-      notifyListeners();
-      return false;
+    if (fromError == null &&
+        toError == null &&
+        fromPlace!.latitude == toPlace!.latitude &&
+        fromPlace!.longitude == toPlace!.longitude) {
+      toError = "Pickup and drop-off can't be the same location";
     }
+    _revalidateTime();
+    notifyListeners();
+    if (fromError != null || toError != null || timeError != null) return false;
 
     isSubmitting = true;
     errorMessage = null;
@@ -151,7 +203,9 @@ class PostSignupDriverViewModel extends ChangeNotifier {
 
       return true;
     } on PostgrestException catch (e) {
-      errorMessage = e.message;
+      // Generic message instead of e.message — don't leak raw
+      // constraint/column details from the DB to the driver.
+      errorMessage = 'Could not save your route. Please try again.';
       return false;
     } catch (e) {
       errorMessage = 'Could not save your route. Please try again.';

@@ -3,19 +3,28 @@ import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/components/base_button.dart';
 import 'package:nak_tumpang/core/components/location_autocomplete_field.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
-import 'package:nak_tumpang/features/home/UI/screens/home_screen.dart';
 import 'package:nak_tumpang/features/profile/view_models/post_signup_driver_view_model.dart';
 
 const _weekdayNames = ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-// compulsory for drivers to fill this in to complete creating account
+// Optional post-signup step for drivers — the account itself (users +
+// driver_profiles) already exists by the time this screen is reached
+// (RegisterViewModel writes it immediately, same as passengers). This
+// screen just lets the driver add their first route/schedule into
+// driver_trips; skipping it (via "Later" on the get-started dialog)
+// leaves a perfectly valid driver account with no trips yet.
 class PostSignupDriverScreen extends StatelessWidget {
-  const PostSignupDriverScreen({super.key});
+  final String userId;
+
+  const PostSignupDriverScreen({
+    super.key,
+    required this.userId,
+  });
 
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider(
-      create: (_) => PostSignupDriverViewModel(),
+      create: (_) => PostSignupDriverViewModel(userId: userId),
       child: const _PostSignupDriverView(),
     );
   }
@@ -27,9 +36,10 @@ class _PostSignupDriverView extends StatelessWidget {
   Future<void> _complete(BuildContext context, PostSignupDriverViewModel vm) async {
     final success = await vm.submit();
     if (!context.mounted || !success) return;
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const HomeScreen()),
-    );
+    // Home is already the screen underneath (see RegisterScreen — this
+    // is only ever pushed on top of it), so pop back to it rather than
+    // pushReplacement-ing in a second, brand-new HomeScreen instance.
+    Navigator.of(context).pop();
   }
 
   Future<void> _pickTime(BuildContext context, TimeOfDay initial, ValueChanged<TimeOfDay> onPicked) async {
@@ -44,7 +54,7 @@ class _PostSignupDriverView extends StatelessWidget {
     return Scaffold(
       backgroundColor: AppColors.white,
       appBar: AppBar(
-        title: const Text('Complete your profile'),
+        title: const Text('Add your route'),
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -87,7 +97,11 @@ class _PostSignupDriverView extends StatelessWidget {
                 selectedDay: vm.toDay,
                 onChanged: vm.setToDay,
               ),
-              if (vm.dayError != null) _errorText(vm.dayError!),
+              const SizedBox(height: 6),
+              Text(
+                'Active days: ${vm.activeDaysPreview.join(", ")}',
+                style: const TextStyle(color: AppColors.greyText, fontSize: 12),
+              ),
               const SizedBox(height: 20),
 
               const Text('I usually depart at...', style: TextStyle(fontWeight: FontWeight.w600)),
@@ -128,25 +142,6 @@ class _PostSignupDriverView extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(top: 4),
       child: Text(error, style: const TextStyle(color: Colors.red, fontSize: 12)),
-    );
-  }
-
-  InputDecoration _fieldDecoration({IconData? icon}) {
-    return InputDecoration(
-      suffixIcon: icon != null ? Icon(icon, color: AppColors.primaryYellow) : null,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: const BorderSide(color: AppColors.greyBorder),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: const BorderSide(color: AppColors.greyBorder),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: const BorderSide(color: AppColors.primaryYellow, width: 1.5),
-      ),
     );
   }
 }

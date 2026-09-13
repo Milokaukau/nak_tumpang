@@ -9,12 +9,10 @@ import 'package:nak_tumpang/features/profile/data/services/profile_storage_servi
 
 /// What the screen should do after [RegisterViewModel.submit] succeeds.
 enum RegisterResult {
-  /// Driver account created — go to the post-signup-driver (route/days/
-  /// time) page next.
-  driverNext,
-
-  /// Passenger account created — show the "Let's get started!" popup.
-  passengerComplete,
+  /// Account (and, for drivers, `driver_profiles`) created — show the
+  /// "Let's get started!" popup so they can optionally add a trip right
+  /// away, or come back to it later.
+  accountComplete,
 
   /// Account created, but Supabase requires the new email to be
   /// confirmed before a session exists. There's no `auth.uid()` yet, so
@@ -43,9 +41,14 @@ class RegisterViewModel extends ChangeNotifier {
   final licenseNumberController = TextEditingController();
   Uint8List? licenseBytes;
   bool isUploadingLicense = false;
-  final _licenseNumberRegex = RegExp(r'^[A-Z0-9](?:[A-Z0-9\s-]*[A-Z0-9])?$');
   String? licenseNumberError;
   String? licenseError;
+
+  // Set once the license (if any) is uploaded to Storage, then written
+  // straight onto `driver_profiles` below in the same submit() call —
+  // PostSignupDriverScreen no longer touches driver_profiles at all
+  // (see PostSignupDriverViewModel), it only ever writes driver_trips.
+  String? licenseStoragePath;
 
   final _storageService = ProfileStorageService();
 
@@ -66,6 +69,17 @@ class RegisterViewModel extends ChangeNotifier {
 
   String? _registeredUserId;
 
+  /// The Auth user id created by [submit], once it's run at least once.
+  /// Needed by the screen to hand off to PostSignupDriverScreen if a
+  /// newly-registered driver chooses "Add trip" from the get-started
+  /// dialog.
+  String? get registeredUserId => _registeredUserId;
+
+  String get trimmedName => nameController.text.trim();
+  String get trimmedEmail => emailController.text.trim();
+  String get trimmedLicenseNumber => licenseNumberController.text.trim();
+  String get storedPhone => Validators.toStoredPhone(phoneController.text);
+
   void setRole(String newRole) {
     role = newRole;
     notifyListeners();
@@ -73,10 +87,18 @@ class RegisterViewModel extends ChangeNotifier {
 
   Future<void> pickLicense() async {
     final bytes = await _storageService.pickImage(source: ImageSource.gallery);
-    if (bytes != null) {
-      licenseBytes = bytes;
+    if (bytes == null) return;
+
+    final imageCheck = await _storageService.validateImage(bytes);
+    if (!imageCheck.isValid) {
+      errorMessage = imageCheck.error;
       notifyListeners();
+      return;
     }
+
+    licenseBytes = bytes;
+    errorMessage = null;
+    notifyListeners();
   }
 
   @override
@@ -102,13 +124,6 @@ class RegisterViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  String? _validateLicenseNumber(String v) {
-    final trimmed = v.trim();
-    if (trimmed.isEmpty) return 'License number is required';
-    if (!_licenseNumberRegex.hasMatch(trimmed)) return 'Enter a valid license number';
-    return null;
-  }
-
   void _runValidation() {
     nameError = Validators.name(nameController.text);
     phoneError = Validators.phoneLocal(phoneController.text);
@@ -117,7 +132,7 @@ class RegisterViewModel extends ChangeNotifier {
     confirmError = Validators.confirmPassword(confirmPasswordController.text, passwordController.text);
 
     if (role == 'driver') {
-      licenseNumberError = _validateLicenseNumber(licenseNumberController.text);
+      licenseNumberError = Validators.licenseNumber(licenseNumberController.text);
       licenseError = licenseBytes == null ? 'Please upload your driving license' : null;
     } else {
       licenseNumberError = null;
@@ -132,6 +147,12 @@ class RegisterViewModel extends ChangeNotifier {
   }
 
   Future<RegisterResult?> submit() async {
+    // Guards against a second call landing while one is already in
+    // flight (e.g. a double-tap before the UI rebuilds with isLoading
+    // disabling the button) — this can create an auth user and upload a
+    // file, so don't rely on the button's disabled state alone.
+    if (isLoading) return null;
+
     _autoValidate = true;
     _runValidation();
     notifyListeners();
@@ -194,44 +215,68 @@ class RegisterViewModel extends ChangeNotifier {
         }
       }
 
-      String? licenseStoragePath;
+      // Tracked separately from licenseStoragePath: only set when *this*
+      // call actually uploads a file, so the rollback below can't ever
+      // delete a file a previous, already-committed attempt is relying
+      // on — only ever the upload made in this attempt, if the DB
+      // writes right after it fail.
+      String? pendingLicensePath;
       if (role == 'driver' && licenseBytes != null) {
         isUploadingLicense = true;
         notifyListeners();
-        licenseStoragePath = await _storageService.uploadUserFile(
+        // Unique filename per upload (rather than a fixed 'license.jpg')
+        // so re-picking a new photo on a retry doesn't collide with, or
+        // get confused for, an earlier attempt.
+        pendingLicensePath = await _storageService.uploadUserFile(
           bytes: licenseBytes!,
           bucket: 'driver-licenses',
           userId: newUserId,
-          fileName: 'license.jpg',
+          fileName: 'license_${DateTime.now().millisecondsSinceEpoch}.jpg',
           public: false,
         );
+        licenseStoragePath = pendingLicensePath;
         isUploadingLicense = false;
       }
 
-      await _supabase.from('users').upsert({
-        'id': newUserId,
-        'name': nameController.text.trim(),
-        'phone': fullPhoneForStorage,
-        'email': emailController.text.trim(),
-        'role': role,
-      });
+      try {
+        // Account row is written immediately for both roles now — a
+        // route is no longer required to have an account. Adding a trip
+        // is an optional next step offered by the "Let's get started!"
+        // dialog instead (PostSignupDriverScreen), not a precondition
+        // for the account existing.
+        await _supabase.from('users').upsert({
+          'id': newUserId,
+          'name': nameController.text.trim(),
+          'phone': fullPhoneForStorage,
+          'email': emailController.text.trim(),
+          'role': role,
+        });
 
-      if (role == 'driver') {
-        try {
+        if (role == 'driver') {
           await _supabase.from('driver_profiles').upsert({
             'user_id': newUserId,
             'total_earnings': 0,
             'available_balance': 0,
             'total_withdrawn': 0,
-            'license_number': licenseNumberController.text.trim(),
+            'license_number': trimmedLicenseNumber,
             'license_url': licenseStoragePath,
           });
-        } catch (e) {
-          debugPrint('driver_profiles bootstrap failed (non-fatal): $e');
         }
+      } catch (e) {
+        // Neither write can be trusted to have committed — clean up the
+        // license file uploaded *in this attempt* so a failed submit
+        // doesn't leave an orphaned file in Storage that nothing in the
+        // DB ever ends up pointing to. A later retry (same screen
+        // instance) re-uploads under a fresh filename, so this is always
+        // safe to remove.
+        if (pendingLicensePath != null) {
+          await _storageService.deleteUserFile(bucket: 'driver-licenses', path: pendingLicensePath);
+          licenseStoragePath = null;
+        }
+        rethrow;
       }
 
-      return role == 'driver' ? RegisterResult.driverNext : RegisterResult.passengerComplete;
+      return RegisterResult.accountComplete;
     } on AuthException catch (e) {
       errorMessage = e.message;
       return null;
@@ -239,10 +284,10 @@ class RegisterViewModel extends ChangeNotifier {
       // cannot register with email already in database
       errorMessage = e.code == '23505'
           ? 'That account detail is already registered.'
-          : e.message;
+          : 'Could not complete registration. Please try again.';
       return null;
     } catch (e) {
-      errorMessage = 'Something went wrong: $e';
+      errorMessage = 'Could not complete registration. Please try again.';
       return null;
     } finally {
       isLoading = false;

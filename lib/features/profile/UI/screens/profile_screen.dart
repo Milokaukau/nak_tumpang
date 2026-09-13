@@ -3,22 +3,16 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/components/base_button.dart';
 import 'package:nak_tumpang/features/auth/UI/screens/login_screen.dart';
-import 'package:nak_tumpang/features/home/UI/screens/home_screen.dart';
-import 'package:nak_tumpang/features/profile/UI/components/role_selection_dialog.dart';
 import 'package:nak_tumpang/features/profile/view_models/profile_view_model.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 
 class ProfileScreen extends StatelessWidget {
-  /// When true, this screen is shown right after a brand-new sign-up
-  /// so the user can fill in their details for the first time.
-  final bool isFirstTimeSetup;
-
-  const ProfileScreen({super.key, this.isFirstTimeSetup = false});
+  const ProfileScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider(
-      create: (_) => ProfileViewModel(isFirstTimeSetup: isFirstTimeSetup),
+      create: (_) => ProfileViewModel(),
       child: const _ProfileView(),
     );
   }
@@ -35,6 +29,13 @@ class _ProfileView extends StatefulWidget {
 class _ProfileViewState extends State<_ProfileView> {
   bool _isHoveringAvatar = false;
 
+  // Set to whatever avatarUrl last failed to load, so the CircleAvatar
+  // below can fall back to initials for that specific URL instead of
+  // retrying it forever — but still attempts a *different* URL (e.g.
+  // after picking a new avatar, or after loadProfile() re-fetches a
+  // fresh signed one) since only that exact failed value is excluded.
+  String? _failedAvatarUrl;
+
   @override
   void initState() {
     super.initState();
@@ -44,24 +45,10 @@ class _ProfileViewState extends State<_ProfileView> {
   Future<void> _initialLoad() async {
     final vm = context.read<ProfileViewModel>();
     await vm.loadProfile();
-
-    // Brand-new account -> ask Passenger or Driver before they fill in
-    // the rest. Shown here (not in the view model) since it needs a
-    // BuildContext.
-    if (vm.isFirstTimeSetup && mounted) {
-      final role = await RoleSelectionDialog.show(context);
-      if (mounted) vm.setRole(role ?? 'passenger');
-    }
   }
 
   Future<void> _save(ProfileViewModel vm) async {
-    final result = await vm.save();
-    if (!mounted) return;
-    if (result == ProfileSaveResult.firstTimeSetupComplete) {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const HomeScreen()),
-      );
-    }
+    await vm.save();
   }
 
   Future<void> _logout(ProfileViewModel vm) async {
@@ -84,31 +71,20 @@ class _ProfileViewState extends State<_ProfileView> {
     return Scaffold(
       backgroundColor: AppColors.white,
       appBar: AppBar(
-        title: Text(
-          vm.isFirstTimeSetup ? 'Complete your profile' : 'My Profile',
-        ),
-        automaticallyImplyLeading: !vm.isFirstTimeSetup,
+        title: const Text('My Profile'),
         actions: [
-          if (!vm.isFirstTimeSetup)
-            IconButton(
-              icon: const Icon(Icons.logout),
-              tooltip: 'Log out',
-              onPressed: () => _logout(vm),
-            ),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            tooltip: 'Log out',
+            onPressed: () => _logout(vm),
+          ),
         ],
       ),
       body: SafeArea(
         child: Column(
           children: [
-            if (vm.role == 'driver' && !vm.isFirstTimeSetup)
-              _ProfileRouteTabBar(
-                activeTab: vm.activeTab,
-                onChanged: (tab) => vm.setTab(tab),
-              ),
             Expanded(
-              child: (vm.role == 'driver' && !vm.isFirstTimeSetup && vm.activeTab == 'route')
-                  ? _RouteTabView(vm: vm)
-                  : SingleChildScrollView(
+              child: SingleChildScrollView(
                 padding: const EdgeInsets.all(24),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -125,27 +101,46 @@ class _ProfileViewState extends State<_ProfileView> {
                           onTap: vm.isUploadingAvatar ? null : vm.pickAvatar,
                           child: Stack(
                             children: [
-                              CircleAvatar(
-                                radius: 44,
-                                backgroundColor: AppColors.primaryYellow,
-                                backgroundImage: vm.avatarBytes != null
+                              Builder(builder: (context) {
+                                final networkUrl = vm.avatarBytes == null &&
+                                    vm.avatarUrl != null &&
+                                    vm.avatarUrl != _failedAvatarUrl
+                                    ? vm.avatarUrl
+                                    : null;
+                                final ImageProvider? avatarImage = vm.avatarBytes != null
                                     ? MemoryImage(vm.avatarBytes!)
-                                    : (vm.avatarUrl != null
-                                    ? NetworkImage(vm.avatarUrl!) as ImageProvider
-                                    : null),
-                                child: vm.isUploadingAvatar
-                                    ? const CircularProgressIndicator(color: Colors.white)
-                                    : (vm.avatarBytes == null && vm.avatarUrl == null)
-                                    ? Text(
-                                  vm.initials,
-                                  style: const TextStyle(
-                                    fontSize: 28,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                  ),
-                                )
-                                    : null,
-                              ),
+                                    : (networkUrl != null ? NetworkImage(networkUrl) : null);
+
+                                return CircleAvatar(
+                                  radius: 44,
+                                  backgroundColor: AppColors.primaryYellow,
+                                  backgroundImage: avatarImage,
+                                  // A stale/expired avatar URL (e.g. the
+                                  // bucket file was removed, or the URL
+                                  // is otherwise no longer valid) should
+                                  // fall back to initials instead of
+                                  // just failing silently with no image
+                                  // and no child shown.
+                                  onBackgroundImageError: avatarImage is NetworkImage
+                                      ? (_, __) {
+                                    if (!mounted) return;
+                                    setState(() => _failedAvatarUrl = vm.avatarUrl);
+                                  }
+                                      : null,
+                                  child: vm.isUploadingAvatar
+                                      ? const CircularProgressIndicator(color: Colors.white)
+                                      : avatarImage == null
+                                      ? Text(
+                                    vm.initials,
+                                    style: const TextStyle(
+                                      fontSize: 28,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                      : null,
+                                );
+                              }),
                               // Gray shade over the avatar, shown only on hover
                               // to signal that it's tappable.
                               Positioned.fill(
@@ -264,53 +259,39 @@ class _ProfileViewState extends State<_ProfileView> {
                     _errorText(vm.phoneError),
                     const SizedBox(height: 18),
 
-                    // Role — chosen once via the Passenger/Driver dialog right
-                    // after sign-up and locked in afterwards. Editable here only
-                    // during first-time setup, before the account is saved; once
-                    // saved it's shown read-only so it can't be switched later.
+                    // Role — chosen once via the Passenger/Driver dialog on
+                    // the register screen, and never editable from here.
                     Text('I am a', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
                     const SizedBox(height: 6),
-                    if (vm.isFirstTimeSetup)
-                      DropdownButtonFormField<String>(
-                        initialValue: vm.role,
-                        decoration: _fieldDecoration(),
-                        items: const [
-                          DropdownMenuItem(value: 'passenger', child: Text('Passenger')),
-                          DropdownMenuItem(value: 'driver', child: Text('Driver')),
-                        ],
-                        onChanged: (value) {
-                          if (value != null) vm.setRole(value);
-                        },
-                      )
-                    else
-                    // Read-only after signup, so this is a plain locked pill
-                    // rather than a text field the user might think they can
-                    // edit — with darker text to stay legible.
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: AppColors.greyBorder),
-                          color: AppColors.lightYellow.withValues(alpha: 0.5),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              vm.role == 'driver' ? Icons.directions_car : Icons.person,
-                              size: 18,
-                              color: AppColors.black,
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              vm.role == 'driver' ? 'Driver' : 'Passenger',
-                              style: TextStyle(color: AppColors.black, fontWeight: FontWeight.w600),
-                            ),
-                            const Spacer(),
-                            Icon(Icons.lock_outline, size: 16, color: AppColors.greyText),
-                          ],
-                        ),
+                    // Locked — the only place the role is ever actually
+                    // chosen is at registration. This is a plain pill
+                    // rather than a dropdown/text field so nothing on this
+                    // screen suggests it can be tapped and changed.
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: AppColors.greyBorder),
+                        color: AppColors.lightYellow.withValues(alpha: 0.5),
                       ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            vm.role == 'driver' ? Icons.directions_car : Icons.person,
+                            size: 18,
+                            color: AppColors.black,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            vm.role == 'driver' ? 'Driver' : 'Passenger',
+                            style: TextStyle(color: AppColors.black, fontWeight: FontWeight.w600),
+                          ),
+                          const Spacer(),
+                          Icon(Icons.lock_outline, size: 16, color: AppColors.greyText),
+                        ],
+                      ),
+                    ),
 
                     // Driving license - drivers only
                     if (vm.role == 'driver') ...[
@@ -344,30 +325,60 @@ class _ProfileViewState extends State<_ProfileView> {
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(color: AppColors.greyBorder),
                           ),
-                          child: vm.isUploadingLicense
-                              ? const Center(child: CircularProgressIndicator())
-                              : vm.licenseBytes != null
-                              ? ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: Image.memory(vm.licenseBytes!, fit: BoxFit.cover, width: double.infinity),
-                          )
-                              : vm.licenseUrl != null
-                              ? ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: Image.network(vm.licenseUrl!, fit: BoxFit.cover, width: double.infinity),
-                          )
-                              : Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.upload_file, color: AppColors.greyText),
-                                const SizedBox(height: 6),
-                                Text(
-                                  'Tap to upload your driving license',
-                                  style: TextStyle(color: AppColors.greyText, fontSize: 12),
-                                ),
-                              ],
-                            ),
+                          child: Stack(
+                            children: [
+                              if (vm.isUploadingLicense)
+                                const Center(child: CircularProgressIndicator())
+                              else if (vm.licenseBytes != null)
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Image.memory(vm.licenseBytes!, fit: BoxFit.cover, width: double.infinity, height: double.infinity),
+                                )
+                              else if (vm.licenseUrl != null)
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: Image.network(
+                                      vm.licenseUrl!,
+                                      fit: BoxFit.cover,
+                                      width: double.infinity,
+                                      height: double.infinity,
+                                      // The signed URL expires after 1 hour
+                                      // (ProfileStorageService.getSignedUrl) —
+                                      // if this screen was left open that
+                                      // long, or the network just failed,
+                                      // show a clear message instead of
+                                      // Flutter's default broken-image icon.
+                                      errorBuilder: (context, error, stackTrace) => Center(
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(Icons.refresh, color: AppColors.greyText),
+                                            const SizedBox(height: 6),
+                                            Text(
+                                              'Could not load preview. Reopen this screen to refresh it.',
+                                              textAlign: TextAlign.center,
+                                              style: TextStyle(color: AppColors.greyText, fontSize: 11),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  )
+                                else
+                                  Center(
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.upload_file, color: AppColors.greyText),
+                                        const SizedBox(height: 6),
+                                        Text(
+                                          'Tap to upload your driving license',
+                                          style: TextStyle(color: AppColors.greyText, fontSize: 12),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                            ],
                           ),
                         ),
                       ),
@@ -376,100 +387,98 @@ class _ProfileViewState extends State<_ProfileView> {
                     // Change password — collapsed by default behind a link, so
                     // opening it up is a deliberate action. Once open, the
                     // current password is required before a new one is accepted.
-                    if (!vm.isFirstTimeSetup) ...[
-                      const SizedBox(height: 18),
-                      if (!vm.showChangePassword)
-                        InkWell(
-                          onTap: vm.toggleChangePassword,
-                          borderRadius: BorderRadius.circular(4),
-                          child: Row(
-                            children: [
-                              Icon(Icons.lock_reset, size: 18, color: AppColors.primaryYellow),
-                              const SizedBox(width: 8),
-                              Text(
-                                'Change Password',
-                                style: TextStyle(
-                                  color: AppColors.primaryYellow,
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ],
-                          ),
-                        )
-                      else ...[
-                        Row(
+                    const SizedBox(height: 18),
+                    if (!vm.showChangePassword)
+                      InkWell(
+                        onTap: vm.toggleChangePassword,
+                        borderRadius: BorderRadius.circular(4),
+                        child: Row(
                           children: [
-                            Text('Change Password', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
-                            const Spacer(),
-                            InkWell(
-                              onTap: vm.toggleChangePassword,
-                              child: Text(
-                                'Cancel',
-                                style: TextStyle(
-                                  color: AppColors.greyText,
-                                  fontSize: 12,
-                                ),
+                            Icon(Icons.lock_reset, size: 18, color: AppColors.primaryYellow),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Change Password',
+                              style: TextStyle(
+                                color: AppColors.primaryYellow,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13,
                               ),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 10),
-
-                        Text('Current Password', style: TextStyle(color: AppColors.greyText, fontSize: 12)),
-                        const SizedBox(height: 4),
-                        TextField(
-                          controller: vm.currentPasswordController,
-                          obscureText: vm.obscureCurrentPassword,
-                          decoration: _fieldDecoration(hint: 'Your current password').copyWith(
-                            suffixIcon: IconButton(
-                              icon: Icon(vm.obscureCurrentPassword ? Icons.visibility_off : Icons.visibility),
-                              onPressed: vm.toggleObscureCurrentPassword,
+                      )
+                    else ...[
+                      Row(
+                        children: [
+                          Text('Change Password', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
+                          const Spacer(),
+                          InkWell(
+                            onTap: vm.toggleChangePassword,
+                            child: Text(
+                              'Cancel',
+                              style: TextStyle(
+                                color: AppColors.greyText,
+                                fontSize: 12,
+                              ),
                             ),
                           ),
-                          onChanged: (_) => vm.revalidateIfNeeded(),
-                        ),
-                        _errorText(vm.currentPasswordError),
-                        const SizedBox(height: 14),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
 
-                        Text('New Password', style: TextStyle(color: AppColors.greyText, fontSize: 12)),
-                        const SizedBox(height: 4),
-                        TextField(
-                          controller: vm.newPasswordController,
-                          obscureText: vm.obscureNewPassword,
-                          decoration: _fieldDecoration(hint: 'New password').copyWith(
-                            suffixIcon: IconButton(
-                              icon: Icon(vm.obscureNewPassword ? Icons.visibility_off : Icons.visibility),
-                              onPressed: vm.toggleObscureNewPassword,
-                            ),
-                          ),
-                          onChanged: (_) => vm.revalidateIfNeeded(),
-                        ),
-                        _errorText(vm.newPasswordError),
-                        Padding(
-                          padding: const EdgeInsets.only(top: 4),
-                          child: Text(
-                            'At least 6 characters, with a letter and a number',
-                            style: TextStyle(color: AppColors.greyText, fontSize: 11),
+                      Text('Current Password', style: TextStyle(color: AppColors.greyText, fontSize: 12)),
+                      const SizedBox(height: 4),
+                      TextField(
+                        controller: vm.currentPasswordController,
+                        obscureText: vm.obscureCurrentPassword,
+                        decoration: _fieldDecoration(hint: 'Your current password').copyWith(
+                          suffixIcon: IconButton(
+                            icon: Icon(vm.obscureCurrentPassword ? Icons.visibility_off : Icons.visibility),
+                            onPressed: vm.toggleObscureCurrentPassword,
                           ),
                         ),
-                        const SizedBox(height: 14),
+                        onChanged: (_) => vm.revalidateIfNeeded(),
+                      ),
+                      _errorText(vm.currentPasswordError),
+                      const SizedBox(height: 14),
 
-                        Text('Confirm New Password', style: TextStyle(color: AppColors.greyText, fontSize: 12)),
-                        const SizedBox(height: 4),
-                        TextField(
-                          controller: vm.confirmPasswordController,
-                          obscureText: vm.obscureConfirmPassword,
-                          decoration: _fieldDecoration(hint: 'Re-enter new password').copyWith(
-                            suffixIcon: IconButton(
-                              icon: Icon(vm.obscureConfirmPassword ? Icons.visibility_off : Icons.visibility),
-                              onPressed: vm.toggleObscureConfirmPassword,
-                            ),
+                      Text('New Password', style: TextStyle(color: AppColors.greyText, fontSize: 12)),
+                      const SizedBox(height: 4),
+                      TextField(
+                        controller: vm.newPasswordController,
+                        obscureText: vm.obscureNewPassword,
+                        decoration: _fieldDecoration(hint: 'New password').copyWith(
+                          suffixIcon: IconButton(
+                            icon: Icon(vm.obscureNewPassword ? Icons.visibility_off : Icons.visibility),
+                            onPressed: vm.toggleObscureNewPassword,
                           ),
-                          onChanged: (_) => vm.revalidateIfNeeded(),
                         ),
-                        _errorText(vm.confirmPasswordError),
-                      ],
+                        onChanged: (_) => vm.revalidateIfNeeded(),
+                      ),
+                      _errorText(vm.newPasswordError),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          'At least 6 characters, with an uppercase letter, a number and a special character',
+                          style: TextStyle(color: AppColors.greyText, fontSize: 11),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+
+                      Text('Confirm New Password', style: TextStyle(color: AppColors.greyText, fontSize: 12)),
+                      const SizedBox(height: 4),
+                      TextField(
+                        controller: vm.confirmPasswordController,
+                        obscureText: vm.obscureConfirmPassword,
+                        decoration: _fieldDecoration(hint: 'Re-enter new password').copyWith(
+                          suffixIcon: IconButton(
+                            icon: Icon(vm.obscureConfirmPassword ? Icons.visibility_off : Icons.visibility),
+                            onPressed: vm.toggleObscureConfirmPassword,
+                          ),
+                        ),
+                        onChanged: (_) => vm.revalidateIfNeeded(),
+                      ),
+                      _errorText(vm.confirmPasswordError),
                     ],
 
                     if (vm.errorMessage != null) ...[
@@ -483,7 +492,7 @@ class _ProfileViewState extends State<_ProfileView> {
 
                     const SizedBox(height: 28),
                     BaseButton(
-                      text: vm.isFirstTimeSetup ? 'Continue' : 'Save Changes',
+                      text: 'Save Changes',
                       height: 48,
                       isLoading: vm.isSaving,
                       textStyle: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
@@ -540,222 +549,6 @@ class UpperCaseTextFormatter extends TextInputFormatter {
     return TextEditingValue(
       text: newValue.text.toUpperCase(),
       selection: newValue.selection,
-    );
-  }
-}
-
-/// Profile / Route segmented toggle shown at the top of a driver's own
-/// profile page — Profile shows the editable fields already on this
-/// screen, Route shows the driving route(s) they set up earlier.
-class _ProfileRouteTabBar extends StatelessWidget {
-  final String activeTab;
-  final ValueChanged<String> onChanged;
-
-  const _ProfileRouteTabBar({required this.activeTab, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
-      child: Row(
-        children: [
-          Expanded(
-            child: _TabButton(
-              label: 'Profile',
-              selected: activeTab == 'profile',
-              onTap: () => onChanged('profile'),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: _TabButton(
-              label: 'Route',
-              selected: activeTab == 'route',
-              onTap: () => onChanged('route'),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _TabButton extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _TabButton({required this.label, required this.selected, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        decoration: BoxDecoration(
-          color: selected ? AppColors.primaryYellow : AppColors.white,
-          border: Border.all(color: selected ? AppColors.primaryYellow : AppColors.greyBorder),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Text(
-          label,
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            color: selected ? AppColors.black : AppColors.greyText,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Shows the driving route(s) a driver entered on the post-signup screen
-/// — read-only for now, pulled straight from `driver_trips`.
-class _RouteTabView extends StatelessWidget {
-  final ProfileViewModel vm;
-
-  const _RouteTabView({required this.vm});
-
-  static const _dayKeys = [
-    'active_monday',
-    'active_tuesday',
-    'active_wednesday',
-    'active_thursday',
-    'active_friday',
-    'active_saturday',
-    'active_sunday',
-  ];
-  static const _shortDayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-
-  /// Turns the 7 active_* booleans back into a compact label — a
-  /// contiguous range like "Mon - Fri" when possible (matching how
-  /// PostSignupDriverViewModel writes them), otherwise a comma list.
-  String _formatActiveDays(Map<String, dynamic> trip) {
-    final active = List<bool>.generate(7, (i) => trip[_dayKeys[i]] == true);
-    final activeCount = active.where((a) => a).length;
-    if (activeCount == 7) return 'Every day';
-    if (activeCount == 0) return 'No days set';
-
-    for (int start = 0; start < 7; start++) {
-      if (!active[start]) continue;
-      bool isContiguousRun = true;
-      for (int i = 0; i < activeCount; i++) {
-        if (!active[(start + i) % 7]) {
-          isContiguousRun = false;
-          break;
-        }
-      }
-      if (isContiguousRun) {
-        final end = (start + activeCount - 1) % 7;
-        return activeCount == 1
-            ? _shortDayNames[start]
-            : '${_shortDayNames[start]} - ${_shortDayNames[end]}';
-      }
-    }
-
-    return [for (int i = 0; i < 7; i++) if (active[i]) _shortDayNames[i]].join(', ');
-  }
-
-  String _formatTime(dynamic raw) {
-    // Stored as "HH:mm:ss" — show it as "HH:mm".
-    final s = raw as String? ?? '';
-    return s.length >= 5 ? s.substring(0, 5) : s;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (vm.isLoadingRoutes) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    if (vm.driverTrips.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text(
-            "You haven't set up a route yet.",
-            style: TextStyle(color: AppColors.greyText),
-            textAlign: TextAlign.center,
-          ),
-        ),
-      );
-    }
-
-    return RefreshIndicator(
-      onRefresh: vm.loadDriverRoutes,
-      child: ListView.builder(
-        padding: const EdgeInsets.all(24),
-        itemCount: vm.driverTrips.length,
-        itemBuilder: (context, i) {
-          final trip = vm.driverTrips[i];
-          return Container(
-            margin: const EdgeInsets.only(bottom: 16),
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              border: Border.all(color: AppColors.greyBorder),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(Icons.route, size: 18, color: AppColors.primaryYellow),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        (trip['trip_name'] as String?) ??
-                            '${trip['depart_name']} → ${trip['arrival_name']}',
-                        style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.black),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                _RouteInfoRow(
-                  icon: Icons.calendar_today,
-                  text: 'Every ${_formatActiveDays(trip)}',
-                ),
-                const SizedBox(height: 6),
-                _RouteInfoRow(
-                  icon: Icons.schedule,
-                  text: 'Depart ${_formatTime(trip['depart_time'])} · '
-                      'Arrive ${_formatTime(trip['arrival_time'])}',
-                ),
-                const SizedBox(height: 6),
-                _RouteInfoRow(
-                  icon: Icons.place_outlined,
-                  text: '${trip['depart_name']} → ${trip['arrival_name']}',
-                ),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _RouteInfoRow extends StatelessWidget {
-  final IconData icon;
-  final String text;
-
-  const _RouteInfoRow({required this.icon, required this.text});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, size: 16, color: AppColors.greyText),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(text, style: TextStyle(color: AppColors.greyText, fontSize: 13)),
-        ),
-      ],
     );
   }
 }

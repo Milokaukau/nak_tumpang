@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/components/base_button.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
@@ -37,7 +38,7 @@ class ClaimPayoutDialog extends StatelessWidget {
                   const Text('Available points', style: TextStyle(color: AppColors.greyText, fontSize: 12)),
                   const Spacer(),
                   Text(
-                    '${vm.availableBalance.toStringAsFixed(0)} pts',
+                    '${pointsLabel(vm.availableBalance)} pts',
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                 ],
@@ -46,16 +47,7 @@ class ClaimPayoutDialog extends StatelessWidget {
             const SizedBox(height: 16),
             const Text('Amount', style: TextStyle(fontWeight: FontWeight.w600)),
             const SizedBox(height: 6),
-            TextField(
-              controller: vm.amountController,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              onChanged: (_) => vm.notifyUiOnly(),
-              decoration: InputDecoration(
-                prefixText: 'RM ',
-                border: const OutlineInputBorder(),
-                errorText: vm.amountError,
-              ),
-            ),
+            _AmountField(vm: vm),
             const SizedBox(height: 20),
             const Text('Payout method', style: TextStyle(fontWeight: FontWeight.w600)),
             const SizedBox(height: 8),
@@ -75,7 +67,7 @@ class ClaimPayoutDialog extends StatelessWidget {
             const SizedBox(height: 8),
             Text(
               vm.selectedMethod == PayoutMethod.bankTransfer
-                  ? 'Transfer will be made within 3-5 working days.'
+                  ? 'A RM${vm.bankTransferFee.toStringAsFixed(2)} processing fee applies.'
                   : 'Instant transfer to your eWallet.',
               style: const TextStyle(color: AppColors.greyText, fontSize: 12),
             ),
@@ -114,6 +106,131 @@ class ClaimPayoutDialog extends StatelessWidget {
         value: vm,
         child: const PayoutDetailsDialog(),
       ),
+    );
+  }
+}
+
+/// Amount entry, styled to match _TngPhoneField / the register screen's
+/// phone field: a fixed 'RM' prefix that's always visible (not just on
+/// focus, the way InputDecoration.prefixText behaves), a border that
+/// turns yellow on focus / red on error, and a left-aligned error/helper
+/// message under the box instead of InputDecoration's own error slot.
+class _AmountField extends StatefulWidget {
+  final PayoutViewModel vm;
+  const _AmountField({required this.vm});
+
+  @override
+  State<_AmountField> createState() => _AmountFieldState();
+}
+
+class _AmountFieldState extends State<_AmountField> {
+  final _focusNode = FocusNode();
+
+  static final _leadingZeroFormatter = TextInputFormatter.withFunction((oldValue, newValue) {
+    var text = newValue.text.replaceFirst(RegExp(r'^0+(?=\d)'), '');
+    if (text.isEmpty) text = '0';
+    return TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
+  });
+
+  @override
+  void initState() {
+    super.initState();
+    _focusNode.addListener(_onFocusChange);
+  }
+
+  void _onFocusChange() {
+    // Selects the default '0' the moment the field gains focus, so the
+    // first digit typed replaces it instead of appending after it
+    // (e.g. typing '5' would otherwise leave '05').
+    if (_focusNode.hasFocus && widget.vm.amountController.text == '0') {
+      widget.vm.amountController.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: widget.vm.amountController.text.length,
+      );
+    }
+    setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _focusNode.removeListener(_onFocusChange);
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final vm = widget.vm;
+    final hasError = vm.amountError != null;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(
+              color: hasError
+                  ? Colors.red
+                  : (_focusNode.hasFocus ? AppColors.primaryYellow : AppColors.greyBorder),
+              width: (hasError || _focusNode.hasFocus) ? 1.5 : 1,
+            ),
+          ),
+          child: Row(
+            children: [
+              const Padding(
+                padding: EdgeInsets.only(left: 14),
+                child: Text(
+                  'RM',
+                  style: TextStyle(color: AppColors.greyText, fontWeight: FontWeight.w500),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: TextField(
+                  controller: vm.amountController,
+                  focusNode: _focusNode,
+                  keyboardType: TextInputType.number,
+                  // Blocks any non-digit keystroke (including '.') —
+                  // matches the whole-number-only format
+                  // PayoutViewModel.validateAmount enforces, so a driver
+                  // can't even type something the validator will just
+                  // reject a moment later.
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    _leadingZeroFormatter,
+                  ],
+                  style: const TextStyle(color: AppColors.black),
+                  decoration: const InputDecoration(
+                    contentPadding: EdgeInsets.symmetric(vertical: 12),
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                  ),
+                  onChanged: (_) => vm.notifyUiOnly(),
+                ),
+              ),
+              TextButton(
+                onPressed: vm.setAmountToMax,
+                child: const Text('Max'),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(
+            vm.amountError ?? 'Minimum RM${kMinPayoutAmount.toStringAsFixed(0)}',
+            style: TextStyle(
+              color: hasError ? Colors.red : AppColors.greyText,
+              fontSize: 12,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

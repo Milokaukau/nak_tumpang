@@ -16,6 +16,8 @@ class PayoutDetailsDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     final vm = context.watch<PayoutViewModel>();
     final isBank = vm.selectedMethod == PayoutMethod.bankTransfer;
+    final amount = double.tryParse(vm.amountController.text.trim()) ?? 0;
+    final netAmount = payoutNetAmount(amount, vm.selectedMethod, vm.bankTransferFee);
 
     return Dialog(
       backgroundColor: AppColors.white,
@@ -43,7 +45,9 @@ class PayoutDetailsDialog extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              'RM${(double.tryParse(vm.amountController.text.trim()) ?? 0).toStringAsFixed(2)} will be sent here once confirmed.',
+              isBank
+                  ? 'RM${netAmount.toStringAsFixed(2)} will be sent here (RM${amount.toStringAsFixed(2)} minus a RM${vm.bankTransferFee.toStringAsFixed(2)} processing fee).'
+                  : 'RM${amount.toStringAsFixed(2)} will be sent here once confirmed.',
               style: const TextStyle(color: AppColors.greyText, fontSize: 12),
             ),
             const SizedBox(height: 16),
@@ -91,7 +95,7 @@ class PayoutDetailsDialog extends StatelessWidget {
                   child: BaseButton(
                     text: 'Back',
                     isOutlined: true,
-                    onPressed: vm.isSubmitting ? () {} : () => Navigator.pop(context),
+                    onPressed: vm.isSubmitting ? null : () => Navigator.pop(context),
                   ),
                 ),
                 const SizedBox(width: 12),
