@@ -678,6 +678,8 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
       );
     }
 
+    final dailyFee = double.tryParse(widget.subscription['fee']?.toString() ?? '') ?? 0.0;
+
     return ListView.builder(
       padding: const EdgeInsets.all(16),
       itemCount: items.length,
@@ -685,6 +687,7 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
         final item = items[index];
         final status = item['status'] ?? 'pending';
         final reason = item['reason'] ?? item['note'] ?? 'Schedule exception';
+        final initiatedByRole = item['initiated_by_role']?.toString().toLowerCase();
 
         final startDate = item['start_date'] ?? '';
         final endDate = item['end_date'] ?? '';
@@ -695,6 +698,19 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
         Color statusColor = Colors.orange;
         if (status == 'approved' || status == 'accepted' || status == 'active') statusColor = Colors.green;
         if (status == 'rejected') statusColor = Colors.red;
+
+        // Refund calc: exception_days × daily_fee, only for driver-initiated
+        // "can't fetch" exceptions, only while the exception is still active.
+        double? refundAmount;
+        int? exceptionDays;
+        if (initiatedByRole == 'driver' && status == 'active') {
+          final start = DateTime.tryParse(startDate);
+          final end = DateTime.tryParse(endDate);
+          if (start != null && end != null) {
+            exceptionDays = end.difference(start).inDays + 1;
+            refundAmount = exceptionDays * dailyFee;
+          }
+        }
 
         return Container(
           margin: const EdgeInsets.only(bottom: 12),
@@ -734,9 +750,35 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
               const SizedBox(height: 8),
               Text('Reason: $reason', style: const TextStyle(color: AppColors.black, fontSize: 13)),
 
-              // Only your own pending requests, on an active subscription,
-              // can be edited (or cancelled from inside the edit sheet).
-              // The other party's requests remain view-only.
+              if (refundAmount != null && refundAmount > 0) ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppColors.successGreenBg,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.savings_outlined, size: 16, color: AppColors.successGreenText),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          widget.role == 'passenger'
+                              ? 'RM ${refundAmount.toStringAsFixed(2)} will be deducted from your next invoice '
+                              '($exceptionDays day${exceptionDays == 1 ? '' : 's'} × RM ${dailyFee.toStringAsFixed(2)}/day).'
+                              : 'This reduces the passenger\'s next invoice by RM ${refundAmount.toStringAsFixed(2)} '
+                              '($exceptionDays day${exceptionDays == 1 ? '' : 's'} × RM ${dailyFee.toStringAsFixed(2)}/day).',
+                          style: const TextStyle(color: AppColors.successGreenText, fontSize: 12, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+
               if (isMyChanges && status == 'active' && isActive) ...[
                 const SizedBox(height: 16),
                 Row(
