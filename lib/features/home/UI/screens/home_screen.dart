@@ -308,6 +308,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final viewModel = context.watch<HomeViewModel>();
     final userName = viewModel.currentUser?['name'] ?? 'User';
+    final avatarUrl = viewModel.currentUser?['avatar_url'] as String?;
 
     final allPoints = viewModel.mapRoutes.expand((r) => r.points).toList();
     _maybeUpdateCamera(allPoints);
@@ -318,6 +319,7 @@ class _HomeScreenState extends State<HomeScreen> {
       endDrawer: AppSidebar(
         userName: userName,
         userRole: viewModel.currentUserRole == 'driver' ? 'Driver' : 'Passenger',
+        profileImageUrl: avatarUrl,
         selectedIndex: -1,
       ),
       body: Stack(

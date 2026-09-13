@@ -4,8 +4,8 @@ import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/features/home/UI/screens/home_screen.dart';
 import 'package:nak_tumpang/features/profile/UI/components/get_started_dialog.dart';
-import 'package:nak_tumpang/features/profile/UI/screens/post_signup_driver_screen.dart';
 import 'package:nak_tumpang/features/profile/UI/screens/profile_screen.dart' show UpperCaseTextFormatter;
+import 'package:nak_tumpang/features/trips/UI/add_edit_trip_screen.dart';
 import 'package:nak_tumpang/features/profile/view_models/register_view_model.dart';
 
 class RegisterScreen extends StatelessWidget {
@@ -43,16 +43,17 @@ class _RegisterViewState extends State<_RegisterView> {
     if (choice == 'add_trip' && vm.role == 'driver') {
       // Land on Home first (replacing RegisterScreen, whose only path
       // back is LoginScreen — confusing to land on once already
-      // registered and signed in), then push the route-setup screen on
-      // top of it. That way the back stack is [Home, PostSignupDriver],
-      // so backing out of route setup lands on Home instead of Login.
+      // registered and signed in), then push the same add-trip screen
+      // used from the sidebar on top of it. That way the back stack is
+      // [Home, AddEditTrip], so backing out lands on Home instead of
+      // Login. role: 'driver' is passed explicitly — see
+      // AddEditTripScreen's doc comment for why it can't just read
+      // MyTripsViewModel.currentUserRole here.
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const HomeScreen()),
       );
       Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => PostSignupDriverScreen(
-          userId: vm.registeredUserId!,
-        )),
+        MaterialPageRoute(builder: (_) => const AddEditTripScreen(role: 'driver')),
       );
       return;
     }
@@ -218,7 +219,7 @@ class _RegisterViewState extends State<_RegisterView> {
               Padding(
                 padding: const EdgeInsets.only(top: 2),
                 child: Text(
-                  'At least 6 characters, with an uppercase letter, a number and a special character',
+                  'At least 6 characters, with a lowercase letter, an uppercase letter, a number and a special character',
                   style: TextStyle(color: AppColors.greyText, fontSize: 11),
                 ),
               ),

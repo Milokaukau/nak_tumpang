@@ -38,6 +38,32 @@ class AddEditTripViewModel extends ChangeNotifier {
 
   int _minutesOf(TimeOfDay t) => t.hour * 60 + t.minute;
 
+  /// Shared by setFromPlace/setToPlace (live, as soon as both places are
+  /// picked) and _validate() (final check before submit) — one place
+  /// for this rule instead of two copies that could drift apart.
+  void _revalidateLocations() {
+    if (fromPlace == null || toPlace == null) return;
+    final samePlace =
+        fromPlace!.latitude == toPlace!.latitude && fromPlace!.longitude == toPlace!.longitude;
+    if (samePlace) {
+      toError = "Pickup and drop-off can't be the same location";
+    } else if (toError == "Pickup and drop-off can't be the same location") {
+      toError = null;
+    }
+  }
+
+  /// Shared by setDepartTime/setArriveTime (live) and _validate() (final
+  /// check) — arrival has to be chronologically after departure, not
+  /// just "not exactly equal" (the old check let e.g. an 8am arrival
+  /// with a 5pm departure through).
+  void _revalidateTime() {
+    if (_minutesOf(arriveTime) <= _minutesOf(departTime)) {
+      timeError = 'Arrival time must be after departure time';
+    } else {
+      timeError = null;
+    }
+  }
+
   void _initFromExistingTrip() {
     nameController.text = existingTrip!['trip_name'] ?? '';
 
@@ -105,6 +131,7 @@ class AddEditTripViewModel extends ChangeNotifier {
   void setFromPlace(GeocodedPlace place) {
     fromPlace = place;
     fromError = null;
+    _revalidateLocations();
     notifyListeners();
   }
 
@@ -117,6 +144,7 @@ class AddEditTripViewModel extends ChangeNotifier {
   void setToPlace(GeocodedPlace place) {
     toPlace = place;
     toError = null;
+    _revalidateLocations();
     notifyListeners();
   }
 
@@ -138,11 +166,13 @@ class AddEditTripViewModel extends ChangeNotifier {
 
   void setDepartTime(TimeOfDay time) {
     departTime = time;
+    _revalidateTime();
     notifyListeners();
   }
 
   void setArriveTime(TimeOfDay time) {
     arriveTime = time;
+    _revalidateTime();
     notifyListeners();
   }
 
@@ -168,10 +198,11 @@ class AddEditTripViewModel extends ChangeNotifier {
       isValid = false;
     }
 
-    if (_minutesOf(departTime) == _minutesOf(arriveTime)) {
-      timeError = 'Depart and arrival time cannot be exactly the same';
-      isValid = false;
-    }
+    _revalidateLocations();
+    if (toError != null) isValid = false;
+
+    _revalidateTime();
+    if (timeError != null) isValid = false;
 
     notifyListeners();
     return isValid;

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:nak_tumpang/core/services/network_service.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/utils/validators.dart';
+import 'package:nak_tumpang/features/payout/data/services/payout_local_service.dart';
 import 'package:nak_tumpang/features/payout/data/services/payout_gateway.dart';
 import 'package:nak_tumpang/features/payout/data/services/payout_service.dart';
 
@@ -179,6 +181,7 @@ class PayoutViewModel extends ChangeNotifier {
   }
 
   final _service = PayoutService();
+  final _localService = PayoutLocalService();
   // Whatever actually processes the payout after it's recorded — see
   // payout_gateway.dart for why this is still a mock and how to swap it.
   final PayoutGateway _gateway;
@@ -359,7 +362,9 @@ class PayoutViewModel extends ChangeNotifier {
 
     try {
       if (!_historyDatesLoaded) {
-        _historyDates = await _service.fetchPayoutHistoryDates(userId);
+        _historyDates = NetworkService.isOfflineNotifier.value
+            ? await _localService.getCachedPayoutHistoryDates(userId)
+            : await _service.fetchPayoutHistoryDates(userId);
         _historyDatesLoaded = true;
       }
       await _fetchHistoryPage(userId, reset: true);
@@ -429,13 +434,29 @@ class PayoutViewModel extends ChangeNotifier {
       _historyOffset = 0;
       hasMoreHistory = true;
     }
-    final rows = await _service.fetchPayoutHistoryPage(
-      userId,
-      limit: _historyPageSize,
-      offset: _historyOffset,
-      year: selectedHistoryYear,
-      month: selectedHistoryMonth?.month,
-    );
+
+    List<Map<String, dynamic>> rows;
+    if (NetworkService.isOfflineNotifier.value) {
+      rows = await _localService.getCachedPayoutHistoryPage(
+        userId,
+        limit: _historyPageSize,
+        offset: _historyOffset,
+        year: selectedHistoryYear,
+        month: selectedHistoryMonth?.month,
+      );
+    } else {
+      rows = await _service.fetchPayoutHistoryPage(
+        userId,
+        limit: _historyPageSize,
+        offset: _historyOffset,
+        year: selectedHistoryYear,
+        month: selectedHistoryMonth?.month,
+      );
+      // Cache the page we just fetched — full rows (select() with no
+      // args = select *), so a plain insert-or-replace is safe.
+      await _localService.cachePayoutHistoryPage(rows);
+    }
+
     final page = rows.map(PayoutHistoryDisplay.fromRow).toList();
     payoutHistory = reset ? page : [...payoutHistory, ...page];
     _historyOffset += page.length;
@@ -482,64 +503,98 @@ class PayoutViewModel extends ChangeNotifier {
   }
 
   Future<void> _loadWalletData(String userId) async {
-    final profile = await _service.fetchDriverProfile(userId);
-    totalEarnings = (profile?['total_earnings'] as num?)?.toDouble() ?? 0;
-    availableBalance = (profile?['available_balance'] as num?)?.toDouble() ?? 0;
-    totalWithdrawn = (profile?['total_withdrawn'] as num?)?.toDouble() ?? 0;
+    if (NetworkService.isOfflineNotifier.value) {
+      await _loadWalletDataFromCache(userId);
+      return;
+    }
 
-    // Best-effort: if this fails, bankTransferFee just stays at its
-    // fallback value rather than blocking the whole Wallet tab from
-    // loading over what's ultimately a display-only preview number.
     try {
-      bankTransferFee = await _service.fetchBankTransferFee();
-    } catch (_) {
-      // keep the fallback already assigned above
-    }
-
-    final now = DateTime.now();
-    final monthStart = DateTime(now.year, now.month, 1);
-    final monthEnd = DateTime(
-      now.month == 12 ? now.year + 1 : now.year,
-      now.month == 12 ? 1 : now.month + 1,
-      1,
-    );
-
-    // Two bounded queries instead of one unpaginated fetch of every
-    // completed trip the driver has ever had: one scoped to the current
-    // month (for the stat cards), one capped at 10 rows (for the
-    // "Recent trips" list) — same reasoning as payout_history's
-    // paginated fetch, so this doesn't get slower the longer a driver's
-    // been active.
-    final monthTrips = await _service.fetchCompletedTripsInRange(
-      userId,
-      start: monthStart,
-      end: monthEnd,
-    );
-    thisMonthPoints = 0;
-    // Kept in lockstep with thisMonthPoints — both describe the same
-    // current-month window, so the stat cards never show a trip count
-    // that doesn't actually back up the points figure next to it.
-    tripsCompletedCount = 0;
-    for (final trip in monthTrips) {
-      thisMonthPoints += (trip['fee'] as num?)?.toDouble() ?? 0;
-      tripsCompletedCount++;
-    }
-
-    final recent = await _service.fetchRecentCompletedTrips(userId, limit: 10);
-    recentTrips = recent.map((trip) {
-      final dateStr = trip['sub_start_date'] as String?;
-      final date = dateStr != null ? DateTime.tryParse(dateStr) : null;
-      final passengerName = trip['passenger_trips']?['users']?['name'] as String? ?? 'Passenger';
-      return RecentTripDisplay(
-        tripId: trip['id']?.toString() ?? '-',
-        passengerName: passengerName,
-        pickupName: trip['pickup_name'] as String? ?? '-',
-        dropoffName: trip['dropoff_name'] as String? ?? '-',
-        points: (trip['fee'] as num?)?.toDouble() ?? 0,
-        monthLabel: date != null ? _monthName(date.month) : '-',
-        tripDate: date,
+      final profile = await _service.fetchDriverProfile(userId);
+      totalEarnings = (profile?['total_earnings'] as num?)?.toDouble() ?? 0;
+      availableBalance = (profile?['available_balance'] as num?)?.toDouble() ?? 0;
+      totalWithdrawn = (profile?['total_withdrawn'] as num?)?.toDouble() ?? 0;
+      await _localService.cacheWalletBalance(
+        userId: userId,
+        totalEarnings: totalEarnings,
+        availableBalance: availableBalance,
+        totalWithdrawn: totalWithdrawn,
       );
-    }).toList();
+
+      // Best-effort: if this fails, bankTransferFee just stays at its
+      // fallback value rather than blocking the whole Wallet tab from
+      // loading over what's ultimately a display-only preview number.
+      try {
+        bankTransferFee = await _service.fetchBankTransferFee();
+        await _localService.cacheBankTransferFee(bankTransferFee);
+      } catch (_) {
+        // keep the fallback already assigned above
+      }
+
+      final now = DateTime.now();
+      final monthStart = DateTime(now.year, now.month, 1);
+      final monthEnd = DateTime(
+        now.month == 12 ? now.year + 1 : now.year,
+        now.month == 12 ? 1 : now.month + 1,
+        1,
+      );
+
+      // Two bounded queries instead of one unpaginated fetch of every
+      // completed trip the driver has ever had: one scoped to the current
+      // month (for the stat cards), one capped at 10 rows (for the
+      // "Recent trips" list) — same reasoning as payout_history's
+      // paginated fetch, so this doesn't get slower the longer a driver's
+      // been active.
+      final monthTrips = await _service.fetchCompletedTripsInRange(
+        userId,
+        start: monthStart,
+        end: monthEnd,
+      );
+      thisMonthPoints = 0;
+      // Kept in lockstep with thisMonthPoints — both describe the same
+      // current-month window, so the stat cards never show a trip count
+      // that doesn't actually back up the points figure next to it.
+      tripsCompletedCount = 0;
+      for (final trip in monthTrips) {
+        thisMonthPoints += (trip['fee'] as num?)?.toDouble() ?? 0;
+        tripsCompletedCount++;
+      }
+
+      final recent = await _service.fetchRecentCompletedTrips(userId, limit: 10);
+      recentTrips = recent.map((trip) {
+        final dateStr = trip['sub_start_date'] as String?;
+        final date = dateStr != null ? DateTime.tryParse(dateStr) : null;
+        final passengerName = trip['passenger_trips']?['users']?['name'] as String? ?? 'Passenger';
+        return RecentTripDisplay(
+          tripId: trip['id']?.toString() ?? '-',
+          passengerName: passengerName,
+          pickupName: trip['pickup_name'] as String? ?? '-',
+          dropoffName: trip['dropoff_name'] as String? ?? '-',
+          points: (trip['fee'] as num?)?.toDouble() ?? 0,
+          monthLabel: date != null ? _monthName(date.month) : '-',
+          tripDate: date,
+        );
+      }).toList();
+    } catch (e) {
+      // Supabase call failed outright (e.g. connectivity dropped mid-
+      // request) — fall back to cached balance/fee rather than leaving
+      // the screen blank.
+      await _loadWalletDataFromCache(userId);
+    }
+  }
+
+  /// Populates balance + fee from the local cache only — used when
+  /// offline, or when the Supabase fetch above throws. "This month"
+  /// stats and "Recent trips" aren't cached (they come from a
+  /// multi-table join that isn't mirrored locally), so they just stay
+  /// at whatever they last were — empty on a cold, offline start.
+  Future<void> _loadWalletDataFromCache(String userId) async {
+    final cached = await _localService.getCachedWalletBalance(userId);
+    totalEarnings = (cached?['total_earnings'] as num?)?.toDouble() ?? 0;
+    availableBalance = (cached?['available_balance'] as num?)?.toDouble() ?? 0;
+    totalWithdrawn = (cached?['total_withdrawn'] as num?)?.toDouble() ?? 0;
+
+    final cachedFee = await _localService.getCachedBankTransferFee();
+    if (cachedFee != null) bankTransferFee = cachedFee;
   }
 
   String _monthName(int month) {
@@ -689,6 +744,17 @@ class PayoutViewModel extends ChangeNotifier {
       lastPayoutId = payoutId;
       payoutStatus = 'pending';
 
+      // Cache the balance change immediately — totalEarnings/
+      // totalWithdrawn aren't returned by request_payout, so keep
+      // whatever this session already has for them rather than
+      // overwriting with a stale/zero value.
+      await _localService.cacheWalletBalance(
+        userId: userId,
+        totalEarnings: totalEarnings,
+        availableBalance: availableBalance,
+        totalWithdrawn: totalWithdrawn,
+      );
+
       // Only splice the new entry directly into the currently-loaded page
       // if it actually belongs to whatever scope is selected right now
       // (almost always true, since a fresh payout is dated today — but
@@ -696,6 +762,25 @@ class PayoutViewModel extends ChangeNotifier {
       // inserting it here would show a "today" row inside a "March 2025"
       // filtered list, which would be wrong).
       final now = DateTime.now();
+
+      // Cache this payout regardless of the currently selected history
+      // filter (unlike the optimistic UI splice below, which only
+      // applies if it matches what's on screen right now) — it's a
+      // real transaction and should be in the offline cache either way.
+      await _localService.cachePayoutHistoryRow({
+        'id': payoutId,
+        'user_id': userId,
+        'amount': amount,
+        'bank_name': bankName,
+        'bank_acc_no': bankAccNo,
+        'ewallet_phone': ewalletPhone,
+        'status': 'pending',
+        'requested_at': now.toIso8601String(),
+        'processed_at': null,
+        'payment_method': selectedMethod.dbValue,
+        'fee': fee ?? 0,
+      });
+
       final matchesYear = selectedHistoryYear == null || selectedHistoryYear == now.year;
       final matchesMonth = selectedHistoryMonth == null ||
           (selectedHistoryMonth!.year == now.year && selectedHistoryMonth!.month == now.month);
@@ -780,6 +865,7 @@ class PayoutViewModel extends ChangeNotifier {
       if (isTerminal) {
         try {
           await _service.updatePayoutStatus(payoutId, status);
+          await _localService.updateCachedPayoutStatus(payoutId, status, processedAt: DateTime.now());
         } catch (e) {
           // The UI already shows this payout as done — don't let a
           // failed write silently leave payout_history disagreeing with
@@ -790,6 +876,7 @@ class PayoutViewModel extends ChangeNotifier {
           await Future.delayed(const Duration(seconds: 3));
           try {
             await _service.updatePayoutStatus(payoutId, status);
+            await _localService.updateCachedPayoutStatus(payoutId, status, processedAt: DateTime.now());
             pendingReconciliation.remove(payoutId);
           } catch (e2) {
             debugPrint('Retry also failed to persist payout status for $payoutId: $e2');

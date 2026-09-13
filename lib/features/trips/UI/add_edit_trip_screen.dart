@@ -12,14 +12,30 @@ const _weekdayNames = ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday
 class AddEditTripScreen extends StatelessWidget {
   final Map<String, dynamic>? existingTrip;
 
-  const AddEditTripScreen({super.key, this.existingTrip});
+  /// Overrides which role's fields/table this screen submits to.
+  /// Normally left null so it falls back to
+  /// `MyTripsViewModel.currentUserRole` (the sidebar "Add trip" flow,
+  /// where that's already been loaded by the time My Trips is open).
+  ///
+  /// Explicit because right after registration (see RegisterScreen's
+  /// post-signup "add trip" push) `MyTripsViewModel.loadMyTrips()`
+  /// hasn't run yet this session, so `currentUserRole` would still be
+  /// sitting on its 'passenger' default regardless of which role the
+  /// driver just picked on the signup form — silently inserting their
+  /// first route into `passenger_trips` instead of `driver_trips`. The
+  /// caller already knows the role for certain in that flow, so it's
+  /// passed straight through instead of trusting a value nothing has
+  /// populated yet.
+  final String? role;
+
+  const AddEditTripScreen({super.key, this.existingTrip, this.role});
 
   @override
   Widget build(BuildContext context) {
-    final role = context.read<MyTripsViewModel>().currentUserRole;
+    final resolvedRole = role ?? context.read<MyTripsViewModel>().currentUserRole;
 
     return ChangeNotifierProvider(
-      create: (_) => AddEditTripViewModel(role, existingTrip: existingTrip),
+      create: (_) => AddEditTripViewModel(resolvedRole, existingTrip: existingTrip),
       child: const _AddEditTripView(),
     );
   }

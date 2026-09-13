@@ -26,45 +26,65 @@ class RoleSelectionDialog extends StatelessWidget {
     return PopScope(
       canPop: dismissible,
       child: Dialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (dismissible)
-                Align(
-                  alignment: Alignment.topRight,
-                  child: IconButton(
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                    icon: Icon(Icons.close, color: AppColors.greyText),
-                    onPressed: () => Navigator.of(context).pop(),
-                  ),
+        child: ConstrainedBox(
+          // Caps the dialog's width on wider screens (tablets) — on a
+          // phone this just matches whatever insetPadding leaves, so it
+          // doesn't change anything there.
+          constraints: const BoxConstraints(maxWidth: 400),
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Title and close button share a row instead of the
+                // close button floating above a separately-wrapped
+                // title — keeps the X level with the first line of text
+                // instead of pushing the whole heading down.
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'How will you be using Nak Tumpang?',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.black,
+                          height: 1.25,
+                        ),
+                      ),
+                    ),
+                    if (dismissible)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 8),
+                        child: IconButton(
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          icon: Icon(Icons.close, color: AppColors.greyText),
+                          onPressed: () => Navigator.of(context).pop(),
+                        ),
+                      ),
+                  ],
                 ),
-              Text(
-                'How will you be using Nak Tumpang?',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.black,
+                const SizedBox(height: 20),
+                _RoleOption(
+                  icon: Icons.directions_walk_rounded,
+                  label: 'Passenger',
+                  sublabel: 'Find a tumpang to your destination',
+                  onTap: () => Navigator.of(context).pop('passenger'),
                 ),
-              ),
-              const SizedBox(height: 6),
-              _RoleOption(
-                icon: Icons.directions_walk_rounded,
-                label: 'Passenger',
-                sublabel: 'Find a tumpang to your destination',
-                onTap: () => Navigator.of(context).pop('passenger'),
-              ),
-              const SizedBox(height: 12),
-              _RoleOption(
-                icon: Icons.directions_car_filled_rounded,
-                label: 'Driver',
-                sublabel: 'Offer a tumpang along your route',
-                onTap: () => Navigator.of(context).pop('driver'),
-              ),
-            ],
+                const SizedBox(height: 12),
+                _RoleOption(
+                  icon: Icons.directions_car_filled_rounded,
+                  label: 'Driver',
+                  sublabel: 'Offer a tumpang along your route',
+                  onTap: () => Navigator.of(context).pop('driver'),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -116,7 +136,7 @@ class _RoleOption extends StatelessWidget {
                   ),
                   Text(
                     sublabel,
-                    style: TextStyle(color: AppColors.greyText, fontSize: 11),
+                    style: TextStyle(color: AppColors.greyText, fontSize: 12),
                   ),
                 ],
               ),

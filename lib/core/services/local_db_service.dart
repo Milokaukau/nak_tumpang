@@ -19,7 +19,7 @@ class LocalDbService {
 
     return await openDatabase(
       path,
-      version: 2,
+      version: 4,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -58,6 +58,43 @@ class LocalDbService {
     ''');
 
       await db.execute('DROP TABLE points_ledger_old');
+    }
+
+    if (oldVersion < 3) {
+      await _createPostSignupDraftTable(db);
+    }
+
+    if (oldVersion < 4) {
+      // payout_history's local schema had drifted from what the app
+      // actually reads/writes: it required a `payout_at` column that
+      // nothing ever supplies (guaranteed NOT NULL failure on every
+      // insert), required `bank_acc_no` even though e-wallet payouts
+      // deliberately leave it null, and was missing `ewallet_phone`
+      // entirely. That mismatch made every local cache write throw —
+      // right after a successful request_payout() call, and right
+      // after a successful history fetch — which is what made claim
+      // payout look like it "failed" (the server-side payout had
+      // already gone through) and made payout history fail to load.
+      // Safe to just drop and recreate: this table is a pure read
+      // cache of Supabase's payout_history, never the source of truth,
+      // so it refills itself on the next successful fetch.
+      await db.execute('DROP TABLE IF EXISTS payout_history');
+      await db.execute('''
+        CREATE TABLE payout_history (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          amount REAL NOT NULL,
+          bank_name TEXT,
+          bank_acc_no TEXT,
+          ewallet_phone TEXT,
+          status TEXT NOT NULL CHECK (status IN ('pending', 'completed', 'failed')),
+          requested_at TEXT,
+          processed_at TEXT,
+          payment_method TEXT NOT NULL CHECK (payment_method IN ('bank_transfer', 'tng_ewallet')),
+          fee REAL NOT NULL DEFAULT 0,
+          FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        )
+      ''');
     }
   }
 
@@ -103,9 +140,9 @@ class LocalDbService {
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
         amount REAL NOT NULL,
-        payout_at TEXT NOT NULL,
         bank_name TEXT,
-        bank_acc_no TEXT NOT NULL,
+        bank_acc_no TEXT,
+        ewallet_phone TEXT,
         status TEXT NOT NULL CHECK (status IN ('pending', 'completed', 'failed')),
         requested_at TEXT,
         processed_at TEXT,
@@ -338,6 +375,36 @@ class LocalDbService {
       CREATE TABLE payout_settings (
         id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
         bank_transfer_fee REAL NOT NULL DEFAULT 1.00
+      )
+    ''');
+
+    // 16. post_signup_draft
+    await _createPostSignupDraftTable(db);
+  }
+
+  // No longer written to — the post-signup driver flow now reuses
+  // AddEditTripScreen (see add_edit_trip_screen.dart) instead of its
+  // own screen/draft-saving view model, so nothing populates this
+  // table anymore. Left in place rather than dropped so upgrading
+  // installs that still have an old cached draft row don't hit a
+  // "no such table" error before this comment is next revisited.
+  Future<void> _createPostSignupDraftTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS post_signup_draft (
+        user_id TEXT PRIMARY KEY,
+        from_label TEXT,
+        from_lat REAL,
+        from_lng REAL,
+        to_label TEXT,
+        to_lat REAL,
+        to_lng REAL,
+        from_day INTEGER,
+        to_day INTEGER,
+        depart_hour INTEGER,
+        depart_minute INTEGER,
+        arrive_hour INTEGER,
+        arrive_minute INTEGER,
+        updated_at TEXT NOT NULL
       )
     ''');
   }

@@ -74,10 +74,11 @@ class Validators {
       return optional ? null : 'Password is required';
     }
     if (v.length < 6) return 'At least 6 characters';
-    if (!RegExp(r'[A-Z]').hasMatch(v) ||
+    if (!RegExp(r'[a-z]').hasMatch(v) ||
+        !RegExp(r'[A-Z]').hasMatch(v) ||
         !RegExp(r'[0-9]').hasMatch(v) ||
         !_specialCharRegex.hasMatch(v)) {
-      return 'Include an uppercase letter, a number, and a special character';
+      return 'Include a lowercase letter, an uppercase letter, a number, and a special character';
     }
     return null;
   }

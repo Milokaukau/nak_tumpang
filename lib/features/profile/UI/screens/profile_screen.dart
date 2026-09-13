@@ -459,7 +459,7 @@ class _ProfileViewState extends State<_ProfileView> {
                       Padding(
                         padding: const EdgeInsets.only(top: 4),
                         child: Text(
-                          'At least 6 characters, with an uppercase letter, a number and a special character',
+                          'At least 6 characters, with a lowercase letter, an uppercase letter, a number and a special character',
                           style: TextStyle(color: AppColors.greyText, fontSize: 11),
                         ),
                       ),

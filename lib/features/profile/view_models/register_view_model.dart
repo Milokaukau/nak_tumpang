@@ -31,8 +31,8 @@ class RegisterViewModel extends ChangeNotifier {
 
   // Set once the license (if any) is uploaded to Storage, then written
   // straight onto `driver_profiles` below in the same submit() call —
-  // PostSignupDriverScreen no longer touches driver_profiles at all
-  // (see PostSignupDriverViewModel), it only ever writes driver_trips.
+  // the post-signup "add trip" step (AddEditTripScreen) never touches
+  // driver_profiles, it only ever writes driver_trips.
   String? licenseStoragePath;
 
   final _storageService = ProfileStorageService();
@@ -55,9 +55,6 @@ class RegisterViewModel extends ChangeNotifier {
   String? _registeredUserId;
 
   /// The Auth user id created by [submit], once it's run at least once.
-  /// Needed by the screen to hand off to PostSignupDriverScreen if a
-  /// newly-registered driver chooses "Add trip" from the get-started
-  /// dialog.
   String? get registeredUserId => _registeredUserId;
 
   String get trimmedName => nameController.text.trim();
@@ -224,8 +221,7 @@ class RegisterViewModel extends ChangeNotifier {
         // Account row is written immediately for both roles now — a
         // route is no longer required to have an account. Adding a trip
         // is an optional next step offered by the "Let's get started!"
-        // dialog instead (PostSignupDriverScreen), not a precondition
-        // for the account existing.
+        // dialog instead, not a precondition for the account existing.
         await _supabase.from('users').upsert({
           'id': newUserId,
           'name': nameController.text.trim(),

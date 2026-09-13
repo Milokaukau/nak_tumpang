@@ -21,76 +21,84 @@ class ClaimPayoutDialog extends StatelessWidget {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Claim payout', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: AppColors.primaryYellow)),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppColors.lightYellow,
-                borderRadius: BorderRadius.circular(10),
+        // The keyboard pushes this dialog up to stay above it, which can
+        // leave less vertical room than the content needs — without
+        // this, that showed as a render overflow AND made Confirm
+        // physically unreachable (it was being laid out below the
+        // visible area, not just visually clipped). Scrolling lets the
+        // same content fit in whatever space is actually left.
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Claim payout', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: AppColors.primaryYellow)),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.lightYellow,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  children: [
+                    const Text('Available points', style: TextStyle(color: AppColors.greyText, fontSize: 12)),
+                    const Spacer(),
+                    Text(
+                      '${pointsLabel(vm.availableBalance)} pts',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
               ),
-              child: Row(
+              const SizedBox(height: 16),
+              const Text('Amount', style: TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 6),
+              _AmountField(vm: vm),
+              const SizedBox(height: 20),
+              const Text('Payout method', style: TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              _MethodTile(
+                icon: Icons.account_balance,
+                label: 'Bank transfer',
+                selected: vm.selectedMethod == PayoutMethod.bankTransfer,
+                onTap: () => vm.selectMethod(PayoutMethod.bankTransfer),
+              ),
+              const SizedBox(height: 8),
+              _MethodTile(
+                icon: Icons.account_balance_wallet,
+                label: "Touch 'n Go eWallet",
+                selected: vm.selectedMethod == PayoutMethod.tngEwallet,
+                onTap: () => vm.selectMethod(PayoutMethod.tngEwallet),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                vm.selectedMethod == PayoutMethod.bankTransfer
+                    ? 'A RM${vm.bankTransferFee.toStringAsFixed(2)} processing fee applies.'
+                    : 'Instant transfer to your eWallet.',
+                style: const TextStyle(color: AppColors.greyText, fontSize: 12),
+              ),
+              const SizedBox(height: 20),
+              Row(
                 children: [
-                  const Text('Available points', style: TextStyle(color: AppColors.greyText, fontSize: 12)),
-                  const Spacer(),
-                  Text(
-                    '${pointsLabel(vm.availableBalance)} pts',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  Expanded(
+                    child: BaseButton(
+                      text: 'Cancel',
+                      isOutlined: true,
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: BaseButton(
+                      text: 'Confirm',
+                      onPressed: () => _confirm(context, vm),
+                    ),
                   ),
                 ],
               ),
-            ),
-            const SizedBox(height: 16),
-            const Text('Amount', style: TextStyle(fontWeight: FontWeight.w600)),
-            const SizedBox(height: 6),
-            _AmountField(vm: vm),
-            const SizedBox(height: 20),
-            const Text('Payout method', style: TextStyle(fontWeight: FontWeight.w600)),
-            const SizedBox(height: 8),
-            _MethodTile(
-              icon: Icons.account_balance,
-              label: 'Bank transfer',
-              selected: vm.selectedMethod == PayoutMethod.bankTransfer,
-              onTap: () => vm.selectMethod(PayoutMethod.bankTransfer),
-            ),
-            const SizedBox(height: 8),
-            _MethodTile(
-              icon: Icons.account_balance_wallet,
-              label: "Touch 'n Go eWallet",
-              selected: vm.selectedMethod == PayoutMethod.tngEwallet,
-              onTap: () => vm.selectMethod(PayoutMethod.tngEwallet),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              vm.selectedMethod == PayoutMethod.bankTransfer
-                  ? 'A RM${vm.bankTransferFee.toStringAsFixed(2)} processing fee applies.'
-                  : 'Instant transfer to your eWallet.',
-              style: const TextStyle(color: AppColors.greyText, fontSize: 12),
-            ),
-            const SizedBox(height: 20),
-            Row(
-              children: [
-                Expanded(
-                  child: BaseButton(
-                    text: 'Cancel',
-                    isOutlined: true,
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: BaseButton(
-                    text: 'Confirm',
-                    onPressed: () => _confirm(context, vm),
-                  ),
-                ),
-              ],
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
