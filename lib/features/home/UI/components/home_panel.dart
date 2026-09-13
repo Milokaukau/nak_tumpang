@@ -25,6 +25,36 @@ import 'package:nak_tumpang/features/negotiation/view_models/negotiation_view_mo
 class HomePanel extends StatelessWidget {
   const HomePanel({super.key});
 
+  /// Maps short codes to human-readable transit types
+  String _getStationDisplay(dynamic station) {
+    String type = 'Train';
+    String shortName = (station.lineShortName ?? '').toUpperCase();
+
+    if (shortName.contains('KJL') || shortName.contains('AGL') || shortName.contains('SPL')) {
+      type = 'LRT';
+    } else if (shortName.contains('MRT') || shortName.contains('PYL') || shortName.contains('KGL')) {
+      type = 'MRT';
+    } else if (shortName.contains('MRL')) {
+      type = 'Monorail';
+    } else if (shortName.isNotEmpty) {
+      type = shortName;
+    }
+
+    return '$type ${station.name}'.toUpperCase();
+  }
+
+  /// Checks if coordinates are near a station and intercepts the UI text
+  String _getStationNameIfNear(double lat, double lng, String defaultName) {
+    if (lat == 0.0 || lng == 0.0) return defaultName;
+    final station = TransitUtils.findNearestStation(LatLng(lat, lng));
+
+    // 250m tolerance for manual map pins
+    if (station != null && MatchingUtils.calculateDistance(lat, lng, station.location.latitude, station.location.longitude) <= 250) {
+      return _getStationDisplay(station);
+    }
+    return defaultName;
+  }
+
   @override
   Widget build(BuildContext context) {
     final viewModel = context.watch<HomeViewModel>();
@@ -60,8 +90,6 @@ class HomePanel extends StatelessWidget {
                   ),
                 ),
               ),
-
-              // --- SINGLE SOURCE OF TRUTH: panel mode routing, then loading, then role-based view ---
               if (viewModel.panelMode == HomePanelMode.cantFetch && viewModel.selectedSubscription != null)
                 CantFetchPanel(
                   tumpangSubscriptionId: viewModel.selectedSubscription!['sub_id'] ?? viewModel.selectedSubscription!['id'] ?? '',
@@ -505,12 +533,20 @@ class HomePanel extends StatelessWidget {
 
     if (isDriver) {
       return driverLegsData.map((leg) {
+        final currentLat = FormatUtils.parseDouble(leg['pickup_lat']);
+        final currentLng = FormatUtils.parseDouble(leg['pickup_lng']);
+        final dropLat = FormatUtils.parseDouble(leg['dropoff_lat']);
+        final dropLng = FormatUtils.parseDouble(leg['dropoff_lng']);
+
+        final pickupStr = _getStationNameIfNear(currentLat, currentLng, leg['pickup_location']);
+        final dropoffStr = _getStationNameIfNear(dropLat, dropLng, leg['dropoff_location']);
+
         return ActiveSubscriptionLeg(
           type: LegType.driver,
           name: leg['name'],
           imageUrl: leg['imageUrl'],
-          pickupLocation: leg['pickup_location'],
-          dropoffLocation: leg['dropoff_location'],
+          pickupLocation: pickupStr,
+          dropoffLocation: dropoffStr,
           time: leg['pickup_time'],
           exceptionButtonText: "Can't fetch at...",
           onCallPressed: () => UrlUtils.makePhoneCall(leg['phone']),
@@ -603,7 +639,6 @@ class HomePanel extends StatelessWidget {
     final lastDriverLat = FormatUtils.parseDouble(driverLegsData.last['dropoff_lat']);
     final lastDriverLng = FormatUtils.parseDouble(driverLegsData.last['dropoff_lng']);
 
-    // Guard missing passenger coordinates before calculating gap distances
     final startGapDist = (passStart.latitude != 0.0 && passStart.longitude != 0.0)
         ? MatchingUtils.calculateDistance(passStart.latitude, passStart.longitude, firstDriverLat, firstDriverLng)
         : 0.0;
@@ -613,21 +648,24 @@ class HomePanel extends StatelessWidget {
         : 0.0;
 
     if (startGapDist > 100) {
+      final fdPickup = _getStationNameIfNear(firstDriverLat, firstDriverLng, driverLegsData.first['pickup_location']);
+
       if (startGapDist > 1500) {
         final boardStation = TransitUtils.findNearestStation(passStart);
         if (boardStation != null) {
+          final boardName = _getStationDisplay(boardStation);
           result.add(ActiveSubscriptionLeg(
             type: LegType.walk,
             name: 'Walk',
             pickupLocation: 'Origin',
-            dropoffLocation: boardStation.name,
+            dropoffLocation: boardName,
             time: '',
           ));
           result.add(ActiveSubscriptionLeg(
             type: LegType.transit,
             name: 'Train',
-            pickupLocation: boardStation.name,
-            dropoffLocation: driverLegsData.first['pickup_location'],
+            pickupLocation: boardName,
+            dropoffLocation: fdPickup,
             time: '',
           ));
         }
@@ -636,7 +674,7 @@ class HomePanel extends StatelessWidget {
           type: LegType.walk,
           name: 'Walk',
           pickupLocation: 'Origin',
-          dropoffLocation: driverLegsData.first['pickup_location'],
+          dropoffLocation: fdPickup,
           time: '',
         ));
       }
@@ -644,19 +682,25 @@ class HomePanel extends StatelessWidget {
 
     for (int i = 0; i < driverLegsData.length; i++) {
       final leg = driverLegsData[i];
+      final currentLat = FormatUtils.parseDouble(leg['pickup_lat']);
+      final currentLng = FormatUtils.parseDouble(leg['pickup_lng']);
+      final dropLat = FormatUtils.parseDouble(leg['dropoff_lat']);
+      final dropLng = FormatUtils.parseDouble(leg['dropoff_lng']);
+
+      final pickupStr = _getStationNameIfNear(currentLat, currentLng, leg['pickup_location']);
+      final dropoffStr = _getStationNameIfNear(dropLat, dropLng, leg['dropoff_location']);
 
       if (i > 0) {
         final prevLat = FormatUtils.parseDouble(driverLegsData[i - 1]['dropoff_lat']);
         final prevLng = FormatUtils.parseDouble(driverLegsData[i - 1]['dropoff_lng']);
-        final currentLat = FormatUtils.parseDouble(leg['pickup_lat']);
-        final currentLng = FormatUtils.parseDouble(leg['pickup_lng']);
 
         if (MatchingUtils.calculateDistance(prevLat, prevLng, currentLat, currentLng) > 100) {
+          final prevDropoffStr = _getStationNameIfNear(prevLat, prevLng, driverLegsData[i - 1]['dropoff_location']);
           result.add(ActiveSubscriptionLeg(
             type: LegType.transit,
             name: 'Train',
-            pickupLocation: driverLegsData[i - 1]['dropoff_location'],
-            dropoffLocation: leg['pickup_location'],
+            pickupLocation: prevDropoffStr,
+            dropoffLocation: pickupStr,
             time: '',
           ));
         }
@@ -666,8 +710,8 @@ class HomePanel extends StatelessWidget {
         type: LegType.driver,
         name: leg['name'],
         imageUrl: leg['imageUrl'],
-        pickupLocation: leg['pickup_location'],
-        dropoffLocation: leg['dropoff_location'],
+        pickupLocation: pickupStr,
+        dropoffLocation: dropoffStr,
         time: leg['pickup_time'],
         exceptionButtonText: 'No need tumpang at...',
         onCallPressed: () => UrlUtils.makePhoneCall(leg['phone']),
@@ -714,20 +758,23 @@ class HomePanel extends StatelessWidget {
     }
 
     if (endGapDist > 100) {
+      final ldDropoff = _getStationNameIfNear(lastDriverLat, lastDriverLng, driverLegsData.last['dropoff_location']);
+
       if (endGapDist > 1500) {
         final alightStation = TransitUtils.findNearestStation(passEnd);
         if (alightStation != null) {
+          final alightName = _getStationDisplay(alightStation);
           result.add(ActiveSubscriptionLeg(
             type: LegType.transit,
             name: 'Train',
-            pickupLocation: driverLegsData.last['dropoff_location'],
-            dropoffLocation: alightStation.name,
+            pickupLocation: ldDropoff,
+            dropoffLocation: alightName,
             time: '',
           ));
           result.add(ActiveSubscriptionLeg(
             type: LegType.walk,
             name: 'Walk',
-            pickupLocation: alightStation.name,
+            pickupLocation: alightName,
             dropoffLocation: 'Destination',
             time: '',
           ));
@@ -736,7 +783,7 @@ class HomePanel extends StatelessWidget {
         result.add(ActiveSubscriptionLeg(
           type: LegType.walk,
           name: 'Walk',
-          pickupLocation: driverLegsData.last['dropoff_location'],
+          pickupLocation: ldDropoff,
           dropoffLocation: 'Destination',
           time: '',
         ));
