@@ -506,15 +506,14 @@ class NegotiationViewModel extends ChangeNotifier {
   }) {
     if (isOffline) throw NegotiationException('You cannot request an extension while offline.');
 
-    final activeUserId = _supabase.auth.currentUser?.id;
-    if (activeUserId == null) throw NegotiationException('You must be signed in to request an extension.');
-    currentUserId = activeUserId;
+    final liveUserId = _supabase.auth.currentUser?.id ?? currentUserId;
+    if (liveUserId == null) throw NegotiationException('You must be signed in to request an extension.');
 
     return runNegotiationAction<String>(
           () async {
         final requestId = await _service.createExtensionRequest(
           subscription: subscription,
-          requestedById: activeUserId,
+          requestedById: liveUserId,
           newEndDate: newEndDate,
           extensionType: extensionType,
           overridePickupName: overridePickupName,

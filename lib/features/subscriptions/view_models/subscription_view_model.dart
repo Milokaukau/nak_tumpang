@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:nak_tumpang/features/subscriptions/data/services/subscription_supabase_service.dart';
+import 'package:nak_tumpang/core/services/network_service.dart';
+import 'package:nak_tumpang/features/subscriptions/data/services/subscription_local_service.dart';
 
 class SubscriptionViewModel extends ChangeNotifier {
   final SubscriptionSupabaseService _service = SubscriptionSupabaseService();
+  final SubscriptionLocalService _localService = SubscriptionLocalService();
 
   bool isLoading = false;
   List<Map<String, dynamic>> subscriptions = [];
@@ -14,14 +17,26 @@ class SubscriptionViewModel extends ChangeNotifier {
     isLoading = true;
     notifyListeners();
 
-    final results = await _service.fetchSubscriptions(userId: userId, role: role);
+    if (NetworkService.isOfflineNotifier.value) {
+      subscriptions = await _localService.getCachedSubscriptionsForList(userId, role);
+      isLoading = false;
+      notifyListeners();
+      return;
+    }
 
-    // Run exception checks in parallel for faster load times
-    await Future.wait(results.map((sub) async {
-      sub['has_active_exception'] = await _service.hasActiveException(sub['id']);
-    }));
+    try {
+      final results = await _service.fetchSubscriptions(userId: userId, role: role);
 
-    subscriptions = results;
+      await Future.wait(results.map((sub) async {
+        sub['has_active_exception'] = await _service.hasActiveException(sub['id']);
+      }));
+
+      subscriptions = results;
+    } catch (e) {
+      debugPrint('⚠️ Error loading subscriptions online, falling back to cache: $e');
+      subscriptions = await _localService.getCachedSubscriptionsForList(userId, role);
+    }
+
     isLoading = false;
     notifyListeners();
   }

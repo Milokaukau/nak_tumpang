@@ -19,12 +19,46 @@ class LocalDbService {
 
     return await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
       onCreate: _createDB,
+      onUpgrade: _upgradeDB,
     );
+  }
+
+  Future<void> _upgradeDB(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      // Widen points_ledger's reason CHECK to match the Supabase migration
+      // (added 'goyang_points'/'goyang_voucher'). SQLite can't ALTER a
+      // CHECK constraint in place, so rename the old table, create the new
+      // one with the updated constraint, copy the existing rows across,
+      // then drop the old table — preserves cached history instead of
+      // wiping it on upgrade.
+      await db.execute('ALTER TABLE points_ledger RENAME TO points_ledger_old');
+
+      await db.execute('''
+      CREATE TABLE points_ledger (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        change_amount INTEGER NOT NULL,
+        reason TEXT NOT NULL CHECK (reason IN ('trip_completed', 'voucher_redeemed', 'goyang_points', 'goyang_voucher')),
+        reference_id TEXT,
+        description TEXT NOT NULL,
+        created_at TEXT,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+      )
+    ''');
+
+      await db.execute('''
+      INSERT INTO points_ledger (id, user_id, change_amount, reason, reference_id, description, created_at)
+      SELECT id, user_id, change_amount, reason, reference_id, description, created_at
+      FROM points_ledger_old
+    ''');
+
+      await db.execute('DROP TABLE points_ledger_old');
+    }
   }
 
   Future<void> _createDB(Database db, int version) async {
@@ -287,17 +321,17 @@ class LocalDbService {
 
     // 14. points_ledger
     await db.execute('''
-      CREATE TABLE points_ledger (
-        id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL,
-        change_amount INTEGER NOT NULL,
-        reason TEXT NOT NULL CHECK (reason IN ('trip_completed', 'voucher_redeemed')),
-        reference_id TEXT,
-        description TEXT NOT NULL,
-        created_at TEXT,
-        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-      )
-    ''');
+  CREATE TABLE points_ledger (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    change_amount INTEGER NOT NULL,
+    reason TEXT NOT NULL CHECK (reason IN ('trip_completed', 'voucher_redeemed', 'goyang_points', 'goyang_voucher')),
+    reference_id TEXT,
+    description TEXT NOT NULL,
+    created_at TEXT,
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+  )
+''');
 
     // 15. payout_settings
     await db.execute('''
