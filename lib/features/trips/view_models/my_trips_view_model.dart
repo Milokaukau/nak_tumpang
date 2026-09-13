@@ -114,4 +114,18 @@ class MyTripsViewModel extends ChangeNotifier {
       return false;
     }
   }
+
+  // Database access lives in TripSupabaseService; the view model only
+  // decides whether to call it (offline check) and passes data through.
+  // Errors from the service propagate to the caller instead of being
+  // swallowed into null, so "no match" and "query failed" stay distinguishable.
+  Future<String?> getNegotiatingRequestId(String tripId) async {
+    if (NetworkService.isOfflineNotifier.value) return null;
+    return _tripService.findNegotiatingRequestId(tripId);
+  }
+
+  Future<Map<String, dynamic>?> getActiveSubscription(String tripId, String role) async {
+    if (NetworkService.isOfflineNotifier.value) return null;
+    return _tripService.fetchActiveSubscriptionForTrip(tripId, role);
+  }
 }

@@ -178,7 +178,6 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
     }
   }
 
-  // --- NEW: Added the missing Cancellation flow for passengers ---
   Future<void> _confirmCancel(BuildContext context, NegotiationViewModel controller) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -333,14 +332,11 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                 if (request == null) return const Center(child: Text('Request no longer exists.'));
 
                 final targetTripId = isDriver ? request.passengerTripId : request.driverTripId;
-                final bool isCompleted = request.status == 'completed';
-                final bool isRejected = request.status == 'rejected';
+                final myTripId = isDriver ? request.driverTripId : request.passengerTripId;
+                final bool isCompleted = request.status == 'completed';final bool isRejected = request.status == 'rejected';
                 final bool isCancelled = request.status == 'cancelled';
 
-                // We separate Finalized from Offline so the card banner still says "Agreement Status" when offline
                 final bool isFinalized = isCompleted || isRejected || isCancelled;
-
-                // Fields become locked if it's finalized OR if the user is offline
                 final bool fieldsReadOnly = isFinalized || isOffline;
 
                 final bool isFullyAgreed = request.fee.isAccepted &&
@@ -356,11 +352,22 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                     final userData = userSnapshot.data;
                     final displayName = userData?['name'] ?? userData?['full_name'] ?? 'User';
 
+                    // Fetch trip name synchronously here!
+                    final myTripId = isDriver ? request.driverTripId : request.passengerTripId;
+                    final tripName = controller.getCachedTripName(myTripId);
+
                     return SingleChildScrollView(
                       padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 20.0),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
+                          Text(
+                            tripName,
+                            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppColors.black),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 24),
+
                           Container(
                             width: 80, height: 80,
                             decoration: BoxDecoration(
@@ -447,8 +454,8 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                             isRejected: isRejected || isCancelled,
                             isOffline: isOffline,
                             onReject: () => _confirmReject(context, controller),
-                            onCancelRequest: () => _confirmCancel(context, controller), // Properly wired
-                            onCancelSubscription: () => _confirmCancel(context, controller), // Properly wired
+                            onCancelRequest: () => _confirmCancel(context, controller),
+                            onCancelSubscription: () => _confirmCancel(context, controller),
                             onProceedToSummary: () {
                               Navigator.push(
                                 context,

@@ -425,7 +425,9 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
     final endedBy = widget.subscription['ended_by'];
     final cancelReason = widget.subscription['cancellation_reason'];
 
-    final otherUserName = widget.subscription['name'] ?? 'User';
+    final myTripKey = widget.role == 'passenger' ? 'passenger_trips' : 'driver_trips';
+    final myTrip = widget.subscription[myTripKey] as Map<String, dynamic>?;
+    final tripName = myTrip?['trip_name'] ?? widget.subscription['trip_name'] ?? 'Tumpang Journey';    final otherUserName = widget.subscription['name'] ?? 'User';
     final pickupName = widget.subscription['pickup_location'] ?? 'Unknown';
     final dropoffName = widget.subscription['dropoff_location'] ?? 'Unknown';
     final startDate = widget.subscription['subscription_start_date'] ?? '';
@@ -446,6 +448,13 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
+          Text(
+            tripName,
+            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppColors.black),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 24),
+
           if (!isActive)
             Container(
               width: double.infinity,
