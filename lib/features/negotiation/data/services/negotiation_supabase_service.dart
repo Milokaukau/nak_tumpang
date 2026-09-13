@@ -171,6 +171,15 @@ class NegotiationSupabaseService {
       throw StateError('Extension request $extensionRequestId is not fully agreed yet.');
     }
 
+    // VALIDATION: Ensure the extension end date has not expired relative to today before writing
+    final extensionEndDate = DateTime.tryParse(request.subscriptionEndDate.value);
+    final today = DateTime.now();
+    final todayDateOnly = DateTime(today.year, today.month, today.day);
+
+    if (extensionEndDate == null || extensionEndDate.isBefore(todayDateOnly)) {
+      throw StateError('Extension request $extensionRequestId has expired.');
+    }
+
     final oldSubscriptionId = request.extendsSubscriptionId!;
     final oldSub = await _supabase
         .from('tumpang_subscription')
@@ -183,8 +192,8 @@ class NegotiationSupabaseService {
     }
 
     final newSubscriptionId = 'sub_${DateTime.now().millisecondsSinceEpoch}';
-    final todayStr = DateTime.now().toIso8601String().split('T').first;
-    final nowIso = DateTime.now().toIso8601String();
+    final todayStr = todayDateOnly.toIso8601String().split('T').first;
+    final nowIso = today.toIso8601String();
 
     // 1. ALWAYS create a brand new subscription row
     await _supabase.from('tumpang_subscription').insert({
@@ -201,14 +210,14 @@ class NegotiationSupabaseService {
       'fee': request.fee.value,
       'deposit': additionalDeposit, // Fresh deposit only
       'deposit_refunded': false,
-      'subscription_start_date': todayStr, // Start exactly at finalization
+      'subscription_start_date': todayStr,
       'subscription_end_date': request.subscriptionEndDate.value,
       'status': 'active',
     });
 
     // 2. Shut down the old subscription safely
     final oldEndDate = DateTime.tryParse(oldSub['subscription_end_date']?.toString() ?? '');
-    final isOldEndInFuture = oldEndDate != null && oldEndDate.isAfter(DateTime.now());
+    final isOldEndInFuture = oldEndDate != null && oldEndDate.isAfter(today);
 
     final updatePayload = {
       'status': 'inactive',
@@ -238,8 +247,8 @@ class NegotiationSupabaseService {
       await _supabase.from('payments').insert({
         'id': paymentId,
         'tumpang_subscription_id': newSubscriptionId,
-        'month': DateTime.now().month,
-        'year': DateTime.now().year,
+        'month': today.month,
+        'year': today.year,
         'due_date': nowIso,
         'paid_at': nowIso,
         'amount': additionalDeposit,
