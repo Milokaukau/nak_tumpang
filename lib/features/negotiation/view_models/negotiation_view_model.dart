@@ -118,7 +118,7 @@ class NegotiationViewModel extends ChangeNotifier {
     notifyListeners();
 
     try {
-      currentUserId = _supabase.auth.currentUser?.id;
+      currentUserId = _supabase.auth.currentUser?.id ?? currentUserId;
       if (currentUserId == null) {
         isLoading = false;
         notifyListeners();
@@ -251,7 +251,6 @@ class NegotiationViewModel extends ChangeNotifier {
     return null;
   }
 
-  // Generic wrapper for standard errors
   Future<T> runNegotiationAction<T>(
       Future<T> Function() action, {
         String fallbackMessage = 'An error occurred during negotiation.',
@@ -281,7 +280,8 @@ class NegotiationViewModel extends ChangeNotifier {
     double? lng,
   }) {
     if (isOffline) throw NegotiationException('You cannot propose terms while offline.');
-    if (currentUserId == null) return Future.value();
+    final activeUserId = _supabase.auth.currentUser?.id ?? currentUserId;
+    if (activeUserId == null) return Future.value();
 
     return runNegotiationAction(() async {
       await _service.updateNegotiationField(
@@ -290,7 +290,7 @@ class NegotiationViewModel extends ChangeNotifier {
         value: value,
         lat: lat,
         lng: lng,
-        requestedById: currentUserId!,
+        requestedById: activeUserId,
         isAccepted: false,
       );
       await refreshRequests();
@@ -303,7 +303,8 @@ class NegotiationViewModel extends ChangeNotifier {
     required String endDate,
   }) {
     if (isOffline) throw NegotiationException('You cannot propose terms while offline.');
-    if (currentUserId == null) return Future.value();
+    final activeUserId = _supabase.auth.currentUser?.id ?? currentUserId;
+    if (activeUserId == null) return Future.value();
 
     return runNegotiationAction(() async {
       final start = DateTime.tryParse(startDate);
@@ -321,7 +322,7 @@ class NegotiationViewModel extends ChangeNotifier {
         requestId: requestId,
         startDate: startDate,
         endDate: endDate,
-        requestedById: currentUserId!,
+        requestedById: activeUserId,
       );
       await refreshRequests();
     });
@@ -406,13 +407,16 @@ class NegotiationViewModel extends ChangeNotifier {
     double? overrideFee,
   }) {
     if (isOffline) throw NegotiationException('You cannot request an extension while offline.');
-    if (currentUserId == null) throw NegotiationException('You must be signed in to request an extension.');
+
+    final activeUserId = _supabase.auth.currentUser?.id ?? currentUserId;
+    if (activeUserId == null) throw NegotiationException('You must be signed in to request an extension.');
+    currentUserId = activeUserId;
 
     return runNegotiationAction<String>(
           () async {
         final requestId = await _service.createExtensionRequest(
           subscription: subscription,
-          requestedById: currentUserId!,
+          requestedById: activeUserId,
           newEndDate: newEndDate,
           extensionType: extensionType,
           overridePickupName: overridePickupName,
@@ -431,9 +435,6 @@ class NegotiationViewModel extends ChangeNotifier {
     );
   }
 
-  // --- NEW METHODS FOR SUMMARY & EXTENSION DEPOSIT HANDLING ---
-
-  /// Fetches both the request AND the old deposit (if it's an extension) in one go
   Future<Map<String, dynamic>?> getSummaryData(String requestId) async {
     final req = await getSingleRequest(requestId);
     if (req == null) return null;
@@ -450,7 +451,6 @@ class NegotiationViewModel extends ChangeNotifier {
     };
   }
 
-  /// Finalizes the extension and pushes the additional deposit to Supabase
   Future<void> finalizeExtensionRequest({
     required String extensionRequestId,
     required double additionalDeposit,
