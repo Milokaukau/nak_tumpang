@@ -748,7 +748,7 @@ class HomeViewModel extends ChangeNotifier {
       List<Map<String, dynamic>> tempMatchedDrivers = [];
       int matchCount = 0;
       bool moreAvailable = false;
-      int driversEvaluated = 0; // <-- The 4 Driver Max Cap
+      int orsFailuresThisRun = 0; // Track total full failures
 
       for (int i = 0; i < driverTrips.length; i++) {
         if (_fetchId != currentFetchId) return;
@@ -777,17 +777,18 @@ class HomeViewModel extends ChangeNotifier {
         if (pickDist > 15000 || dropDist > 15000) continue;
 
         try {
-          // --- STRICT CAP: Check if we've evaluated 4 drivers ---
-          if (driversEvaluated >= currentDirectLimit) {
-            moreAvailable = true;
-            break;
-          }
-          driversEvaluated++;
-
           final driverRoute = await _getCachedRoute(drivStart, drivEnd);
           if (_fetchId != currentFetchId) return;
 
-          if (driverRoute.isEmpty) continue; // Guards against empty ORS results
+          if (driverRoute.isEmpty) {
+            orsFailuresThisRun++;
+            if (orsFailuresThisRun >= 4) {
+              debugPrint('🛑 Stopping search: ORS failed completely 4 times.');
+              moreAvailable = true;
+              break;
+            }
+            continue;
+          }
 
           if (MatchingUtils.isRouteMatch(passPick, passDrop, driverRoute, 800)) {
             tempMatchedDrivers.add({
@@ -804,6 +805,10 @@ class HomeViewModel extends ChangeNotifier {
             });
 
             matchCount++;
+            if (matchCount >= currentDirectLimit) {
+              moreAvailable = i < driverTrips.length - 1;
+              break;
+            }
           }
         } catch (e) {
           if (e.toString().contains('Quota') || e.toString().contains('SocketException')) break;
@@ -901,7 +906,8 @@ class HomeViewModel extends ChangeNotifier {
         lastMileOptions.add({'type': 'Walk'});
       }
 
-      int driversEvaluated = 0; // <-- The 4 Driver Max Cap
+      int validDriversFound = 0;
+      int orsFailuresThisRun = 0; // Track total full failures
 
       for (int i = 0; i < driverTrips.length; i++) {
         if (_fetchId != currentFetchId) return;
@@ -928,17 +934,18 @@ class HomeViewModel extends ChangeNotifier {
           bool potentialLastMile = (drivTime > passTime) && (pickDistFromStation <= 15000 && dropDistToDest <= 15000);
 
           if (potentialFirstMile || potentialLastMile) {
-            // --- STRICT CAP: Check if we've evaluated 4 drivers ---
-            if (driversEvaluated >= currentMixedLimit) {
-              moreAvailable = true;
-              break;
-            }
-            driversEvaluated++;
-
             final driverRoute = await _getCachedRoute(drivStart, drivEnd);
             if (_fetchId != currentFetchId) return;
 
-            if (driverRoute.isEmpty) continue; // Guards against empty ORS results
+            if (driverRoute.isEmpty) {
+              orsFailuresThisRun++;
+              if (orsFailuresThisRun >= 4) {
+                debugPrint('🛑 Stopping search: ORS failed completely 4 times.');
+                moreAvailable = true;
+                break;
+              }
+              continue;
+            }
 
             if (potentialFirstMile && MatchingUtils.isRouteMatch(passPick, pickStation.location, driverRoute, 800)) {
               final routeDistToStation = MatchingUtils.calculateDistance(passPick.latitude, passPick.longitude, pickStation.location.latitude, pickStation.location.longitude);
@@ -969,6 +976,14 @@ class HomeViewModel extends ChangeNotifier {
                 'distance_km': pickDistFromStation / 1000,
               });
               foundAny = true;
+            }
+          }
+
+          if (foundAny) {
+            validDriversFound++;
+            if (validDriversFound >= currentMixedLimit * 2) {
+              moreAvailable = i < driverTrips.length - 1;
+              break;
             }
           }
         } catch (e) {
