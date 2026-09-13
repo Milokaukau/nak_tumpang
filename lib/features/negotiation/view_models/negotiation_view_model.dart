@@ -26,6 +26,8 @@ class NegotiationViewModel extends ChangeNotifier {
   List<TumpangRequest> completedRequests = [];
 
   final Map<String, Map<String, dynamic>> _userCache = {};
+  final Map<String, String> _tripNameCache = {}; // Cache for instant UI loading
+
   late final StreamSubscription<AuthState> _authSubscription;
 
   bool get isOffline => NetworkService.isOfflineNotifier.value;
@@ -45,6 +47,7 @@ class NegotiationViewModel extends ChangeNotifier {
           debugPrint('Failed to clear local negotiation cache on account change: $e');
         }
         _userCache.clear();
+        _tripNameCache.clear();
         currentUserRole = null;
       }
 
@@ -59,6 +62,7 @@ class NegotiationViewModel extends ChangeNotifier {
       debugPrint('Failed to clear local negotiation cache on logout: $e');
     }
     _userCache.clear();
+    _tripNameCache.clear();
     currentUserRole = null;
   }
 
@@ -161,12 +165,18 @@ class NegotiationViewModel extends ChangeNotifier {
           currentTripId = isDriver ? rows.first['driver_trip_id'] : rows.first['passenger_trip_id'];
         }
       } else {
+        // --- FIXED: Pre-fetch trip_name alongside IDs so UI loads instantly ---
         final List<dynamic> trips = await _supabase
             .from(tripTable)
-            .select('id')
+            .select('id, trip_name')
             .eq('user_id', currentUserId!);
 
-        final tripIds = trips.map((t) => t['id'] as String).toList();
+        final tripIds = <String>[];
+        for (var t in trips) {
+          final id = t['id'] as String;
+          tripIds.add(id);
+          _tripNameCache[id] = t['trip_name']?.toString() ?? 'Tumpang Journey';
+        }
 
         if (tripIds.isEmpty) {
           pendingRequests = [];
@@ -249,6 +259,11 @@ class NegotiationViewModel extends ChangeNotifier {
       debugPrint('Error fetching user profile: $e');
     }
     return null;
+  }
+
+  // --- FIXED: Instant synchronous lookup using the pre-fetched data ---
+  String getCachedTripName(String tripId) {
+    return _tripNameCache[tripId] ?? 'Tumpang Journey';
   }
 
   Future<T> runNegotiationAction<T>(

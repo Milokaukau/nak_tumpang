@@ -82,7 +82,12 @@ class _SubscriptionListScreenState extends State<SubscriptionListScreen> {
                   itemBuilder: (context, index) {
                     final sub = filtered[index];
 
+                    final myTripKey = widget.role == 'passenger' ? 'passenger_trips' : 'driver_trips';
+                    final myTrip = sub[myTripKey] as Map<String, dynamic>?;
+                    final tripName = myTrip?['trip_name'] ?? sub['trip_name'] ?? 'Tumpang Journey';
+
                     return SubscriptionCard(
+                      tripName: tripName,
                       name: sub['name'] ?? 'Unknown',
                       phone: sub['phone'] ?? 'N/A',
                       imageUrl: sub['imageUrl'],
