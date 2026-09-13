@@ -6,6 +6,8 @@ import 'package:nak_tumpang/core/services/network_service.dart';
 import 'package:nak_tumpang/features/trips/view_models/my_trips_view_model.dart';
 import 'package:nak_tumpang/features/trips/UI/add_edit_trip_screen.dart';
 import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
+import 'package:nak_tumpang/features/negotiation/UI/screens/negotiation_screen.dart';
+import 'package:nak_tumpang/features/subscriptions/UI/screens/subscription_detail_screen.dart';
 
 class MyTripsScreen extends StatefulWidget {
   const MyTripsScreen({super.key});
@@ -62,6 +64,64 @@ class _MyTripsScreenState extends State<MyTripsScreen> {
     );
   }
 
+  Future<void> _handleViewDetails(BuildContext context, String tripId, TripStatus status, String role) async {
+    if (NetworkService.isOfflineNotifier.value) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cannot view details while offline.'), backgroundColor: Colors.red),
+      );
+      return;
+    }
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const Center(child: CircularProgressIndicator(color: AppColors.primaryYellow)),
+    );
+
+    final vm = context.read<MyTripsViewModel>();
+
+    try {
+      if (status == TripStatus.negotiating) {
+        final reqId = await vm.getNegotiatingRequestId(tripId);
+        if (!context.mounted) return;
+        Navigator.pop(context); // close dialog
+
+        if (reqId != null) {
+          Navigator.push(context, MaterialPageRoute(builder: (_) => NegotiationScreen(requestId: reqId)));
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Request not found or no longer negotiating.')));
+        }
+      } else if (status == TripStatus.active) {
+        // Pass the role to the ViewModel so it handles normalization
+        final normalizedData = await vm.getActiveSubscription(tripId, role);
+
+        if (!context.mounted) return;
+        Navigator.pop(context); // close dialog
+
+        if (normalizedData != null) {
+          final currentUserId = context.read<HomeViewModel>().currentUserId ?? '';
+
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => SubscriptionDetailScreen(
+                subscription: normalizedData, // Pass the already-clean data
+                currentUserId: currentUserId,
+                role: role,
+              ),
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Subscription not found or no longer active.')));
+        }
+      }
+    } catch (e) {
+      if (!context.mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error loading details: $e')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final viewModel = context.watch<MyTripsViewModel>();
@@ -79,7 +139,6 @@ class _MyTripsScreenState extends State<MyTripsScreen> {
           : viewModel.myTrips.isEmpty
           ? const Center(child: Text('You have no trips yet.', style: TextStyle(color: AppColors.greyText, fontSize: 16)))
           : ListView.separated(
-        // Added dynamic bottom padding to clear the Floating Action Button
         padding: EdgeInsets.only(
           left: 16,
           right: 16,
@@ -167,7 +226,6 @@ class _MyTripsScreenState extends State<MyTripsScreen> {
     final startStr = startLocation ?? 'Unknown Origin';
     final endStr = endLocation ?? 'Unknown Destination';
 
-    // Lock the buttons if the trip is either actively subscribed OR actively negotiating
     final isLocked = status == TripStatus.active || status == TripStatus.negotiating;
 
     return Container(
@@ -216,7 +274,6 @@ class _MyTripsScreenState extends State<MyTripsScreen> {
               Expanded(
                 child: BaseButton(
                   text: 'Edit',
-                  // Ensure onPressed is always active to trigger the SnackBar
                   onPressed: () {
                     if (isLocked) {
                       final msg = status == TripStatus.active
@@ -265,7 +322,17 @@ class _MyTripsScreenState extends State<MyTripsScreen> {
                 ),
               ),
             ],
-          )
+          ),
+          if (isLocked) ...[
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: BaseButton(
+                text: status == TripStatus.active ? 'View Subscription' : 'View Request',
+                onPressed: () => _handleViewDetails(context, trip['id'], status, role),
+              ),
+            ),
+          ]
         ],
       ),
     );

@@ -3,11 +3,13 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nak_tumpang/features/trips/data/services/trip_supabase_service.dart';
 import 'package:nak_tumpang/core/services/network_service.dart';
 import 'package:nak_tumpang/features/home/data/services/home_local_service.dart';
+import 'package:nak_tumpang/features/subscriptions/data/services/subscription_supabase_service.dart';
 
 enum TripStatus { active, negotiating, none }
 
 class MyTripsViewModel extends ChangeNotifier {
   final TripSupabaseService _tripService = TripSupabaseService();
+  final SupabaseClient _supabase = Supabase.instance.client; // <-- Added client
   final GoTrueClient _auth = Supabase.instance.client.auth;
 
   bool isLoading = true;
@@ -113,5 +115,45 @@ class MyTripsViewModel extends ChangeNotifier {
       debugPrint('⚠️ Error deleting trip: $e');
       return false;
     }
+  }
+
+  // --- NEW: Extracted Supabase logic from UI to ViewModel ---
+  Future<String?> getNegotiatingRequestId(String tripId) async {
+    if (NetworkService.isOfflineNotifier.value) return null;
+    try {
+      final resList = await _supabase
+          .from('tumpang_request')
+          .select('id')
+          .or('driver_trip_id.eq.$tripId,passenger_trip_id.eq.$tripId')
+          .eq('status', 'negotiating')
+          .limit(1);
+
+      if (resList.isNotEmpty) {
+        return resList.first['id'] as String;
+      }
+    } catch (e) {
+      debugPrint('Error finding negotiating request: $e');
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> getActiveSubscription(String tripId, String role) async {
+    if (NetworkService.isOfflineNotifier.value) return null;
+    try {
+      final resList = await _supabase
+          .from('tumpang_subscription')
+          .select('*, driver_trips(*, users(*)), passenger_trips(*, users(*))')
+          .or('driver_trip_id.eq.$tripId,passenger_trip_id.eq.$tripId')
+          .eq('status', 'active')
+          .limit(1);
+
+      if (resList.isNotEmpty) {
+        // ViewModel handles the service and data normalization
+        return SubscriptionSupabaseService().normalizeSubscription(resList.first, role);
+      }
+    } catch (e) {
+      debugPrint('Error finding active subscription: $e');
+    }
+    return null;
   }
 }
