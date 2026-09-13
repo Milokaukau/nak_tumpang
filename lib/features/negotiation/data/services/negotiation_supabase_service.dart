@@ -39,8 +39,6 @@ class NegotiationSupabaseService {
       if (lat != null) updates['${fieldPrefix}_lat'] = lat;
       if (lng != null) updates['${fieldPrefix}_lng'] = lng;
     } else {
-      // 'sub_start' / 'sub_end' no longer go through here individually -
-      // see proposeTumpangDates() below.
       updates[fieldPrefix] = value;
     }
 
@@ -57,20 +55,6 @@ class NegotiationSupabaseService {
         .eq('id', requestId);
   }
 
-  /// Atomically proposes both the Tumpang start and end date.
-  ///
-  /// This is a SINGLE `.update()` call setting both `sub_start_date` and
-  /// `sub_end_date` (and both requested_by / is_accepted columns) in one
-  /// map. PostgREST turns that into ONE SQL `UPDATE` statement against one
-  /// row - a single statement is atomic by itself in Postgres, so there is
-  /// no window where only one of the two dates has changed. This replaces
-  /// the old pattern of two separate `updateNegotiationField()` calls
-  /// (two HTTP requests, two independent SQL statements), which is what
-  /// let the row end up with sub_start_date changed but sub_end_date
-  /// stale if the second call failed or was interrupted.
-  ///
-  /// [startDate] / [endDate] are "YYYY-MM-DD" strings, matching what the
-  /// date picker already produces - no RPC / server-side function needed.
   Future<void> proposeTumpangDates({
     required String requestId,
     required String startDate,
@@ -87,8 +71,6 @@ class NegotiationSupabaseService {
     }).eq('id', requestId);
   }
 
-  /// Atomically accepts both the Tumpang start and end date - same
-  /// single-statement reasoning as [proposeTumpangDates].
   Future<void> acceptTumpangDates({required String requestId}) async {
     await _supabase.from(_table).update({
       'sub_start_is_accepted': true,
@@ -103,20 +85,11 @@ class NegotiationSupabaseService {
         .eq('id', requestId);
   }
 
-  /// Creates a new tumpang_request representing an extension of an
-  /// existing subscription. All fields are copied from the current
-  /// subscription and marked already-accepted, EXCEPT the end date (and,
-  /// for a 'renegotiate' extension, whichever other fields the caller
-  /// passes as overrides) — those go in unaccepted, so they flow through
-  /// the normal negotiation UI and require the driver's acceptance.
-  ///
-  /// This never touches tumpang_subscription directly - see
-  /// [finalizeExtension] for what happens once this request is agreed.
   Future<String> createExtensionRequest({
-    required Map<String, dynamic> subscription, // a tumpang_subscription row
+    required Map<String, dynamic> subscription,
     required String requestedById,
     required DateTime newEndDate,
-    required String extensionType, // 'date_only' | 'renegotiate'
+    required String extensionType,
     String? overridePickupName,
     double? overridePickupLat,
     double? overridePickupLng,
@@ -134,6 +107,8 @@ class NegotiationSupabaseService {
     final bool dropoffChanged = overrideDropoffName != null;
     final bool timeChanged = overridePickupTime != null;
     final bool feeChanged = overrideFee != null;
+
+    final todayStr = DateTime.now().toIso8601String().split('T').first;
 
     await _supabase.from(_table).insert({
       'id': requestId,
@@ -161,9 +136,7 @@ class NegotiationSupabaseService {
       'fee_requested_by': requestedById,
       'fee_is_accepted': !feeChanged,
 
-      // Start date carries over unchanged (the subscription's original
-      // start) and is pre-accepted; only the end date is actually new.
-      'sub_start_date': subscription['subscription_start_date'],
+      'sub_start_date': todayStr,
       'sub_start_requested_by': requestedById,
       'sub_start_is_accepted': true,
 
@@ -179,37 +152,32 @@ class NegotiationSupabaseService {
     return requestId;
   }
 
-  /// Called once an extension request's [TumpangRequest.isFullyAgreed] is
-  /// true (i.e. the driver has accepted). Applies the agreed terms to
-  /// tumpang_subscription, then marks the extension request completed.
-  ///
-  /// - 'date_only': UPDATEs the existing subscription's end date directly.
-  ///   No new subscription row, no new deposit - your existing invoice
-  ///   generator naturally continues billing into the extended period
-  ///   once subscription_end_date moves.
-  /// - 'renegotiate': INSERTs a brand-new subscription row with the
-  ///   agreed terms, and marks the OLD subscription row 'superseded'
-  ///   rather than updating/deleting it — old data is preserved.
-  ///
-  /// Returns the id of the subscription now in effect (the same id for
-  /// 'date_only', a new id for 'renegotiate').
   Future<String> finalizeExtension(String extensionRequestId, {double additionalDeposit = 0.0}) async {
     final request = await fetchSingleRequest(extensionRequestId);
+
     if (request == null) {
       throw StateError('Extension request $extensionRequestId not found.');
     }
-    if (!request.isExtension || request.extendsSubscriptionId == null) {
-      throw StateError('Request $extensionRequestId is not an extension.');
-    }
-    // Idempotency guard: if this request was already finalized (e.g. from a
-    // double-tap or duplicate call), don't create/update anything again —
-    // just return the subscription that was already produced.
-    if (request.subscriptionId != null) {
+
+    // IDEMPOTENCY GUARD: Prevent duplicate rows on retry
+    if (request.status == 'completed' && request.subscriptionId != null) {
       return request.subscriptionId!;
     }
 
+    if (!request.isExtension || request.extendsSubscriptionId == null) {
+      throw StateError('Request $extensionRequestId is not an extension.');
+    }
     if (!request.isFullyAgreed) {
       throw StateError('Extension request $extensionRequestId is not fully agreed yet.');
+    }
+
+    // VALIDATION: Ensure the extension end date has not expired relative to today before writing
+    final extensionEndDate = DateTime.tryParse(request.subscriptionEndDate.value);
+    final today = DateTime.now();
+    final todayDateOnly = DateTime(today.year, today.month, today.day);
+
+    if (extensionEndDate == null || extensionEndDate.isBefore(todayDateOnly)) {
+      throw StateError('Extension request $extensionRequestId has expired.');
     }
 
     final oldSubscriptionId = request.extendsSubscriptionId!;
@@ -223,89 +191,70 @@ class NegotiationSupabaseService {
       throw StateError('Original subscription $oldSubscriptionId not found.');
     }
 
-    // Calculate total updated deposit
-    final currentDeposit = double.tryParse(oldSub['deposit']?.toString() ?? '') ?? 0.0;
-    final newTotalDeposit = currentDeposit + additionalDeposit;
-    String activeSubscriptionId = oldSubscriptionId;
+    final newSubscriptionId = 'sub_${DateTime.now().millisecondsSinceEpoch}';
+    final todayStr = todayDateOnly.toIso8601String().split('T').first;
+    final nowIso = today.toIso8601String();
 
-    if (request.extensionType == 'renegotiate') {
-      final newSubscriptionId = 'sub_${DateTime.now().millisecondsSinceEpoch}';
-      activeSubscriptionId = newSubscriptionId;
+    // 1. ALWAYS create a brand new subscription row
+    await _supabase.from('tumpang_subscription').insert({
+      'id': newSubscriptionId,
+      'passenger_trip_id': oldSub['passenger_trip_id'],
+      'driver_trip_id': oldSub['driver_trip_id'],
+      'pickup_lat': request.pickupLocation.lat,
+      'pickup_lng': request.pickupLocation.lng,
+      'pickup_location': request.pickupLocation.name,
+      'dropoff_lat': request.dropoffLocation.lat,
+      'dropoff_lng': request.dropoffLocation.lng,
+      'dropoff_location': request.dropoffLocation.name,
+      'pickup_time': request.pickupTime.value,
+      'fee': request.fee.value,
+      'deposit': additionalDeposit, // Fresh deposit only
+      'deposit_refunded': false,
+      'subscription_start_date': todayStr,
+      'subscription_end_date': request.subscriptionEndDate.value,
+      'status': 'active',
+    });
 
-      await _supabase.from('tumpang_subscription').insert({
-        'id': newSubscriptionId,
-        'passenger_trip_id': oldSub['passenger_trip_id'],
-        'driver_trip_id': oldSub['driver_trip_id'],
-        'pickup_lat': request.pickupLocation.lat,
-        'pickup_lng': request.pickupLocation.lng,
-        'pickup_location': request.pickupLocation.name,
-        'dropoff_lat': request.dropoffLocation.lat,
-        'dropoff_lng': request.dropoffLocation.lng,
-        'dropoff_location': request.dropoffLocation.name,
-        'pickup_time': request.pickupTime.value,
-        'fee': request.fee.value,
-        'deposit': newTotalDeposit, // Updated Deposit
-        'deposit_refunded': false,
-        'subscription_start_date': request.subscriptionStartDate.value,
-        'subscription_end_date': request.subscriptionEndDate.value,
-        'status': 'active',
-      });
+    // 2. Shut down the old subscription safely
+    final oldEndDate = DateTime.tryParse(oldSub['subscription_end_date']?.toString() ?? '');
+    final isOldEndInFuture = oldEndDate != null && oldEndDate.isAfter(today);
 
-      // Attach subscription_id to the request IMMEDIATELY after creating it,
-      // so a later failure can't cause a retry to create ANOTHER duplicate.
-      await _supabase.from(_table).update({
-        'subscription_id': activeSubscriptionId,
-      }).eq('id', extensionRequestId);
+    final updatePayload = {
+      'status': 'inactive',
+      'ended_by': 'system', // Satisfies DB constraint
+      'ended_at': nowIso,   // Satisfies DB constraint
+      'deposit_refunded': false,
+    };
 
-      await _supabase
-          .from('tumpang_subscription')
-          .update({
-        'status': 'inactive',
-        'ended_by': 'extended',
-        'ended_at': DateTime.now().toIso8601String(),
-      })
-          .eq('id', oldSubscriptionId);
-
-    } else {
-      // date_only
-      await _supabase.from('tumpang_subscription').update({
-        'subscription_end_date': request.subscriptionEndDate.value,
-        'deposit': newTotalDeposit, // Updated Deposit
-        'status': 'active',
-        'ended_by': null,
-        'ended_at': null,
-      }).eq('id', oldSubscriptionId);
-
-      await _supabase
-          .from(_table)
-          .update({'sub_end_date': request.subscriptionEndDate.value})
-          .eq('subscription_id', oldSubscriptionId)
-          .neq('id', extensionRequestId);
+    if (isOldEndInFuture) {
+      updatePayload['subscription_end_date'] = todayStr;
     }
 
-    // Mark request completed
+    await _supabase
+        .from('tumpang_subscription')
+        .update(updatePayload)
+        .eq('id', oldSubscriptionId);
+
+    // 3. Mark request completed
     await _supabase.from(_table).update({
       'status': 'completed',
-      'subscription_id': activeSubscriptionId,
+      'subscription_id': newSubscriptionId,
     }).eq('id', extensionRequestId);
 
-    // Create payment record for the additional deposit collected
+    // 4. Save the fresh payment
     if (additionalDeposit > 0) {
-      final paidAt = DateTime.now();
-      final paymentId = 'pay_${paidAt.millisecondsSinceEpoch}_extdep';
+      final paymentId = 'pay_${DateTime.now().millisecondsSinceEpoch}_extdep';
       await _supabase.from('payments').insert({
         'id': paymentId,
-        'tumpang_subscription_id': activeSubscriptionId,
-        'month': paidAt.month,
-        'year': paidAt.year,
-        'due_date': paidAt.toIso8601String(),
-        'paid_at': paidAt.toIso8601String(),
+        'tumpang_subscription_id': newSubscriptionId,
+        'month': today.month,
+        'year': today.year,
+        'due_date': nowIso,
+        'paid_at': nowIso,
         'amount': additionalDeposit,
       });
     }
 
-    return activeSubscriptionId;
+    return newSubscriptionId;
   }
-
-
 }

@@ -12,38 +12,6 @@ import 'package:nak_tumpang/features/negotiation/UI/components/time_proposal_bot
 import 'package:nak_tumpang/features/negotiation/UI/screens/map_screen.dart';
 import 'package:nak_tumpang/features/negotiation/UI/screens/negotiation_screen.dart';
 
-/// Screen for requesting an extension of an existing (already-paid)
-/// subscription.
-///
-/// Deliberately self-contained: the ONLY thing a caller needs to provide
-/// is [subscriptionId]. This mirrors how [NegotiationSummaryCard]'s
-/// `onRenew`/`onCancelSubscription` callbacks are already scoped to just
-/// a subscription id elsewhere in this module, so wiring the Subscription
-/// Module's "Extend" button to this screen should be a one-line change:
-///
-/// ```dart
-/// Navigator.push(
-///   context,
-///   MaterialPageRoute(
-///     builder: (_) => ExtendNegotiationScreen(subscriptionId: subscription.id),
-///   ),
-/// );
-/// ```
-///
-/// Prefill source: the `tumpang_subscription` row itself, NOT a separate
-/// "last negotiation request" lookup. The subscription row is written
-/// FROM the last negotiation request's agreed fields at the moment it was
-/// finalized (see TumpangSummaryScreen._handlePayDeposit and
-/// NegotiationSupabaseService.finalizeExtension) — so it already IS the
-/// last negotiation's result, and reading it directly avoids ambiguity
-/// about which `tumpang_request` row (there can be several sharing the
-/// same subscription_id across an extension chain) counts as "the last
-/// one" when there's no reliable timestamp column to sort by.
-///
-/// The subscription's start date always carries over unchanged (matches
-/// NegotiationSupabaseService.createExtensionRequest, which has no
-/// start-date override param) — only the end date, and optionally
-/// pickup/dropoff/pickup time/fee, can be changed here.
 class ExtendNegotiationScreen extends StatefulWidget {
   final String subscriptionId;
 
@@ -57,23 +25,15 @@ class _ExtendNegotiationScreenState extends State<ExtendNegotiationScreen> {
   bool _isLoading = true;
   bool _isSubmitting = false;
 
-  /// The raw subscription row this extension is based on. Null means "no
-  /// previous negotiation data found" — handled gracefully below by
-  /// falling back to empty/default values, same as a brand new negotiation.
   Map<String, dynamic>? _subscription;
 
-  // Prefilled/editable fields. Values are ORIGINALS from the subscription
-  // until the user edits them — used both for display and to detect which
-  // fields actually changed (so we only send overrides for those, and so
-  // fields that DIDN'T change stay accepted, per createExtensionRequest's
-  // existing semantics).
   late String _pickupName;
   late double _pickupLat;
   late double _pickupLng;
   late String _dropoffName;
   late double _dropoffLat;
   late double _dropoffLng;
-  late String _pickupTimeDb; // "HH:mm:ss"
+  late String _pickupTimeDb;
   late double _fee;
 
   String? _originalPickupName;
@@ -85,8 +45,8 @@ class _ExtendNegotiationScreenState extends State<ExtendNegotiationScreen> {
   String? _originalPickupTimeDb;
   double? _originalFee;
 
-  DateTime? _subscriptionStartDate; // carries over unchanged, display-only
-  DateTime? _oldEndDate; // null if no previous subscription data at all
+  DateTime? _subscriptionStartDate;
+  DateTime? _oldEndDate;
   late DateTime _newEndDate;
 
   @override
@@ -126,8 +86,6 @@ class _ExtendNegotiationScreenState extends State<ExtendNegotiationScreen> {
         _subscriptionStartDate = DateTime.tryParse(sub['subscription_start_date']?.toString() ?? '');
         _oldEndDate = DateTime.tryParse(sub['subscription_end_date']?.toString() ?? '');
       } else {
-        // No previous negotiation data available — fall back to the same
-        // empty/default values a brand new negotiation would start with.
         _pickupName = '';
         _pickupLat = 0.0;
         _pickupLng = 0.0;
@@ -140,10 +98,13 @@ class _ExtendNegotiationScreenState extends State<ExtendNegotiationScreen> {
         _oldEndDate = null;
       }
 
-      final base = _oldEndDate ?? DateTime.now();
-      final daysInTargetMonth = DateTime(base.year, base.month + 2, 0).day;
-      final day = base.day > daysInTargetMonth ? daysInTargetMonth : base.day;
-      _newEndDate = DateTime(base.year, base.month + 1, day);
+      final now = DateTime.now();
+      final nowOnly = DateTime(now.year, now.month, now.day);
+      DateTime base = _oldEndDate ?? nowOnly;
+      if (base.isBefore(nowOnly)) {
+        base = nowOnly;
+      }
+      _newEndDate = DateRangeRules.minEndDate(base);
 
       _isLoading = false;
     });
@@ -216,8 +177,8 @@ class _ExtendNegotiationScreenState extends State<ExtendNegotiationScreen> {
         currentValue: _fee.toStringAsFixed(2),
         onSubmit: (value) async {
           final parsed = double.tryParse(value);
-          if (parsed == null) {
-            throw NegotiationException('Please enter a valid fee amount.');
+          if (parsed == null || !parsed.isFinite || parsed <= 0) {
+            throw NegotiationException('Please enter a valid fee greater than RM 0.');
           }
           if (mounted) setState(() => _fee = parsed);
         },
@@ -226,14 +187,21 @@ class _ExtendNegotiationScreenState extends State<ExtendNegotiationScreen> {
   }
 
   Future<void> _pickNewEndDate() async {
-    final minEnd = (_oldEndDate ?? DateTime.now()).add(const Duration(days: 1));
+    final now = DateTime.now();
+    final nowOnly = DateTime(now.year, now.month, now.day);
+    DateTime base = _oldEndDate ?? nowOnly;
+    if (base.isBefore(nowOnly)) {
+      base = nowOnly;
+    }
+
+    final minEnd = DateRangeRules.minEndDate(base);
     final initial = _newEndDate.isBefore(minEnd) ? minEnd : _newEndDate;
 
     final picked = await showDatePicker(
       context: context,
       initialDate: initial,
-      firstDate: minEnd, // must extend PAST the current end date
-      lastDate: minEnd.add(const Duration(days: 730)),
+      firstDate: minEnd,
+      lastDate: base.add(const Duration(days: 730)),
       builder: (context, child) => Theme(
         data: Theme.of(context).copyWith(
           colorScheme: const ColorScheme.light(
@@ -254,9 +222,17 @@ class _ExtendNegotiationScreenState extends State<ExtendNegotiationScreen> {
   String? _validate() {
     if (_pickupName.trim().isEmpty) return 'Please set a pickup location.';
     if (_dropoffName.trim().isEmpty) return 'Please set a dropoff location.';
-    if (_fee < 0) return 'Please enter a valid fee.'; // Fix: Rejects negative values only, allows 0.
-    if (_oldEndDate != null && !_newEndDate.isAfter(_oldEndDate!)) {
-      return 'The new end date must be after the current end date (${_formatDate(_oldEndDate!)}).';
+    if (_fee <= 0) return 'Please enter a valid fee greater than RM 0.';
+
+    final now = DateTime.now();
+    final nowOnly = DateTime(now.year, now.month, now.day);
+    DateTime base = _oldEndDate ?? nowOnly;
+    if (base.isBefore(nowOnly)) {
+      base = nowOnly;
+    }
+
+    if (!DateRangeRules.isAtLeastTwoWeeks(base, _newEndDate)) {
+      return 'The extension must be at least 2 weeks (14 days) after the current end date (${_formatDate(base)}).';
     }
     return null;
   }
@@ -271,9 +247,6 @@ class _ExtendNegotiationScreenState extends State<ExtendNegotiationScreen> {
     }
 
     if (_subscription == null) {
-      // Extending is inherently tied to an existing subscription record —
-      // without one there's nothing on the backend to extend. Surface
-      // this clearly rather than silently failing inside the service call.
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text("Couldn't find this subscription's details. Please go back and try again."),
@@ -296,6 +269,7 @@ class _ExtendNegotiationScreenState extends State<ExtendNegotiationScreen> {
       final newRequestId = await controller.submitExtensionRequest(
         subscription: _subscription!,
         newEndDate: _newEndDate,
+        // Every extension is treated identically, but we keep this flag to accurately log history
         extensionType: anyTermsChanged ? 'renegotiate' : 'date_only',
         overridePickupName: pickupChanged ? _pickupName : null,
         overridePickupLat: pickupChanged ? _pickupLat : null,
@@ -311,9 +285,6 @@ class _ExtendNegotiationScreenState extends State<ExtendNegotiationScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Extension request sent!'), backgroundColor: Colors.green),
       );
-      // Hand off to the existing NegotiationScreen so the driver's
-      // acceptance can be tracked the same way as any other request —
-      // reuses the screen rather than building a second summary view.
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (context) => NegotiationScreen(requestId: newRequestId)),
@@ -351,10 +322,6 @@ class _ExtendNegotiationScreenState extends State<ExtendNegotiationScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Clearly marks this as an extension, not a brand new
-            // negotiation — reuses the same amber "extend" styling
-            // NegotiationSummaryCard already uses for its 7-day extend
-            // window banner, for visual consistency.
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
@@ -382,7 +349,7 @@ class _ExtendNegotiationScreenState extends State<ExtendNegotiationScreen> {
             NegotiationFieldRow(
               title: 'Pickup Location',
               value: _pickupName.isEmpty ? 'Not set' : _pickupName,
-              isAccepted: true, // renders the compact "value + Edit" card, no propose/accept state applies pre-submission
+              isAccepted: true,
               isRequestedByMe: false,
               topWidget: (_pickupLat != 0 || _pickupLng != 0)
                   ? RouteMapHeader(label: _pickupName, lat: _pickupLat, lng: _pickupLng)
@@ -426,7 +393,7 @@ class _ExtendNegotiationScreenState extends State<ExtendNegotiationScreen> {
               value: _subscriptionStartDate != null ? _formatDate(_subscriptionStartDate!) : 'Not available',
               isAccepted: true,
               isRequestedByMe: false,
-              isReadOnly: true, // start date always carries over — not editable for an extension
+              isReadOnly: true,
               onPropose: () {},
               onAccept: () {},
             ),
