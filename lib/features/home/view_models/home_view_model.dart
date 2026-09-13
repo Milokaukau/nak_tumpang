@@ -391,33 +391,31 @@ class HomeViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  // --- NEW: Added 'profile' parameter to generate accurate walking paths ---
   Future<List<LatLng>> _getCachedRoute(LatLng start, LatLng end, {String profile = 'driving-car'}) async {
     final cacheKey = '${profile}_${start.latitude},${start.longitude}-${end.latitude},${end.longitude}';
     if (_routeCache.containsKey(cacheKey)) return _routeCache[cacheKey]!;
 
-    while (true) {
-      if (NetworkService.isOfflineNotifier.value) {
-        // Genuinely offline — don't spin forever, use the straight-line fallback.
-        return [start, end];
-      }
+    // 1. Instant fallback if offline
+    if (NetworkService.isOfflineNotifier.value) return [];
 
+    for (int attempt = 0; attempt < 3; attempt++) {
       try {
         final route = await _orsService.getRoute(start, end, profile: profile);
-        if (route.isEmpty) {
-          // ORS can return [] on bad API key / non-200 / caught errors without throwing.
-          // Treat that the same as a failure — retry instead of caching a dead result.
-          debugPrint('⚠️ Route fetch returned empty for $profile — retrying...');
-          await Future.delayed(const Duration(milliseconds: 800));
-          continue;
+
+        if (route.isNotEmpty) {
+          _routeCache[cacheKey] = route;
+          return route;
         }
-        _routeCache[cacheKey] = route;
-        return route;
+        debugPrint('⚠️ Route fetch empty for $profile (Attempt ${attempt + 1}/3)');
       } catch (e) {
-        debugPrint('⚠️ Route fetch failed for $profile: $e — retrying...');
-        await Future.delayed(const Duration(milliseconds: 800));
+        debugPrint('⚠️ Route fetch error for $profile: $e (Attempt ${attempt + 1}/3)');
       }
+
+      if (attempt < 2) await Future.delayed(const Duration(milliseconds: 600));
     }
+
+    debugPrint('❌ Max retries reached. Returning empty route to prevent inaccurate matches.');
+    return [];
   }
 
   void toggleMatchingUI(bool show) {
@@ -785,6 +783,9 @@ class HomeViewModel extends ChangeNotifier {
           final driverRoute = await _getCachedRoute(drivStart, drivEnd);
           if (_fetchId != currentFetchId) return;
 
+          // SKIPS driver completely if ORS fails, preventing inaccurate matching
+          if (driverRoute.isEmpty) continue;
+
           if (MatchingUtils.isRouteMatch(passPick, passDrop, driverRoute, 800)) {
             tempMatchedDrivers.add({
               'id': driverTrip['user_id'],
@@ -927,7 +928,8 @@ class HomeViewModel extends ChangeNotifier {
               final driverRoute = await _getCachedRoute(drivStart, drivEnd);
               if (_fetchId != currentFetchId) return;
 
-              if (MatchingUtils.isRouteMatch(passPick, pickStation.location, driverRoute, 800)) {
+              // GUARD: Ensure driverRoute is not empty before matching
+              if (driverRoute.isNotEmpty && MatchingUtils.isRouteMatch(passPick, pickStation.location, driverRoute, 800)) {
                 final routeDistToStation = MatchingUtils.calculateDistance(passPick.latitude, passPick.longitude, pickStation.location.latitude, pickStation.location.longitude);
                 final driveMinsToStation = (routeDistToStation / 400).ceil();
 
@@ -954,7 +956,8 @@ class HomeViewModel extends ChangeNotifier {
               final driverRoute = await _getCachedRoute(drivStart, drivEnd);
               if (_fetchId != currentFetchId) return;
 
-              if (MatchingUtils.isRouteMatch(dropStation.location, passDrop, driverRoute, 800)) {
+              // GUARD: Ensure driverRoute is not empty before matching
+              if (driverRoute.isNotEmpty && MatchingUtils.isRouteMatch(dropStation.location, passDrop, driverRoute, 800)) {
                 lastMileOptions.add({
                   'type': 'Driver',
                   'driver_id': driverTrip['user_id'],
