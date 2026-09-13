@@ -20,6 +20,8 @@ class NegotiationViewModel extends ChangeNotifier {
   String? currentUserRole;
   String? currentTripId;
 
+  int _sessionGeneration = 0;
+
   bool isLoading = false;
   String? errorMessage;
   List<TumpangRequest> pendingRequests = [];
@@ -39,9 +41,12 @@ class NegotiationViewModel extends ChangeNotifier {
           (data.event == AuthChangeEvent.signedIn && currentUserId != null && newUserId != currentUserId);
 
       if (isAccountChange) {
-        // Clear in-memory lists immediately and notify listeners to avoid sensitive data exposure
+        _sessionGeneration++;
         pendingRequests.clear();
         completedRequests.clear();
+        _userCache.clear();
+        currentUserRole = null;
+        currentUserId = null;
         notifyListeners();
 
         try {
@@ -49,9 +54,6 @@ class NegotiationViewModel extends ChangeNotifier {
         } catch (e) {
           debugPrint('Failed to clear local negotiation cache on account change: $e');
         }
-        _userCache.clear();
-        currentUserRole = null;
-        currentUserId = null;
       }
 
       await _initSession();
@@ -59,17 +61,19 @@ class NegotiationViewModel extends ChangeNotifier {
   }
 
   Future<void> clearLocalCacheOnLogout() async {
+    _sessionGeneration++;
+    pendingRequests.clear();
+    completedRequests.clear();
+    _userCache.clear();
+    currentUserRole = null;
+    currentUserId = null;
+    notifyListeners();
+
     try {
       await _localService.clearRequestsCache();
     } catch (e) {
       debugPrint('Failed to clear local negotiation cache on logout: $e');
     }
-    _userCache.clear();
-    currentUserRole = null;
-    currentUserId = null;
-    pendingRequests.clear();
-    completedRequests.clear();
-    notifyListeners();
   }
 
   Future<void> _persistRole(String userId, String role) async {
@@ -99,21 +103,22 @@ class NegotiationViewModel extends ChangeNotifier {
 
   Future<void> _initSession() async {
     final user = _supabase.auth.currentUser;
-    currentUserId = user?.id;
+    final sessionUserId = user?.id;
+    currentUserId = sessionUserId;
 
-    if (user != null) {
-      currentUserRole ??= await _readCachedRole(currentUserId!);
+    if (user != null && sessionUserId != null) {
+      currentUserRole ??= await _readCachedRole(sessionUserId);
 
       try {
         final userData = await _supabase
             .from('users')
             .select('role')
-            .eq('id', currentUserId!)
+            .eq('id', sessionUserId)
             .maybeSingle();
 
         final remoteRole = userData?['role']?.toString().replaceAll("'", "") ?? 'passenger';
         currentUserRole = remoteRole;
-        await _persistRole(currentUserId!, remoteRole);
+        await _persistRole(sessionUserId, remoteRole);
       } catch (e) {
         debugPrint('Error refreshing role from Supabase: $e');
       }
@@ -129,34 +134,51 @@ class NegotiationViewModel extends ChangeNotifier {
   }
 
   Future<void> fetchRequests() async {
+    final generation = _sessionGeneration;
+    final user = _supabase.auth.currentUser;
+    final sessionUserId = user?.id;
+
+    if (sessionUserId == null) {
+      currentUserId = null;
+      isLoading = false;
+      notifyListeners();
+      return;
+    }
+
+    currentUserId = sessionUserId;
     isLoading = true;
     errorMessage = null;
     notifyListeners();
 
+    bool isCurrentSessionValid() {
+      return generation == _sessionGeneration && _supabase.auth.currentUser?.id == sessionUserId;
+    }
+
     try {
-      currentUserId = _supabase.auth.currentUser?.id;
-      if (currentUserId == null) {
-        isLoading = false;
-        notifyListeners();
-        return;
+      if (currentUserRole == null) {
+        final cachedRole = await _readCachedRole(sessionUserId);
+        if (!isCurrentSessionValid()) return;
+        currentUserRole = cachedRole;
       }
 
-      if (currentUserRole == null) {
-        currentUserRole = await _readCachedRole(currentUserId!);
-      }
       if (currentUserRole == null && !isOffline) {
         try {
           final userData = await _supabase
               .from('users')
               .select('role')
-              .eq('id', currentUserId!)
+              .eq('id', sessionUserId)
               .maybeSingle();
+
+          if (!isCurrentSessionValid()) return;
+
           currentUserRole = userData?['role']?.toString().replaceAll("'", "") ?? 'passenger';
-          await _persistRole(currentUserId!, currentUserRole!);
+          await _persistRole(sessionUserId, currentUserRole!);
         } catch (e) {
           debugPrint('Error fetching role in fetchRequests(): $e');
         }
       }
+
+      if (!isCurrentSessionValid()) return;
       currentUserRole ??= 'passenger';
 
       final isDriver = currentUserRole == 'driver';
@@ -171,6 +193,8 @@ class NegotiationViewModel extends ChangeNotifier {
         final c = await _localService.getOfflineRequests('completed');
         final r = await _localService.getOfflineRequests('rejected');
         final x = await _localService.getOfflineRequests('cancelled');
+
+        if (!isCurrentSessionValid()) return;
         rows = [...p, ...n, ...c, ...r, ...x];
 
         if (rows.isNotEmpty) {
@@ -180,7 +204,9 @@ class NegotiationViewModel extends ChangeNotifier {
         final List<dynamic> trips = await _supabase
             .from(tripTable)
             .select('id')
-            .eq('user_id', currentUserId!);
+            .eq('user_id', sessionUserId);
+
+        if (!isCurrentSessionValid()) return;
 
         final tripIds = trips.map((t) => t['id'] as String).toList();
 
@@ -200,6 +226,8 @@ class NegotiationViewModel extends ChangeNotifier {
             .inFilter(tripIdColumn, tripIds)
             .or('status.eq.pending,status.eq.negotiating,status.eq.completed,status.eq.rejected,status.eq.cancelled');
 
+        if (!isCurrentSessionValid()) return;
+
         try {
           await _localService.cacheTumpangRequests(rows.cast<Map<String, dynamic>>());
         } catch (e) {
@@ -216,6 +244,8 @@ class NegotiationViewModel extends ChangeNotifier {
         }
       }).toList();
 
+      if (!isCurrentSessionValid()) return;
+
       pendingRequests = allRequests
           .where((r) => r.status == 'pending' || r.status == 'negotiating')
           .toList();
@@ -226,11 +256,14 @@ class NegotiationViewModel extends ChangeNotifier {
 
       errorMessage = null;
     } catch (e, stack) {
+      if (!isCurrentSessionValid()) return;
       debugPrint('Error fetching requests: $e\n$stack');
       errorMessage = 'Failed to load requests: $e';
     } finally {
-      isLoading = false;
-      notifyListeners();
+      if (isCurrentSessionValid()) {
+        isLoading = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -246,6 +279,10 @@ class NegotiationViewModel extends ChangeNotifier {
       }
       return null;
     }
+
+    final activeUser = _supabase.auth.currentUser;
+    if (activeUser == null) return null;
+
     return _service.fetchSingleRequest(requestId);
   }
 
