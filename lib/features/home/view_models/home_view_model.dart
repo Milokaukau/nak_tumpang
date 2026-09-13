@@ -1148,9 +1148,9 @@ class HomeViewModel extends ChangeNotifier {
           if (requestId != _routeFetchId) return;
 
           mapRoutes = [
-            if (validDepart) (points: [depart, ...segments[0], pickup], color: AppColors.primaryYellow, isTransit: false),
+            if (validDepart) (points: [depart, ...segments[0], pickup], color: Colors.blue, isTransit: false), // Changed from yellow
             (points: [pickup, ...segments[1], dropoff], color: Colors.indigo, isTransit: false),
-            if (validArrival) (points: [dropoff, ...segments[2], arrival], color: AppColors.primaryYellow, isTransit: false),
+            if (validArrival) (points: [dropoff, ...segments[2], arrival], color: Colors.blue, isTransit: false), // Changed from yellow
           ];
           mapMarkers = [
             if (validDepart) (point: depart, color: Colors.blue, isSmallNode: false),
@@ -1204,7 +1204,7 @@ class HomeViewModel extends ChangeNotifier {
         : 0.0;
 
     final isMixedRoute = isMultiDriver || startGapDist > 1500 || endGapDist > 1500;
-    final firstLegColor = isMixedRoute ? AppColors.primaryYellow : Colors.indigo;
+    final firstLegColor = isMixedRoute ? Colors.blue : Colors.indigo; // Changed from yellow
 
     // 1. GAP AT START
     if (startGapDist > 100) {
