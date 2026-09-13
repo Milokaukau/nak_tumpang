@@ -10,6 +10,11 @@ import 'package:nak_tumpang/core/entities/geocoded_place.dart';
 class ORSService {
   final _apiKey = dotenv.env['ORS_API_KEY'] ?? '';
 
+  /// Resolves free-typed text (e.g. "KLCC", "TARUMT") into real,
+  /// selectable places with coordinates, biased to Malaysia. Meant to be
+  /// called as the user types (debounce on the caller's side) — this is
+  /// the ORS `/geocode/autocomplete` endpoint, which is built for partial
+  /// queries, not the heavier `/geocode/search`.
   Future<List<GeocodedPlace>> geocodeAutocomplete(String query) async {
     if (_apiKey.isEmpty) {
       print('❌ Error: ORS_API_KEY is missing from .env');
@@ -114,15 +119,23 @@ class ORSService {
     }
   }
 
-  Future<List<LatLng>> getRoute(LatLng start, LatLng end) async {
+  Future<List<LatLng>> getRoute(
+      LatLng start,
+      LatLng end, {
+        String profile = 'driving-car',
+      }) async {
     if (_apiKey.isEmpty) {
       print('❌ Error: ORS_API_KEY is missing from .env');
       return [];
     }
 
     //use API constants
+    final endpoint = (profile == 'foot-walking' || profile.contains('walk'))
+        ? ApiConstants.orsWalkingEndpoint
+        : ApiConstants.orsDrivingEndpoint;
+
     final url = Uri.parse(
-        '${ApiConstants.orsDrivingEndpoint}?api_key=$_apiKey&start=${start.longitude},${start.latitude}&end=${end.longitude},${end.latitude}');
+        '$endpoint?api_key=$_apiKey&start=${start.longitude},${start.latitude}&end=${end.longitude},${end.latitude}');
 
     try {
       final response = await http.get(url);
@@ -147,11 +160,13 @@ class ORSService {
   }
 
   Future<Map<String, dynamic>> getWalkingMetrics(LatLng start, LatLng end) async {
+    // --- FIXED: Removed unnecessary null check since _apiKey defaults to '' ---
     if (_apiKey.isEmpty) {
       print('⚠️ ORS API Key missing. Falling back to default metrics.');
       return {'distance': 0.0, 'duration': 0.0};
     }
 
+    // --- UPDATED to use ApiConstants ---
     final String url =
         '${ApiConstants.orsWalkingEndpoint}?api_key=$_apiKey&start=${start.longitude},${start.latitude}&end=${end.longitude},${end.latitude}';
 
@@ -171,6 +186,7 @@ class ORSService {
       print('ORS Walking API Error: $e');
     }
 
+    // Fallback to straight-line math if the API fails
     final fallbackDist = MatchingUtils.calculateDistance(
         start.latitude, start.longitude, end.latitude, end.longitude);
     return {

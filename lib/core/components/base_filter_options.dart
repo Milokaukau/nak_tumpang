@@ -16,24 +16,24 @@ class BaseFilterOptions extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
-      // Maps through the provided options and builds a stylized button for each
       children: options.map((option) {
         final isSelected = option == selectedOption;
 
         return Padding(
-          padding: const EdgeInsets.only(right: 12.0),
+          padding: const EdgeInsets.only(right: 8.0), // Scaled down spacing between options
           child: GestureDetector(
             onTap: () => onSelectionChanged(option),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6), // Scaled down inner padding
               decoration: BoxDecoration(
                 border: isSelected ? null : Border.all(color: AppColors.greyBorder),
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(6), // Slightly tighter radius
                 color: isSelected ? AppColors.primaryYellow : AppColors.white,
               ),
               child: Text(
                 option,
                 style: TextStyle(
+                  fontSize: 13, // Scaled down font size
                   color: AppColors.black,
                   fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
                 ),

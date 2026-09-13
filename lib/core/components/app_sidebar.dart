@@ -1,9 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
+import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
+import 'package:nak_tumpang/core/services/network_service.dart';
 import 'package:nak_tumpang/features/payout/UI/screens/driver_balance_screen.dart';
+import 'package:nak_tumpang/features/payment/UI/screens/payment_screen.dart';
+import 'package:nak_tumpang/features/payment/view_models/payment_view_model.dart';
+import 'package:nak_tumpang/features/payment/data/services/payment_local_service.dart';
+import 'package:nak_tumpang/features/negotiation/UI/screens/request_list_screen.dart';
+import 'package:nak_tumpang/features/negotiation/view_models/negotiation_view_model.dart';
+import 'package:nak_tumpang/features/negotiation/data/services/negotiation_local_service.dart';
 import 'package:nak_tumpang/features/profile/UI/screens/profile_screen.dart';
 import 'package:nak_tumpang/features/auth/UI/screens/login_screen.dart';
+import 'package:nak_tumpang/features/trips/UI/my_trips_screen.dart';
+import 'package:nak_tumpang/features/subscriptions/UI/screens/subscription_list_screen.dart';
+import 'package:nak_tumpang/features/rewards/UI/screens/rewards_screen.dart';
 
 class HamburgerButton extends StatelessWidget {
   const HamburgerButton({super.key});
@@ -24,24 +36,124 @@ class HamburgerButton extends StatelessWidget {
   }
 }
 
-class AppSidebar extends StatelessWidget {
+class AppSidebar extends StatefulWidget {
   final String userName;
   final String userRole;
   final String? profileImageUrl;
   final int selectedIndex;
 
+  /// Optional manual overrides for badge counts
+  final int? pendingRequestsCount;
+  final int? pendingPaymentsCount;
+
   const AppSidebar({
     super.key,
-    this.userName = 'John Cena',
+    this.userName = 'User',
     this.userRole = 'Driver',
     this.profileImageUrl,
     this.selectedIndex = -1,
+    this.pendingRequestsCount,
+    this.pendingPaymentsCount,
   });
 
-  bool get _isDriver => userRole.toLowerCase() == 'driver';
+  @override
+  State<AppSidebar> createState() => _AppSidebarState();
+}
+
+class _AppSidebarState extends State<AppSidebar> {
+  int _fallbackRequestsCount = 0;
+  int _fallbackPaymentsCount = 0;
+
+  bool get _isDriver => widget.userRole.toLowerCase().trim().contains('driver');
+
+  @override
+  void initState() {
+    super.initState();
+    _loadFallbackCounts();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      try {
+        context.read<NegotiationViewModel?>()?.refreshRequests();
+      } catch (_) {}
+      try {
+        context.read<PaymentViewModel?>()?.fetchAllPayments();
+      } catch (_) {}
+    });
+  }
+
+  Future<void> _loadFallbackCounts() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+
+    try {
+      // 1. Requests Badge (pending + negotiating)
+      if (widget.pendingRequestsCount == null) {
+        if (NetworkService.isOfflineNotifier.value) {
+          final p = await NegotiationLocalService().getOfflineRequests('pending');
+          final n = await NegotiationLocalService().getOfflineRequests('negotiating');
+          if (mounted) setState(() => _fallbackRequestsCount = p.length + n.length);
+        } else {
+          final tripTable = _isDriver ? 'driver_trips' : 'passenger_trips';
+          final tripIdColumn = _isDriver ? 'driver_trip_id' : 'passenger_trip_id';
+
+          final trips = await Supabase.instance.client
+              .from(tripTable)
+              .select('id')
+              .eq('user_id', user.id);
+          final tripIds = (trips as List).map((t) => t['id'] as String).toList();
+
+          if (tripIds.isNotEmpty) {
+            final rows = await Supabase.instance.client
+                .from('tumpang_request')
+                .select('id')
+                .inFilter(tripIdColumn, tripIds)
+                .or('status.eq.pending,status.eq.negotiating');
+            if (mounted) setState(() => _fallbackRequestsCount = (rows as List).length);
+          }
+        }
+      }
+
+      // 2. Payments Badge (unpaid invoices)
+      if (widget.pendingPaymentsCount == null && !_isDriver) {
+        if (NetworkService.isOfflineNotifier.value) {
+          final pRows = await PaymentLocalService().getOfflinePayments(isCompleted: false);
+          if (mounted) setState(() => _fallbackPaymentsCount = pRows.length);
+        } else {
+          final rows = await Supabase.instance.client
+              .from('payments')
+              .select('id, tumpang_subscription!inner(passenger_trip_id, passenger_trips!inner(user_id))')
+              .eq('tumpang_subscription.passenger_trips.user_id', user.id)
+              .isFilter('paid_at', null);
+
+          if (mounted) setState(() => _fallbackPaymentsCount = (rows as List).length);
+        }
+      }
+    } catch (e) {
+      debugPrint('Sidebar count load notice: $e');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    int requestsBadge = widget.pendingRequestsCount ?? _fallbackRequestsCount;
+    int paymentsBadge = widget.pendingPaymentsCount ?? _fallbackPaymentsCount;
+
+    // Reactively watch ViewModels if they exist in the Provider tree
+    try {
+      final negoVm = context.watch<NegotiationViewModel?>();
+      if (negoVm != null && widget.pendingRequestsCount == null) {
+        requestsBadge = negoVm.pendingRequests.length;
+      }
+    } catch (_) {}
+
+    try {
+      final payVm = context.watch<PaymentViewModel?>();
+      if (payVm != null && widget.pendingPaymentsCount == null) {
+        paymentsBadge = payVm.pendingPayments.length;
+      }
+    } catch (_) {}
+
     return Drawer(
       width: MediaQuery.of(context).size.width * 0.72,
       backgroundColor: Colors.transparent,
@@ -61,40 +173,48 @@ class AppSidebar extends StatelessWidget {
             CircleAvatar(
               radius: 40,
               backgroundColor: AppColors.primaryYellow,
-              backgroundImage: profileImageUrl != null
-                  ? NetworkImage(profileImageUrl!)
+              backgroundImage: widget.profileImageUrl != null
+                  ? NetworkImage(widget.profileImageUrl!)
                   : null,
-              child: profileImageUrl == null
+              child: widget.profileImageUrl == null
                   ? const Icon(Icons.person, size: 50, color: AppColors.white)
                   : null,
             ),
             const SizedBox(height: 16),
             Text(
-              userName,
+              widget.userName,
               style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppColors.black),
             ),
             Text(
-              userRole,
+              widget.userRole,
               style: const TextStyle(fontSize: 15, color: AppColors.greyText),
             ),
             const SizedBox(height: 16),
             const Divider(color: AppColors.greyBorder, thickness: 1),
             const SizedBox(height: 20),
 
-            // Navigation Items
             _buildMenuItem(context, index: 0, title: 'View Profile'),
-            _buildMenuItem(context, index: 1, title: 'View Subscriptions'),
-            _buildMenuItem(context, index: 2, title: 'View Requests'),
-            // Passengers pay for trips, drivers earn from them — same
-            // slot, different label/destination depending on role.
-            _buildMenuItem(context, index: 3, title: _isDriver ? 'My Earnings' : 'View Payment'),
-
-            const SizedBox(height: 8), // Slight extra gap before Sign Out
-
-            // Sign Out Option (using the reusable component)
+            _buildMenuItem(context, index: 1, title: 'My Trips'),
+            _buildMenuItem(context, index: 2, title: 'View Subscriptions'),
+            _buildMenuItem(
+              context,
+              index: 3,
+              title: 'View Requests',
+              badgeCount: requestsBadge,
+            ),
             _buildMenuItem(
               context,
               index: 4,
+              title: _isDriver ? 'My Earnings' : 'Payment',
+              badgeCount: _isDriver ? 0 : paymentsBadge,
+            ),
+            _buildMenuItem(context, index: 5, title: 'My Rewards'),
+
+            const SizedBox(height: 8),
+
+            _buildMenuItem(
+              context,
+              index: 6,
               title: 'Sign Out',
               textColor: const Color(0xFFEF4444),
             ),
@@ -104,23 +224,15 @@ class AppSidebar extends StatelessWidget {
     );
   }
 
-  // Handle routing internally
   void _handleItemTap(BuildContext context, int index) async {
-    Navigator.pop(context); // Always close the drawer first
+    // Capture the ViewModel BEFORE the drawer closes and destroys the context
+    final homeViewModel = context.read<HomeViewModel>();
 
-    // Prevent routing if the user is already on this screen
-    if (index == selectedIndex) return;
+    Navigator.pop(context);
 
-    // Handle Sign Out Logic completely separately
-    if (index == 4) {
-      // Clear the Supabase session — without this, AuthGate still sees
-      // a valid currentSession and would send the user right back to
-      // HomeScreen the next time it rebuilds, even though they just hit
-      // "Sign Out".
-      await Supabase.instance.client.auth.signOut();
-      if (!context.mounted) return;
+    if (index == widget.selectedIndex) return;
 
-      // Route to Login and DESTROY the navigation history
+    if (index == 6) {
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(builder: (context) => const LoginScreen()),
@@ -135,30 +247,48 @@ class AppSidebar extends StatelessWidget {
         nextScreen = const ProfileScreen();
         break;
       case 1:
-        nextScreen = const ProfileScreen(); // Replace with actual screen
+        nextScreen = const MyTripsScreen();
         break;
       case 2:
-        nextScreen = const ProfileScreen(); // Replace with actual screen
+        nextScreen = SubscriptionListScreen(
+          userId: homeViewModel.currentUserId ?? '',
+          role: homeViewModel.currentUserRole,
+        );
         break;
       case 3:
-      // Driver -> wallet/earnings. Passenger -> payment history (not
-      // built yet, so this falls back to Profile like the other
-      // placeholders above until that screen exists).
-        nextScreen = _isDriver ? const DriverBalanceScreen() : const ProfileScreen();
+        nextScreen = const RequestListScreen();
+        break;
+      case 4:
+        nextScreen = _isDriver ? const DriverBalanceScreen() : const PaymentScreen();
+        break;
+      case 5:
+        nextScreen = RewardsScreen(userId: homeViewModel.currentUserId ?? '');
         break;
       default:
         return;
     }
 
-    Navigator.push(
+    await Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => nextScreen),
     );
+
+    // Safely refresh the Home screen using the captured ViewModel
+    try {
+      await homeViewModel.refreshHome();
+    } catch (e) {
+      debugPrint('Sidebar refresh error: $e');
+    }
   }
 
-  // Added optional textColor parameter
-  Widget _buildMenuItem(BuildContext context, {required int index, required String title, Color? textColor}) {
-    final isSelected = selectedIndex == index;
+  Widget _buildMenuItem(
+      BuildContext context, {
+        required int index,
+        required String title,
+        Color? textColor,
+        int? badgeCount,
+      }) {
+    final isSelected = widget.selectedIndex == index;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
@@ -171,15 +301,46 @@ class AppSidebar extends StatelessWidget {
           child: Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Text(
-              title,
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                // Use the custom color if provided, otherwise default to black
-                color: textColor ?? AppColors.black,
-              ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                      color: textColor ?? AppColors.black,
+                    ),
+                  ),
+                ),
+                if (badgeCount != null && badgeCount > 0) ...[
+                  const SizedBox(width: 8),
+                  _buildBadge(badgeCount, isSelected: isSelected),
+                ],
+              ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBadge(int count, {bool isSelected = false}) {
+    final label = count > 99 ? '99+' : count.toString();
+    return Container(
+      constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: isSelected ? AppColors.black : AppColors.primaryYellow,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Center(
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+            color: isSelected ? AppColors.white : AppColors.black,
           ),
         ),
       ),

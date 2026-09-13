@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
-import 'package:nak_tumpang/features/auth/UI/screens/login_screen.dart';
 import 'package:nak_tumpang/features/home/UI/screens/home_screen.dart';
 import 'package:nak_tumpang/features/profile/UI/components/get_started_dialog.dart';
 import 'package:nak_tumpang/features/profile/UI/screens/post_signup_driver_screen.dart';
@@ -33,38 +32,11 @@ class _RegisterView extends StatefulWidget {
 
 class _RegisterViewState extends State<_RegisterView> {
   Future<void> _register(RegisterViewModel vm) async {
-    final result = await vm.submit();
-    if (!mounted || result == null) return;
+    final success = await vm.submit();
+    if (!mounted || !success) return;
 
-    if (result == RegisterResult.pendingVerification) {
-      // No session yet — nothing was written to users/driver_profiles,
-      // so there's nothing to continue into. Tell them to confirm, then
-      // send them to log in once they've clicked the link.
-      await showDialog<void>(
-        context: context,
-        builder: (_) => AlertDialog(
-          title: const Text('Confirm your email'),
-          content: const Text(
-            "We've sent a confirmation link to your email address. "
-                'Please confirm it, then log in to finish setting up your account.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
-      );
-      if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const LoginScreen()),
-      );
-      return;
-    }
-
-    // Account exists at this point either way — show the "Let's get
-    // started!" popup so they can optionally add a trip now.
+    // Account exists at this point — show the "Let's get started!"
+    // popup so they can optionally add a trip now.
     final choice = await GetStartedDialog.show(context);
     if (!mounted) return;
 

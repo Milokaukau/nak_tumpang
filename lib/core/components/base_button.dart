@@ -20,7 +20,7 @@ class BaseButton extends StatelessWidget {
   const BaseButton({
     super.key,
     required this.text,
-    required this.onPressed,
+    this.onPressed,
     this.isFullWidth = true,
     this.textStyle,
     this.isOutlined = false,

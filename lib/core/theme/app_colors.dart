@@ -13,4 +13,14 @@ class AppColors {
 
   // Specific UI Colors
   static const Color driverBlueBg = Color(0xFFD6E4FF);
+
+  // Status Colors (used by calendar/exception module)
+  static const Color successGreenBg = Color(0xFFE6F4EA);
+  static const Color successGreenText = Color(0xFF1E7B34);
+  static const Color warningAmberBg = Color(0xFFFCEFD1);
+  static const Color warningAmberText = Color(0xFF8A6D1D);
+
+  // Status Colors
+  static const Color inactiveRedBg = Color(0xFFFCE4E4);
+  static const Color inactiveRedText = Color(0xFFB3261E);
 }

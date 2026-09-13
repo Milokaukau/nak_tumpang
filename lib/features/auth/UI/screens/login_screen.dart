@@ -85,18 +85,11 @@ class _LoginViewState extends State<_LoginView> {
               children: [
                 // Logo
                 Center(
-                  child: Container(
+                  child: Image.asset(
+                    'assets/launch_app_logo.png',
                     width: 100,
                     height: 100,
-                    decoration: BoxDecoration(
-                      color: AppColors.primaryYellow,
-                      borderRadius: BorderRadius.circular(24),
-                    ),
-                    child: const Icon(
-                      Icons.directions_car_filled_rounded,
-                      color: Colors.white,
-                      size: 52,
-                    ),
+                    fit: BoxFit.contain,
                   ),
                 ),
                 const SizedBox(height: 20),
@@ -108,7 +101,7 @@ class _LoginViewState extends State<_LoginView> {
                   style: TextStyle(
                     color: AppColors.primaryYellow,
                     fontWeight: FontWeight.bold,
-                    fontSize: 30,
+                    fontSize: 32,
                   ),
                 ),
                 Text(
@@ -117,7 +110,7 @@ class _LoginViewState extends State<_LoginView> {
                   style: TextStyle(
                     color: AppColors.black,
                     fontWeight: FontWeight.bold,
-                    fontSize: 35,
+                    fontSize: 32,
                   ),
                 ),
                 const SizedBox(height: 8),

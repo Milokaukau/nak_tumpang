@@ -1,28 +1,45 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter_stripe/flutter_stripe.dart';
 import 'package:nak_tumpang/core/theme/app_theme.dart';
 import 'package:nak_tumpang/core/app_providers.dart';
 import 'package:nak_tumpang/features/home/UI/screens/home_screen.dart';
+import 'package:nak_tumpang/core/services/local_db_service.dart';
 import 'package:nak_tumpang/features/auth/UI/screens/login_screen.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:nak_tumpang/core/services/network_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // load the .env file
   await dotenv.load(fileName: ".env");
 
   final supabaseUrl = dotenv.env['SUPABASE_URL'];
-  final supabaseAnonKey = dotenv.env['SUPABASE_ANON_KEY'];
+  final supabasePublishableKey = dotenv.env['SUPABASE_PUBLISHABLE_KEY'];
+  final stripePublishableKey = dotenv.env['STRIPE_PUBLISHABLE_KEY'];
 
-  if (supabaseUrl == null || supabaseAnonKey == null) {
-    throw StateError(
-      'Missing SUPABASE_URL or SUPABASE_ANON_KEY — check your .env file.',
-    );
+  if (supabaseUrl == null || supabaseUrl.isEmpty) {
+    throw StateError('SUPABASE_URL is missing from .env');
+  }
+  if (supabasePublishableKey == null || supabasePublishableKey.isEmpty) {
+    throw StateError('SUPABASE_PUBLISHABLE_KEY is missing from .env.');
+  }
+  if (stripePublishableKey == null || stripePublishableKey.isEmpty) {
+    throw StateError('STRIPE_PUBLISHABLE_KEY is missing from .env.');
   }
 
-  await Supabase.initialize(url: supabaseUrl, anonKey: supabaseAnonKey);
+  Stripe.publishableKey = stripePublishableKey;
+
+  await Supabase.initialize(
+    url: supabaseUrl,
+    publishableKey: supabasePublishableKey,
+  );
+
+  await LocalDbService.instance.testConnection();
+
+  await NetworkService.initialize();
+
   runApp(
     MultiProvider(
       providers: AppProviders.providers,
@@ -40,12 +57,11 @@ class TumpangApp extends StatelessWidget {
       title: 'Tumpang',
       theme: AppTheme.lightTheme,
       debugShowCheckedModeBanner: false,
+      scaffoldMessengerKey: NetworkService.messengerKey,
       home: const AuthGate(),
     );
   }
 }
-
-// shows login screen if nobody is logged in, homescreen if already logged in
 
 class AuthGate extends StatelessWidget {
   const AuthGate({super.key});
@@ -54,9 +70,9 @@ class AuthGate extends StatelessWidget {
   Widget build(BuildContext context) {
     return StreamBuilder<AuthState>(
       stream: Supabase.instance.client.auth.onAuthStateChange,
-      builder: (context, snapshot){
+      builder: (context, snapshot) {
         final session = Supabase.instance.client.auth.currentSession;
-        if (session != null){
+        if (session != null) {
           return const HomeScreen();
         }
         return const LoginScreen();

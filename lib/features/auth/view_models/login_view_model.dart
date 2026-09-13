@@ -19,10 +19,10 @@ class LoginViewModel extends ChangeNotifier {
   String? errorMessage;
 
   // Set during submit() when we had to backfill this driver's
-  // driver_profiles row here (see submit()) — their license was never
-  // saved (registration only uploads it once a session exists, and a
-  // confirm-your-email account has none yet), so the screen should nudge
-  // them to add it again from their profile.
+  // driver_profiles row here (see submit()) — their license never made
+  // it into driver_profiles (backfilling it here has no license to
+  // attach), so the screen should nudge them to add it again from their
+  // profile.
   bool driverLicenseNeedsReupload = false;
 
   // Per-field error messages, rendered manually below each box so they
@@ -99,11 +99,14 @@ class LoginViewModel extends ChangeNotifier {
           .maybeSingle();
 
       // RegisterViewModel writes `users` (and `driver_profiles`, for
-      // drivers) immediately once a session exists. The one case that's
-      // deferred all the way to here is a confirm-your-email signup:
-      // there's no session at signup time, so nothing was written yet —
-      // write it now, on this first login, same as RegisterViewModel
-      // would have.
+      // drivers) immediately once the auth account is created — "Confirm
+      // email" is off for this project, so that always happens during
+      // registration itself, never deferred to here. A missing `users`
+      // row at login time therefore means that write didn't fully land
+      // (e.g. the connection dropped between signUp() succeeding and
+      // the users upsert running) — self-heal it the same way
+      // RegisterViewModel would have, same reasoning as the
+      // driver_profiles self-heal below.
       if (existingRow == null) {
         final meta = response.user?.userMetadata;
         final role = meta?['role'] as String? ?? 'passenger';
@@ -117,9 +120,9 @@ class LoginViewModel extends ChangeNotifier {
         });
 
         if (role == 'driver') {
-          // The license was never uploaded (registration only uploads
-          // it once a session exists, and a confirm-your-email account
-          // had none yet), so nudge them to add it from their profile.
+          // The license was never uploaded here — there's no local copy
+          // of the picked photo left to fall back on this far after
+          // registration — so nudge them to add it from their profile.
           await _supabase.from('driver_profiles').upsert({
             'user_id': userId,
             'total_earnings': 0,

@@ -7,21 +7,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nak_tumpang/core/utils/validators.dart';
 import 'package:nak_tumpang/features/profile/data/services/profile_storage_service.dart';
 
-/// What the screen should do after [RegisterViewModel.submit] succeeds.
-enum RegisterResult {
-  /// Account (and, for drivers, `driver_profiles`) created — show the
-  /// "Let's get started!" popup so they can optionally add a trip right
-  /// away, or come back to it later.
-  accountComplete,
-
-  /// Account created, but Supabase requires the new email to be
-  /// confirmed before a session exists. There's no `auth.uid()` yet, so
-  /// nothing has been written to `users`/`driver_profiles`/storage —
-  /// that happens on first login instead, once the account is
-  /// confirmed. The screen should tell the user to check their email.
-  pendingVerification,
-}
-
 class RegisterViewModel extends ChangeNotifier {
   RegisterViewModel({String initialRole = 'passenger'}) : role = initialRole {
     // Rebuild the phone field's focus-dependent border when focus changes.
@@ -146,12 +131,12 @@ class RegisterViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<RegisterResult?> submit() async {
+  Future<bool> submit() async {
     // Guards against a second call landing while one is already in
     // flight (e.g. a double-tap before the UI rebuilds with isLoading
     // disabling the button) — this can create an auth user and upload a
     // file, so don't rely on the button's disabled state alone.
-    if (isLoading) return null;
+    if (isLoading) return false;
 
     _autoValidate = true;
     _runValidation();
@@ -164,7 +149,7 @@ class RegisterViewModel extends ChangeNotifier {
         confirmError != null ||
         licenseNumberError != null ||
         licenseError != null) {
-      return null;
+      return false;
     }
 
     isLoading = true;
@@ -193,26 +178,23 @@ class RegisterViewModel extends ChangeNotifier {
         final identities = response.user?.identities;
         if (identities != null && identities.isEmpty) {
           errorMessage = 'An account with this email already exists. Please log in instead.';
-          return null;
+          return false;
         }
 
         final createdUserId = response.user?.id;
         if (createdUserId == null) {
           errorMessage = 'Something went wrong creating your account.';
-          return null;
+          return false;
         }
         newUserId = createdUserId;
         _registeredUserId = newUserId;
 
-        // If "Confirm email" is on, Supabase creates the auth user but
-        // doesn't return a session until the confirmation link is
-        // clicked. Without a session there's no auth.uid(), so RLS would
-        // block writing to users/driver_profiles/storage right now —
-        // defer all of that to first login instead, once they're
-        // confirmed.
-        if (response.session == null) {
-          return RegisterResult.pendingVerification;
-        }
+        // "Confirm email" is off for this project, so signUp() always
+        // returns a session immediately — there's no pending-
+        // verification state to handle here. If that setting ever gets
+        // turned on, this assumption breaks (signUp() would return
+        // session: null and auth.uid() wouldn't exist yet for the
+        // writes below), so this comment is the flag to revisit it.
       }
 
       // Tracked separately from licenseStoragePath: only set when *this*
@@ -276,19 +258,19 @@ class RegisterViewModel extends ChangeNotifier {
         rethrow;
       }
 
-      return RegisterResult.accountComplete;
+      return true;
     } on AuthException catch (e) {
       errorMessage = e.message;
-      return null;
+      return false;
     } on PostgrestException catch (e) {
       // cannot register with email already in database
       errorMessage = e.code == '23505'
           ? 'That account detail is already registered.'
           : 'Could not complete registration. Please try again.';
-      return null;
+      return false;
     } catch (e) {
       errorMessage = 'Could not complete registration. Please try again.';
-      return null;
+      return false;
     } finally {
       isLoading = false;
       notifyListeners();
