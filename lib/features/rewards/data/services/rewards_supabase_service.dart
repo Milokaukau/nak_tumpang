@@ -6,23 +6,44 @@ class RewardsSupabaseService {
 
   Future<Map<String, dynamic>> fetchPointsSummary(String userId) async {
     try {
+      // Sweep: zero out any batches that expired since we last checked, so
+      // avai_points in the DB itself stays accurate for any other query
+      // that might read this table directly.
+      await _supabase
+          .from('reward_points')
+          .update({'avai_points': 0})
+          .eq('user_id', userId)
+          .gt('avai_points', 0)
+          .lt('expired_at', DateTime.now().toIso8601String());
       final response = await _supabase
           .from('reward_points')
           .select()
           .eq('user_id', userId);
 
       final rows = List<Map<String, dynamic>>.from(response);
+      final now = DateTime.now();
+
       int obtained = 0;
       int available = 0;
+      int expiredUnused = 0; // points that lapsed without being spent
       DateTime? nearestExpiry;
 
       for (var row in rows) {
-        obtained += (row['obtained_points'] as num).toInt();
+        final obtainedPts = (row['obtained_points'] as num).toInt();
         final avai = (row['avai_points'] as num).toInt();
-        available += avai;
-        if (avai > 0) {
-          final expiry = DateTime.tryParse(row['expired_at'] ?? '');
-          if (expiry != null && (nearestExpiry == null || expiry.isBefore(nearestExpiry))) {
+        obtained += obtainedPts;
+
+        final expiry = DateTime.tryParse(row['expired_at'] ?? '');
+        final isExpired = expiry != null && now.isAfter(expiry);
+
+        if (isExpired) {
+          // Expired batches no longer count toward available balance,
+          // regardless of how many points were left unspent in them.
+          expiredUnused += avai;
+        } else {
+          available += avai;
+          if (avai > 0 && expiry != null &&
+              (nearestExpiry == null || expiry.isBefore(nearestExpiry))) {
             nearestExpiry = expiry;
           }
         }
@@ -36,7 +57,8 @@ class RewardsSupabaseService {
       return {
         'obtained_points': obtained,
         'available_points': available,
-        'used_points': obtained - available,
+        'used_points': obtained - available - expiredUnused,
+        'expired_points': expiredUnused,
         'voucher_count': (voucherCountResponse as List).length,
         'nearest_expiry': nearestExpiry,
       };
@@ -46,6 +68,7 @@ class RewardsSupabaseService {
         'obtained_points': 0,
         'available_points': 0,
         'used_points': 0,
+        'expired_points': 0,
         'voucher_count': 0,
         'nearest_expiry': null,
       };
@@ -145,6 +168,7 @@ class RewardsSupabaseService {
           .select()
           .eq('user_id', userId)
           .gt('avai_points', 0)
+          .gt('expired_at', DateTime.now().toIso8601String())
           .order('obtained_at', ascending: true);
 
       final batches = List<Map<String, dynamic>>.from(response);
