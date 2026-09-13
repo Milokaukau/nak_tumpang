@@ -42,10 +42,12 @@ class HomeViewModel extends ChangeNotifier {
 
   bool _hasFoundDirect = false;
   bool _hasFoundMixed = false;
+  bool hasExceptedTripsToday = false;
 
   int _fetchId = 0;
   int _routeFetchId = 0;
   int _userFetchId = 0;
+  String? _lastLoadedUserId;
 
   int currentDirectLimit = 5;
   int currentMixedLimit = 5;
@@ -58,6 +60,11 @@ class HomeViewModel extends ChangeNotifier {
 
   List<Map<String, dynamic>> matchedDrivers = [];
   List<Map<String, dynamic>> mixedMatchedRoutes = [];
+
+  List<({List<LatLng> points, Color color, bool isTransit})> mapRoutes = [];
+  List<({LatLng point, Color color, bool isSmallNode})> mapMarkers = [];
+
+  final Map<String, List<LatLng>> _routeCache = {};
 
   // ==========================================
   // EXCEPTION PANEL (can't fetch / no need fetch)
@@ -97,7 +104,6 @@ class HomeViewModel extends ChangeNotifier {
     NetworkService.isOfflineNotifier.removeListener(_onNetworkChange);
     super.dispose();
   }
-
 
   void openCantFetchPanel([Map<String, dynamic>? sub]) {
     selectedSubscription = sub;
@@ -173,6 +179,13 @@ class HomeViewModel extends ChangeNotifier {
         endDate: exceptionEndDate!,
         reason: reasonText,
       );
+
+      // --- FIXED: Instantly refresh the UI if the exception is successfully filed! ---
+      if (success) {
+        closeExceptionPanel();
+        await refreshHome();
+      }
+
       return success;
     } catch (e) {
       debugPrint('⚠️ Error submitting exception: $e');
@@ -183,14 +196,8 @@ class HomeViewModel extends ChangeNotifier {
     }
   }
 
-  List<({List<LatLng> points, Color color})> mapRoutes = [];
-  List<({LatLng point, Color color})> mapMarkers = [];
-
-  final Map<String, List<LatLng>> _routeCache = {};
-
   void _onNetworkChange() {
     if (!NetworkService.isOfflineNotifier.value) {
-      // --- FIXED: Reset search flags so it actually searches again on reconnect ---
       _hasFoundDirect = false;
       _hasFoundMixed = false;
       fetchCurrentUser();
@@ -216,6 +223,37 @@ class HomeViewModel extends ChangeNotifier {
     _findMixedRoutes();
   }
 
+  Future<bool> completeTrip({
+    required String subscriptionId,
+    required String driverId,
+    required String passengerId,
+    required double pickupLat,
+    required double pickupLng,
+    required double dropoffLat,
+    required double dropoffLng,
+  }) async {
+    if (_isCompletingTrip) return false;
+
+    _isCompletingTrip = true;
+    notifyListeners();
+
+    try {
+      final success = await _homeService.completeTrip(
+        subscriptionId: subscriptionId,
+        driverId: driverId,
+        passengerId: passengerId,
+        pickupLat: pickupLat,
+        pickupLng: pickupLng,
+        dropoffLat: dropoffLat,
+        dropoffLng: dropoffLng,
+      );
+      return success;
+    } finally {
+      _isCompletingTrip = false;
+      notifyListeners();
+    }
+  }
+
   Future<String?> requestTumpang({
     required String driverTripId,
     required String passengerTripId,
@@ -239,7 +277,6 @@ class HomeViewModel extends ChangeNotifier {
     final dropoffName = overrideDropoffName ?? currentSelectedTrip!['dropoff_name'];
 
     final pickupTime = overridePickupTime ?? currentSelectedTrip!['desired_pickup_time'];
-
     final requestId = const Uuid().v4();
 
     final payload = {
@@ -247,19 +284,16 @@ class HomeViewModel extends ChangeNotifier {
       'passenger_trip_id': passengerTripId,
       'driver_trip_id': driverTripId,
       'status': 'negotiating',
-
       'pickup_lat': pickupLat,
       'pickup_lng': pickupLng,
       'pickup_name': pickupName,
       'pickup_requested_by': authUser.id,
       'pickup_is_accepted': false,
-
       'dropoff_lat': dropoffLat,
       'dropoff_lng': dropoffLng,
       'dropoff_name': dropoffName,
       'dropoff_requested_by': authUser.id,
       'dropoff_is_accepted': false,
-
       'pickup_time': pickupTime,
       'pickup_time_requested_by': authUser.id,
       'pickup_time_is_accepted': false,
@@ -384,6 +418,13 @@ class HomeViewModel extends ChangeNotifier {
 
   Future<void> fetchCurrentUser() async {
     final requestId = ++_userFetchId;
+    final authUser = _auth.currentUser;
+
+    if (authUser != null && _lastLoadedUserId != null && _lastLoadedUserId != authUser.id) {
+      _resetForUserSwitch();
+    }
+    _lastLoadedUserId = authUser?.id;
+
     final matchingUiEpochAtStart = _matchingUiEpoch;
 
     if (_isFirstLoad) {
@@ -391,7 +432,6 @@ class HomeViewModel extends ChangeNotifier {
       notifyListeners();
     }
 
-    final authUser = _auth.currentUser;
     if (authUser == null) {
       if (requestId == _userFetchId) {
         isScreenLoading = false;
@@ -410,13 +450,13 @@ class HomeViewModel extends ChangeNotifier {
 
       if (cachedSubs.isNotEmpty) {
         activeSubscriptions = _mapSubscriptions(cachedSubs, isForPassenger: isPassengerRole);
-        selectedSubscriptionId = activeSubscriptions.first['id'];
-        showMatchingUI = false;
+        selectedSubscriptionId = activeSubscriptions.isEmpty ? null : activeSubscriptions.first['id'];
+        showMatchingUI = activeSubscriptions.isEmpty;
       } else {
         showMatchingUI = true;
       }
 
-      final subbedIds = activeSubscriptions.map((s) => s[isPassengerRole ? 'passenger_trip_id' : 'driver_trip_id']).toSet();
+      final subbedIds = cachedSubs.map((s) => s[isPassengerRole ? 'passenger_trip_id' : 'driver_trip_id']).toSet();
       availableTrips = cachedTrips.where((t) => !subbedIds.contains(t['id'])).toList();
 
       _validateCurrentSelectedTrip();
@@ -453,6 +493,65 @@ class HomeViewModel extends ChangeNotifier {
     }
   }
 
+  void _resetForUserSwitch() {
+    _isFirstLoad = true;
+    currentUser = null;
+    currentUserRole = 'passenger';
+    currentSelectedTrip = null;
+    availableTrips = [];
+    activeSubscriptions = [];
+    selectedSubscriptionId = null;
+    showMatchingUI = false;
+    selectedFilter = 'Direct';
+
+    matchedDrivers.clear();
+    mixedMatchedRoutes.clear();
+    _hasFoundDirect = false;
+    _hasFoundMixed = false;
+    hasExceptedTripsToday = false;
+
+    currentDirectLimit = 5;
+    currentMixedLimit = 5;
+    isDirectLoading = false;
+    isMixedLoading = false;
+    isDirectLoadingMore = false;
+    isMixedLoadingMore = false;
+    hasMoreDirect = false;
+    hasMoreMixed = false;
+
+    mapRoutes = [];
+    mapMarkers = [];
+    _routeCache.clear();
+
+    _fetchId++;
+    _routeFetchId++;
+    notifyListeners();
+  }
+
+  Future<Set<String>> _getExceptedSubIds(List<Map<String, dynamic>> subs) async {
+    if (subs.isEmpty || NetworkService.isOfflineNotifier.value) return {};
+    try {
+      final subIds = subs.map((s) => s['id']).toList();
+      final today = DateTime.now();
+      final todayStr = "${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}";
+
+      final exceptions = await _auth.currentSession != null
+          ? await Supabase.instance.client
+          .from('tumpang_exception')
+          .select('tumpang_subscription_id')
+          .inFilter('tumpang_subscription_id', subIds)
+          .eq('status', 'active')
+          .lte('start_date', todayStr)
+          .gte('end_date', todayStr)
+          : [];
+
+      return exceptions.map((e) => e['tumpang_subscription_id'].toString()).toSet();
+    } catch (e) {
+      debugPrint('Error fetching exceptions: $e');
+      return {};
+    }
+  }
+
   Future<void> _loadDriverData(String userId, int requestId, int matchingUiEpochAtStart) async {
     List<Map<String, dynamic>> rawSubs = [];
     List<Map<String, dynamic>> allDriverTrips = [];
@@ -483,16 +582,24 @@ class HomeViewModel extends ChangeNotifier {
 
     if (requestId != _userFetchId) return;
 
-    activeSubscriptions = _mapSubscriptions(rawSubs, isForPassenger: false);
-    final subbedTripIds = activeSubscriptions.map((s) => s['driver_trip_id']).toSet();
-    availableTrips = myTrips.where((t) => !subbedTripIds.contains(t['id'])).toList();
+    final exceptedSubIds = await _getExceptedSubIds(rawSubs);
+    hasExceptedTripsToday = exceptedSubIds.isNotEmpty;
+    final activeTodaySubs = rawSubs.where((s) => !exceptedSubIds.contains(s['id'])).toList();
 
-    // --- FIXED: Use the new validation helper ---
+    final previousSubCount = activeSubscriptions.length;
+    activeSubscriptions = _mapSubscriptions(activeTodaySubs, isForPassenger: false);
+
+    final allSubbedTripIds = rawSubs.map((s) => s['driver_trip_id']).toSet();
+    availableTrips = myTrips.where((t) => !allSubbedTripIds.contains(t['id'])).toList();
+
     _validateCurrentSelectedTrip();
 
     if (activeSubscriptions.isNotEmpty) {
       selectedSubscriptionId ??= activeSubscriptions.first['id'];
-      if (_isFirstLoad && _matchingUiEpoch == matchingUiEpochAtStart) showMatchingUI = false;
+      if (activeSubscriptions.length > previousSubCount || (_isFirstLoad && _matchingUiEpoch == matchingUiEpochAtStart)) {
+        showMatchingUI = false;
+        selectedSubscriptionId = activeSubscriptions.first['id'];
+      }
     } else {
       showMatchingUI = true;
     }
@@ -526,16 +633,38 @@ class HomeViewModel extends ChangeNotifier {
 
     if (requestId != _userFetchId) return;
 
-    activeSubscriptions = _mapSubscriptions(rawSubs, isForPassenger: true);
-    final subbedTripIds = activeSubscriptions.map((s) => s['passenger_trip_id']).toSet();
-    availableTrips = trips.where((t) => !subbedTripIds.contains(t['id'])).toList();
+    for (var sub in rawSubs) {
+      final pTripId = sub['passenger_trip_id'];
+      final matchingTrip = trips.firstWhere((t) => t['id'] == pTripId, orElse: () => <String, dynamic>{});
+      if (matchingTrip.isNotEmpty) {
+        sub['passenger_trips'] = matchingTrip;
+      }
+    }
 
-    // --- FIXED: Use the new validation helper ---
+    final exceptedSubIds = await _getExceptedSubIds(rawSubs);
+    hasExceptedTripsToday = exceptedSubIds.isNotEmpty;
+
+    final exceptedPassengerTripIds = rawSubs
+        .where((s) => exceptedSubIds.contains(s['id']))
+        .map((s) => s['passenger_trip_id'])
+        .toSet();
+
+    final activeTodaySubs = rawSubs.where((s) => !exceptedPassengerTripIds.contains(s['passenger_trip_id'])).toList();
+
+    final previousSubCount = activeSubscriptions.length;
+    activeSubscriptions = _mapSubscriptions(activeTodaySubs, isForPassenger: true);
+
+    final allSubbedTripIds = rawSubs.map((s) => s['passenger_trip_id']).toSet();
+    availableTrips = trips.where((t) => !allSubbedTripIds.contains(t['id'])).toList();
+
     _validateCurrentSelectedTrip();
 
     if (activeSubscriptions.isNotEmpty) {
       selectedSubscriptionId ??= activeSubscriptions.first['id'];
-      if (_isFirstLoad && _matchingUiEpoch == matchingUiEpochAtStart) showMatchingUI = false;
+      if (activeSubscriptions.length > previousSubCount || (_isFirstLoad && _matchingUiEpoch == matchingUiEpochAtStart)) {
+        showMatchingUI = false;
+        selectedSubscriptionId = activeSubscriptions.first['id'];
+      }
     } else {
       showMatchingUI = true;
     }
@@ -591,7 +720,6 @@ class HomeViewModel extends ChangeNotifier {
     }
     notifyListeners();
 
-    // --- FIXED: Wrap in a try-finally block to ensure spinners always turn off ---
     try {
       final passDays = FormatUtils.extractActiveDays(currentSelectedTrip!);
       final passPick = FormatUtils.latLngFromMap(currentSelectedTrip!, 'pickup_lat', 'pickup_lng');
@@ -681,37 +809,6 @@ class HomeViewModel extends ChangeNotifier {
     }
   }
 
-  Future<bool> completeTrip({
-    required String subscriptionId,
-    required String driverId,
-    required String passengerId,
-    required double pickupLat,
-    required double pickupLng,
-    required double dropoffLat,
-    required double dropoffLng,
-  }) async {
-    if (_isCompletingTrip) return false;
-
-    _isCompletingTrip = true;
-    notifyListeners();
-
-    try {
-      final success = await _homeService.completeTrip(
-        subscriptionId: subscriptionId,
-        driverId: driverId,
-        passengerId: passengerId,
-        pickupLat: pickupLat,
-        pickupLng: pickupLng,
-        dropoffLat: dropoffLat,
-        dropoffLng: dropoffLng,
-      );
-      return success;
-    } finally {
-      _isCompletingTrip = false;
-      notifyListeners();
-    }
-  }
-
   Future<void> _findMixedRoutes() async {
     if (currentSelectedTrip == null) return;
     final currentFetchId = ++_fetchId;
@@ -722,7 +819,6 @@ class HomeViewModel extends ChangeNotifier {
     }
     notifyListeners();
 
-    // --- FIXED: Wrap in a try-finally block to ensure spinners always turn off ---
     try {
       final passDays = FormatUtils.extractActiveDays(currentSelectedTrip!);
       final passPick = FormatUtils.latLngFromMap(currentSelectedTrip!, 'pickup_lat', 'pickup_lng');
@@ -992,31 +1088,23 @@ class HomeViewModel extends ChangeNotifier {
           if (requestId != _routeFetchId) return;
 
           mapRoutes = [
-            (points: _getCurvedRoute(start, end), color: Colors.indigo),
+            (points: _getCurvedRoute(start, end), color: Colors.indigo, isTransit: false),
           ];
           mapMarkers = [
-            (point: start, color: Colors.green),
-            (point: end, color: Colors.red),
+            (point: start, color: Colors.green, isSmallNode: false),
+            (point: end, color: Colors.red, isSmallNode: false),
           ];
         } else {
           if (selectedSubscriptionId == null || activeSubscriptions.isEmpty) return _clearMap();
           final sub = activeSubscriptions.firstWhere((s) => s['id'] == selectedSubscriptionId, orElse: () => <String, dynamic>{});
           if (sub.isEmpty) return _clearMap();
 
-          start = FormatUtils.latLngFromMap(sub, 'pickup_lat', 'pickup_lng');
-          end = FormatUtils.latLngFromMap(sub, 'dropoff_lat', 'dropoff_lng');
-          if (start.latitude == 0.0 || end.latitude == 0.0) return _clearMap();
-
-          final route = await _getCachedRoute(start, end);
+          final built = await _buildSubscriptionRoute(sub);
           if (requestId != _routeFetchId) return;
+          if (built == null) return _clearMap();
 
-          mapRoutes = [
-            (points: [start, ...route, end], color: Colors.indigo),
-          ];
-          mapMarkers = [
-            (point: start, color: Colors.green),
-            (point: end, color: Colors.red),
-          ];
+          mapRoutes = built.routes;
+          mapMarkers = built.markers;
         }
       } else if (currentUserRole == 'driver') {
         if (showMatchingUI) {
@@ -1027,11 +1115,11 @@ class HomeViewModel extends ChangeNotifier {
           if (requestId != _routeFetchId) return;
 
           mapRoutes = [
-            (points: _getCurvedRoute(depart, arrival), color: Colors.indigo),
+            (points: _getCurvedRoute(depart, arrival), color: Colors.indigo, isTransit: false),
           ];
           mapMarkers = [
-            (point: depart, color: Colors.blue),
-            (point: arrival, color: Colors.orange),
+            (point: depart, color: Colors.blue, isSmallNode: false),
+            (point: arrival, color: Colors.orange, isSmallNode: false),
           ];
         } else {
           if (selectedSubscriptionId == null || activeSubscriptions.isEmpty) return _clearMap();
@@ -1054,20 +1142,20 @@ class HomeViewModel extends ChangeNotifier {
           if (requestId != _routeFetchId) return;
 
           mapRoutes = [
-            if (validDepart) (points: [depart, ...segments[0], pickup], color: AppColors.primaryYellow),
-            (points: [pickup, ...segments[1], dropoff], color: Colors.indigo),
-            if (validArrival) (points: [dropoff, ...segments[2], arrival], color: AppColors.primaryYellow),
+            if (validDepart) (points: [depart, ...segments[0], pickup], color: AppColors.primaryYellow, isTransit: false),
+            (points: [pickup, ...segments[1], dropoff], color: Colors.indigo, isTransit: false),
+            if (validArrival) (points: [dropoff, ...segments[2], arrival], color: AppColors.primaryYellow, isTransit: false),
           ];
           mapMarkers = [
-            if (validDepart) (point: depart, color: Colors.blue),
-            (point: pickup, color: Colors.green),
-            (point: dropoff, color: Colors.red),
-            if (validArrival) (point: arrival, color: Colors.orange),
+            if (validDepart) (point: depart, color: Colors.blue, isSmallNode: false),
+            (point: pickup, color: Colors.green, isSmallNode: false),
+            (point: dropoff, color: Colors.red, isSmallNode: false),
+            if (validArrival) (point: arrival, color: Colors.orange, isSmallNode: false),
           ];
         }
       }
     } catch (e) {
-      debugPrint('Error updating map route: $e');
+      debugPrint('⚠️ Error updating map route: $e');
     } finally {
       if (requestId == _routeFetchId) {
         isRouteLoading = false;
@@ -1076,45 +1164,237 @@ class HomeViewModel extends ChangeNotifier {
     }
   }
 
+  Future<({List<({List<LatLng> points, Color color, bool isTransit})> routes, List<({LatLng point, Color color, bool isSmallNode})> markers})?> _buildSubscriptionRoute(
+      Map<String, dynamic> sub,
+      ) async {
+    final legs = (sub['legs'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
+    if (legs.isEmpty) return null;
+
+    final isMultiDriver = legs.length > 1;
+    final routes = <({List<LatLng> points, Color color, bool isTransit})>[];
+    final markers = <({LatLng point, Color color, bool isSmallNode})>[];
+
+    const originColor = Colors.green;
+    const destinationColor = Colors.red;
+    const transferColor = Colors.deepPurple;
+    const transitColor = Colors.teal;
+    const walkColor = Colors.blueGrey;
+    const lastLegColor = Colors.indigo;
+
+    await GtfsService().initStations();
+
+    final passStart = FormatUtils.latLngFromMap(sub, 'pass_pickup_lat', 'pass_pickup_lng');
+    final passEnd = FormatUtils.latLngFromMap(sub, 'pass_dropoff_lat', 'pass_dropoff_lng');
+    final firstLegStart = FormatUtils.latLngFromMap(legs.first, 'pickup_lat', 'pickup_lng');
+    final lastLegEnd = FormatUtils.latLngFromMap(legs.last, 'dropoff_lat', 'dropoff_lng');
+
+    // Guard missing passenger coordinates before calculating gap distances
+    final startGapDist = (passStart.latitude != 0.0 && passStart.longitude != 0.0)
+        ? MatchingUtils.calculateDistance(passStart.latitude, passStart.longitude, firstLegStart.latitude, firstLegStart.longitude)
+        : 0.0;
+
+    final endGapDist = (passEnd.latitude != 0.0 && passEnd.longitude != 0.0)
+        ? MatchingUtils.calculateDistance(passEnd.latitude, passEnd.longitude, lastLegEnd.latitude, lastLegEnd.longitude)
+        : 0.0;
+
+    final isMixedRoute = isMultiDriver || startGapDist > 1500 || endGapDist > 1500;
+    final firstLegColor = isMixedRoute ? AppColors.primaryYellow : Colors.indigo;
+
+    // 1. GAP AT START
+    if (startGapDist > 100) {
+      if (startGapDist > 1500) {
+        final boardStation = TransitUtils.findNearestStation(passStart);
+        if (boardStation != null) {
+          final walkRoute = await _getCachedRoute(passStart, boardStation.location);
+          routes.add((points: [passStart, ...walkRoute, boardStation.location], color: walkColor, isTransit: false));
+          routes.add((points: [boardStation.location, firstLegStart], color: transitColor, isTransit: true));
+
+          markers.add((point: passStart, color: originColor, isSmallNode: false));
+          markers.add((point: boardStation.location, color: transferColor, isSmallNode: true));
+          markers.add((point: firstLegStart, color: transferColor, isSmallNode: true));
+        }
+      } else {
+        final walkRoute = await _getCachedRoute(passStart, firstLegStart);
+        routes.add((points: [passStart, ...walkRoute, firstLegStart], color: walkColor, isTransit: false));
+        markers.add((point: passStart, color: originColor, isSmallNode: false));
+        markers.add((point: firstLegStart, color: transferColor, isSmallNode: true));
+      }
+    } else {
+      markers.add((point: firstLegStart, color: originColor, isSmallNode: false));
+    }
+
+    // 2. DRIVER LEGS
+    LatLng? previousEnd;
+    for (int i = 0; i < legs.length; i++) {
+      final legStart = FormatUtils.latLngFromMap(legs[i], 'pickup_lat', 'pickup_lng');
+      final legEnd = FormatUtils.latLngFromMap(legs[i], 'dropoff_lat', 'dropoff_lng');
+
+      if (previousEnd != null && MatchingUtils.calculateDistance(previousEnd.latitude, previousEnd.longitude, legStart.latitude, legStart.longitude) > 100) {
+        routes.add((points: [previousEnd, legStart], color: transitColor, isTransit: true));
+        markers.add((point: legStart, color: transferColor, isSmallNode: true));
+      }
+
+      final route = await _getCachedRoute(legStart, legEnd);
+      routes.add((points: [legStart, ...route, legEnd], color: i == 0 ? firstLegColor : lastLegColor, isTransit: false));
+
+      final isLastLeg = (i == legs.length - 1);
+      if (isLastLeg) {
+        if (endGapDist <= 100) {
+          markers.add((point: legEnd, color: destinationColor, isSmallNode: false));
+        } else {
+          markers.add((point: legEnd, color: transferColor, isSmallNode: true));
+        }
+      } else {
+        markers.add((point: legEnd, color: transferColor, isSmallNode: true));
+      }
+      previousEnd = legEnd;
+    }
+
+    // 3. GAP AT END
+    if (endGapDist > 100 && previousEnd != null) {
+      if (endGapDist > 1500) {
+        final alightStation = TransitUtils.findNearestStation(passEnd);
+        if (alightStation != null) {
+          routes.add((points: [previousEnd, alightStation.location], color: transitColor, isTransit: true));
+          final walkRoute = await _getCachedRoute(alightStation.location, passEnd);
+          routes.add((points: [alightStation.location, ...walkRoute, passEnd], color: walkColor, isTransit: false));
+
+          markers.add((point: alightStation.location, color: transferColor, isSmallNode: true));
+          markers.add((point: passEnd, color: destinationColor, isSmallNode: false));
+        }
+      } else {
+        final walkRoute = await _getCachedRoute(previousEnd, passEnd);
+        routes.add((points: [previousEnd, ...walkRoute, passEnd], color: walkColor, isTransit: false));
+        markers.add((point: passEnd, color: destinationColor, isSmallNode: false));
+      }
+    }
+
+    return (routes: routes, markers: markers);
+  }
+
   List<Map<String, dynamic>> _mapSubscriptions(List<Map<String, dynamic>> rawSubs, {required bool isForPassenger}) {
-    return rawSubs.map((sub) {
-      final tripKey = isForPassenger ? 'driver_trips' : 'passenger_trips';
-      final myTripKey = isForPassenger ? 'passenger_trips' : 'driver_trips';
-      final defaultName = isForPassenger ? 'Unknown Driver' : 'Unknown Passenger';
-      final trip = sub[tripKey] ?? {};
-      final myTrip = sub[myTripKey] ?? {};
-      final user = trip['users'] ?? {};
-      final driverTrip = isForPassenger ? trip : (sub['driver_trips'] ?? {});
+    final legs = rawSubs.map((sub) => _mapSubscriptionLeg(sub, isForPassenger: isForPassenger)).toList();
 
-      // NEW: the "other party" trip only carries a nested users.id (no
-      // top-level user_id in these queries), while "my" trip does carry
-      // user_id directly since it's the !inner-joined, filtered side.
-      final driverId = sub['driver_id'] ?? (isForPassenger ? user['id'] : myTrip['user_id']);
-      final passengerId = sub['passenger_id'] ?? (isForPassenger ? myTrip['user_id'] : user['id']);
+    if (!isForPassenger) {
+      final sortedDriverLegs = legs.map((leg) => _wrapSubscriptionCard([leg])).toList();
+      sortedDriverLegs.sort((a, b) {
+        final dateA = DateTime.tryParse(a['created_at'] ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
+        final dateB = DateTime.tryParse(b['created_at'] ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
+        return dateB.compareTo(dateA);
+      });
+      return sortedDriverLegs;
+    }
 
-      return {
-        'id': sub['id'],
-        'trip_name': myTrip['trip_name'] ?? 'My Trip',
-        'passenger_trip_id': sub['passenger_trip_id'],
-        'driver_trip_id': sub['driver_trip_id'],
-        'driver_id': driverId,       // NEW
-        'passenger_id': passengerId, // NEW
-        'pickup_lat': sub['pickup_lat'],
-        'pickup_lng': sub['pickup_lng'],
-        'dropoff_lat': sub['dropoff_lat'],
-        'dropoff_lng': sub['dropoff_lng'],
-        'driver_depart_lat': driverTrip['depart_lat'],
-        'driver_depart_lng': driverTrip['depart_lng'],
-        'driver_arrival_lat': driverTrip['arrival_lat'],
-        'driver_arrival_lng': driverTrip['arrival_lng'],
-        'name': user['name'] ?? defaultName,
-        'phone': user['phone'] ?? 'N/A',
-        'imageUrl': user['avatar_url'],
-        'pickup_location': sub['pickup_location'] ?? 'Unknown',
-        'dropoff_location': sub['dropoff_location'] ?? 'Unknown',
-        'pickup_time': sub['pickup_time'] != null ? FormatUtils.formatSqlTimeToUI(sub['pickup_time']) : 'TBD',
-      };
+    final Map<String, List<Map<String, dynamic>>> grouped = {};
+    for (final leg in legs) {
+      final key = (leg['passenger_trip_id'] ?? leg['sub_id']).toString();
+      grouped.putIfAbsent(key, () => []).add(leg);
+    }
+
+    final result = grouped.values.map((groupLegs) {
+      groupLegs.sort((a, b) => (a['pickup_time_minutes'] as int).compareTo(b['pickup_time_minutes'] as int));
+      return _wrapSubscriptionCard(groupLegs);
     }).toList();
+
+    result.sort((a, b) {
+      final dateA = DateTime.tryParse(a['created_at'] ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final dateB = DateTime.tryParse(b['created_at'] ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
+      return dateB.compareTo(dateA);
+    });
+
+    return result;
+  }
+
+  Map<String, dynamic> _mapSubscriptionLeg(Map<String, dynamic> sub, {required bool isForPassenger}) {
+    final tripKey = isForPassenger ? 'driver_trips' : 'passenger_trips';
+    final myTripKey = isForPassenger ? 'passenger_trips' : 'driver_trips';
+    final defaultName = isForPassenger ? 'Unknown Driver' : 'Unknown Passenger';
+    final trip = sub[tripKey] ?? {};
+    final myTrip = sub[myTripKey] ?? {};
+    final user = trip['users'] ?? {};
+    final driverTrip = isForPassenger ? trip : (sub['driver_trips'] ?? {});
+
+    final driverId = sub['driver_id'] ?? (isForPassenger ? user['id'] : myTrip['user_id']);
+    final passengerId = sub['passenger_id'] ?? (isForPassenger ? myTrip['user_id'] : user['id']);
+
+    return {
+      'sub_id': sub['id'],
+      'created_at': sub['created_at'],
+      'is_completed_today': sub['is_completed_today'] ?? false,
+      'trip_name': myTrip['trip_name'] ?? 'My Trip',
+      'passenger_trip_id': sub['passenger_trip_id'],
+      'driver_trip_id': sub['driver_trip_id'],
+      'driver_id': driverId,
+      'passenger_id': passengerId,
+      'pickup_lat': sub['pickup_lat'],
+      'pickup_lng': sub['pickup_lng'],
+      'dropoff_lat': sub['dropoff_lat'],
+      'dropoff_lng': sub['dropoff_lng'],
+      'pass_pickup_lat': myTrip['pickup_lat'],
+      'pass_pickup_lng': myTrip['pickup_lng'],
+      'pass_dropoff_lat': myTrip['dropoff_lat'],
+      'pass_dropoff_lng': myTrip['dropoff_lng'],
+      'driver_depart_lat': driverTrip['depart_lat'],
+      'driver_depart_lng': driverTrip['depart_lng'],
+      'driver_arrival_lat': driverTrip['arrival_lat'],
+      'driver_arrival_lng': driverTrip['arrival_lng'],
+      'name': user['name'] ?? defaultName,
+      'phone': user['phone'] ?? 'N/A',
+      'imageUrl': user['avatar_url'],
+      'pickup_location': sub['pickup_location'] ?? 'Unknown',
+      'dropoff_location': sub['dropoff_location'] ?? 'Unknown',
+      'pickup_time': sub['pickup_time'] != null ? FormatUtils.formatSqlTimeToUI(sub['pickup_time']) : 'TBD',
+      'pickup_time_minutes': _safeSqlTimeToMinutes(sub['pickup_time']),
+    };
+  }
+
+  int _safeSqlTimeToMinutes(dynamic sqlTime) {
+    if (sqlTime == null) return 1 << 30;
+    try {
+      return FormatUtils.sqlTimeToMinutes(sqlTime);
+    } catch (_) {
+      return 1 << 30;
+    }
+  }
+
+  Map<String, dynamic> _wrapSubscriptionCard(List<Map<String, dynamic>> legs) {
+    final first = legs.first;
+    final last = legs.last;
+    final isMixed = legs.length > 1;
+
+    return {
+      'id': isMixed ? first['passenger_trip_id'].toString() : first['sub_id'],
+      'created_at': first['created_at'],
+      'sub_ids': legs.map((l) => l['sub_id']).toList(),
+      'passenger_trip_id': first['passenger_trip_id'],
+      'trip_name': first['trip_name'],
+      'is_mixed': isMixed,
+      'pickup_location': first['pickup_location'],
+      'dropoff_location': last['dropoff_location'],
+      'pickup_time': first['pickup_time'],
+      'pass_pickup_lat': first['pass_pickup_lat'],
+      'pass_pickup_lng': first['pass_pickup_lng'],
+      'pass_dropoff_lat': first['pass_dropoff_lat'],
+      'pass_dropoff_lng': first['pass_dropoff_lng'],
+      'legs': legs,
+      if (!isMixed) ...{
+        'driver_trip_id': first['driver_trip_id'],
+        'driver_id': first['driver_id'],
+        'passenger_id': first['passenger_id'],
+        'is_completed_today': first['is_completed_today'],
+        'pickup_lat': first['pickup_lat'],
+        'pickup_lng': first['pickup_lng'],
+        'dropoff_lat': first['dropoff_lat'],
+        'dropoff_lng': first['dropoff_lng'],
+        'driver_depart_lat': first['driver_depart_lat'],
+        'driver_depart_lng': first['driver_depart_lng'],
+        'driver_arrival_lat': first['driver_arrival_lat'],
+        'driver_arrival_lng': first['driver_arrival_lng'],
+        'name': first['name'],
+        'phone': first['phone'],
+        'imageUrl': first['imageUrl'],
+      },
+    };
   }
 
   List<LatLng> _getCurvedRoute(LatLng start, LatLng end, {int segments = 60}) {
@@ -1138,12 +1418,25 @@ class HomeViewModel extends ChangeNotifier {
 
   void _validateCurrentSelectedTrip() {
     if (availableTrips.isNotEmpty) {
-      // If the current selected trip is null or no longer exists in the new list, reset it to the first available trip
       if (currentSelectedTrip == null || !availableTrips.any((t) => t['id'] == currentSelectedTrip!['id'])) {
         currentSelectedTrip = availableTrips.first;
       }
     } else {
       currentSelectedTrip = null;
     }
+  }
+
+  Future<void> refreshHome() async {
+    showMatchingUI = false;
+    selectedSubscriptionId = null;
+    _matchingUiEpoch++;
+
+    _hasFoundDirect = false;
+    _hasFoundMixed = false;
+    hasExceptedTripsToday = false;
+    matchedDrivers.clear();
+    mixedMatchedRoutes.clear();
+
+    await fetchCurrentUser();
   }
 }

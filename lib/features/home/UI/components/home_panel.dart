@@ -16,6 +16,11 @@ import 'package:nak_tumpang/features/home/UI/components/no_need_fetch_panel.dart
 import 'package:nak_tumpang/features/subscriptions/UI/screens/subscription_detail_screen.dart';
 import 'package:nak_tumpang/core/utils/url_utils.dart';
 import 'package:nak_tumpang/features/subscriptions/data/services/subscription_supabase_service.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:nak_tumpang/core/utils/format_utils.dart';
+import 'package:nak_tumpang/core/utils/matching_utils.dart';
+import 'package:nak_tumpang/core/utils/transit_utils.dart';
+import 'package:nak_tumpang/features/negotiation/view_models/negotiation_view_model.dart';
 
 class HomePanel extends StatelessWidget {
   const HomePanel({super.key});
@@ -37,7 +42,12 @@ class HomePanel extends StatelessWidget {
           ),
           child: ListView(
             controller: scrollController,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            padding: EdgeInsets.only(
+              left: 16,
+              right: 16,
+              top: 12,
+              bottom: MediaQuery.of(context).padding.bottom + 32,
+            ),
             children: [
               Center(
                 child: Container(
@@ -54,7 +64,7 @@ class HomePanel extends StatelessWidget {
               // --- SINGLE SOURCE OF TRUTH: panel mode routing, then loading, then role-based view ---
               if (viewModel.panelMode == HomePanelMode.cantFetch && viewModel.selectedSubscription != null)
                 CantFetchPanel(
-                  tumpangSubscriptionId: viewModel.selectedSubscription!['id'] ?? '',
+                  tumpangSubscriptionId: viewModel.selectedSubscription!['sub_id'] ?? viewModel.selectedSubscription!['id'] ?? '',
                   driverId: viewModel.currentUserId ?? '',
                   passengerId: viewModel.selectedSubscription!['passenger_id'] ?? '',
                   passengerName: viewModel.selectedSubscription!['name'] ?? '',
@@ -68,7 +78,7 @@ class HomePanel extends StatelessWidget {
                 )
               else if (viewModel.panelMode == HomePanelMode.noNeedFetch && viewModel.selectedSubscription != null)
                 NoNeedFetchPanel(
-                  tumpangSubscriptionId: viewModel.selectedSubscription!['id'] ?? '',
+                  tumpangSubscriptionId: viewModel.selectedSubscription!['sub_id'] ?? viewModel.selectedSubscription!['id'] ?? '',
                   passengerId: viewModel.currentUserId ?? '',
                   driverId: viewModel.selectedSubscription!['driver_id'] ?? '',
                   driverName: viewModel.selectedSubscription!['name'] ?? '',
@@ -103,7 +113,7 @@ class HomePanel extends StatelessWidget {
   List<Widget> _buildDriverView(BuildContext context, HomeViewModel viewModel) {
     if (viewModel.activeSubscriptions.isNotEmpty) {
       return [
-        const Text('My Active Subscriptions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        const Text('My Active Tumpang Trips', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
         const SizedBox(height: 12),
         ..._buildSubscriptionList(context, viewModel, isDriver: true),
       ];
@@ -141,7 +151,7 @@ class HomePanel extends StatelessWidget {
 
   List<Widget> _buildPassengerSubscriptionView(BuildContext context, HomeViewModel viewModel) {
     return [
-      const Text('My Active Subscriptions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+      const Text('My Active Tumpang Trips', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
       const SizedBox(height: 12),
       ..._buildSubscriptionList(context, viewModel, isDriver: false),
       const SizedBox(height: 16),
@@ -168,7 +178,7 @@ class HomePanel extends StatelessWidget {
             child: TextButton.icon(
               onPressed: () => viewModel.toggleMatchingUI(false),
               icon: const Icon(Icons.arrow_back, color: AppColors.black, size: 20),
-              label: const Text('Back to Subscriptions', style: TextStyle(color: AppColors.black, fontWeight: FontWeight.bold, fontSize: 13)),
+              label: const Text('Back to Active Trips', style: TextStyle(color: AppColors.black, fontWeight: FontWeight.bold, fontSize: 13)),
             ),
           ),
         ),
@@ -231,14 +241,18 @@ class HomePanel extends StatelessWidget {
                         if (!context.mounted) return;
                         if (requestId != null) {
                           viewModel.markDriverRequestedGlobally([driver['trip_id']]);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Request sent!'), backgroundColor: Colors.green),
-                          );
-                          Navigator.push(context, MaterialPageRoute(builder: (_) => NegotiationScreen(requestId: requestId)));
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Request sent!'), backgroundColor: Colors.green));
+
+                          try {
+                            context.read<NegotiationViewModel>().refreshRequests();
+                          } catch (_) {}
+
+                          await Navigator.push(context, MaterialPageRoute(builder: (_) => NegotiationScreen(requestId: requestId)));
+                          if (context.mounted) {
+                            await viewModel.refreshHome();
+                          }
                         } else {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Failed to send request.'), backgroundColor: Colors.red),
-                          );
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to send request.'), backgroundColor: Colors.red));
                         }
                       },
                     ),
@@ -378,6 +392,10 @@ class HomePanel extends StatelessWidget {
                           return;
                         }
 
+                        try {
+                          context.read<NegotiationViewModel>().refreshRequests();
+                        } catch (_) {}
+
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
                             content: Text(
@@ -388,7 +406,10 @@ class HomePanel extends StatelessWidget {
                             backgroundColor: anyFailed ? Colors.orange : Colors.green,
                           ),
                         );
-                        Navigator.push(context, MaterialPageRoute(builder: (_) => NegotiationScreen(requestId: firstRequestId!)));
+                        await Navigator.push(context, MaterialPageRoute(builder: (_) => NegotiationScreen(requestId: firstRequestId!)));
+                        if (context.mounted) {
+                          await viewModel.refreshHome();
+                        }
                       },
                     ),
                     if (index != viewModel.mixedMatchedRoutes.length - 1)
@@ -429,7 +450,7 @@ class HomePanel extends StatelessWidget {
         children: [
           Text(
             viewModel.availableTrips.isEmpty
-                ? 'You have no trips to match.'
+                ? (viewModel.hasExceptedTripsToday ? 'Your active trip is paused for today.' : 'You have no trips to match.')
                 : 'No trip is selected.\nSelect one from the dropdown, or',
             textAlign: TextAlign.center,
             style: const TextStyle(color: AppColors.greyText, fontSize: 14, height: 1.4),
@@ -462,102 +483,266 @@ class HomePanel extends StatelessWidget {
   List<Widget> _buildSubscriptionList(BuildContext context, HomeViewModel viewModel, {required bool isDriver}) {
     return List.generate(viewModel.activeSubscriptions.length, (index) {
       final sub = viewModel.activeSubscriptions[index];
-      final bool isCompletedToday = sub['is_completed_today'] ?? false;
+      final legs = _buildJourneyLegs(context, viewModel, sub, isDriver: isDriver);
 
       return Column(
         children: [
           ActiveSubscriptionCard(
             tripName: sub['trip_name'],
-            name: sub['name'],
-            imageUrl: sub['imageUrl'],
-            pickupLocation: sub['pickup_location'],
-            dropoffLocation: sub['dropoff_location'],
-            time: sub['pickup_time'],
-            exceptionButtonText: isDriver ? "Can't fetch at..." : 'No need tumpang at...',
             isSelected: viewModel.selectedSubscriptionId == sub['id'],
             onTap: () => viewModel.selectSubscription(sub['id']),
-            onCallPressed: () => UrlUtils.makePhoneCall(sub['phone']),
-            onDetailsPressed: () async {
-              showDialog(
-                context: context,
-                barrierDismissible: false,
-                builder: (ctx) => const Center(child: CircularProgressIndicator(color: AppColors.primaryYellow)),
-              );
-
-              final fullSubscription = await SubscriptionSupabaseService().fetchSubscriptionById(
-                sub['id'],
-                viewModel.currentUserRole,
-              );
-
-              if (context.mounted) Navigator.pop(context); // close loader
-
-              if (fullSubscription == null) {
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Could not load subscription details.'), backgroundColor: Colors.red),
-                  );
-                }
-                return;
-              }
-
-              if (context.mounted) {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => SubscriptionDetailScreen(
-                      currentUserId: viewModel.currentUserId ?? '',
-                      role: viewModel.currentUserRole,
-                      subscription: fullSubscription,
-                    ),
-                  ),
-                );
-              }
-            },
-            onExceptionPressed: () {
-              if (isDriver) {
-                viewModel.openCantFetchPanel(sub);
-              } else {
-                viewModel.openNoNeedFetchPanel(sub);
-              }
-            },
-            isCompletedToday: isCompletedToday,
-            onCompleteTripPressed: (isDriver && !isCompletedToday) ? () async {
-              final confirmed = await showDialog<bool>(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  title: const Text('Complete Trip?'),
-                  content: const Text(
-                    'Mark today\'s tumpang as completed? Both you and the passenger will earn reward points.',
-                  ),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-                    TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Confirm')),
-                  ],
-                ),
-              );
-              if (confirmed == true) {
-                final success = await viewModel.completeTrip(
-                  subscriptionId: sub['id'],
-                  driverId: sub['driver_id'],
-                  passengerId: sub['passenger_id'],
-                  pickupLat: sub['pickup_lat'] ?? 0.0,
-                  pickupLng: sub['pickup_lng'] ?? 0.0,
-                  dropoffLat: sub['dropoff_lat'] ?? 0.0,
-                  dropoffLng: sub['dropoff_lng'] ?? 0.0,
-                );
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(success ? 'Trip completed! Points awarded.' : 'Failed to complete trip.')),
-                  );
-                }
-                await viewModel.fetchCurrentUser();
-              }
-            } : null,
+            legs: legs,
           ),
           if (index != viewModel.activeSubscriptions.length - 1)
             const SizedBox(height: 12),
         ],
       );
     });
+  }
+
+  List<ActiveSubscriptionLeg> _buildJourneyLegs(BuildContext context, HomeViewModel viewModel, Map<String, dynamic> sub, {required bool isDriver}) {
+    final driverLegsData = (sub['legs'] as List).cast<Map<String, dynamic>>();
+
+    if (isDriver) {
+      return driverLegsData.map((leg) {
+        return ActiveSubscriptionLeg(
+          type: LegType.driver,
+          name: leg['name'],
+          imageUrl: leg['imageUrl'],
+          pickupLocation: leg['pickup_location'],
+          dropoffLocation: leg['dropoff_location'],
+          time: leg['pickup_time'],
+          exceptionButtonText: "Can't fetch at...",
+          onCallPressed: () => UrlUtils.makePhoneCall(leg['phone']),
+          onDetailsPressed: () async {
+            showDialog(
+              context: context,
+              barrierDismissible: false,
+              builder: (ctx) => const Center(child: CircularProgressIndicator(color: AppColors.primaryYellow)),
+            );
+
+            final fullSubscription = await SubscriptionSupabaseService().fetchSubscriptionById(
+              leg['sub_id'] ?? leg['id'],
+              viewModel.currentUserRole,
+            );
+
+            if (context.mounted) Navigator.pop(context);
+
+            if (fullSubscription == null) {
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Could not load subscription details.'), backgroundColor: Colors.red),
+                );
+              }
+              return;
+            }
+
+            if (context.mounted) {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => SubscriptionDetailScreen(
+                    currentUserId: viewModel.currentUserId ?? '',
+                    role: viewModel.currentUserRole,
+                    subscription: fullSubscription,
+                  ),
+                ),
+              );
+            }
+          },
+          onExceptionPressed: () => viewModel.openCantFetchPanel(leg),
+          isCompletedToday: leg['is_completed_today'] ?? false,
+          onCompleteTripPressed: !(leg['is_completed_today'] ?? false) ? () async {
+            final confirmed = await showDialog<bool>(
+              context: context,
+              builder: (ctx) => AlertDialog(
+                title: const Text('Complete Trip?'),
+                content: const Text(
+                  'Mark today\'s tumpang as completed? Both you and the passenger will earn reward points.',
+                ),
+                actions: [
+                  TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                  TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Confirm')),
+                ],
+              ),
+            );
+            if (confirmed == true) {
+              final success = await viewModel.completeTrip(
+                subscriptionId: leg['sub_id'] ?? leg['id'],
+                driverId: leg['driver_id'] ?? viewModel.currentUserId ?? '',
+                passengerId: leg['passenger_id'] ?? '',
+                pickupLat: FormatUtils.parseDouble(leg['pickup_lat']),
+                pickupLng: FormatUtils.parseDouble(leg['pickup_lng']),
+                dropoffLat: FormatUtils.parseDouble(leg['dropoff_lat']),
+                dropoffLng: FormatUtils.parseDouble(leg['dropoff_lng']),
+              );
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(success ? 'Trip completed! Points awarded.' : 'Failed to complete trip.')),
+                );
+              }
+              await viewModel.fetchCurrentUser();
+            }
+          } : null,
+        );
+      }).toList();
+    }
+
+    final result = <ActiveSubscriptionLeg>[];
+
+    final passStartLat = FormatUtils.parseDouble(sub['pass_pickup_lat'] ?? 0);
+    final passStartLng = FormatUtils.parseDouble(sub['pass_pickup_lng'] ?? 0);
+    final passEndLat = FormatUtils.parseDouble(sub['pass_dropoff_lat'] ?? 0);
+    final passEndLng = FormatUtils.parseDouble(sub['pass_dropoff_lng'] ?? 0);
+
+    final passStart = LatLng(passStartLat, passStartLng);
+    final passEnd = LatLng(passEndLat, passEndLng);
+
+    final firstDriverLat = FormatUtils.parseDouble(driverLegsData.first['pickup_lat']);
+    final firstDriverLng = FormatUtils.parseDouble(driverLegsData.first['pickup_lng']);
+    final lastDriverLat = FormatUtils.parseDouble(driverLegsData.last['dropoff_lat']);
+    final lastDriverLng = FormatUtils.parseDouble(driverLegsData.last['dropoff_lng']);
+
+    // Guard missing passenger coordinates before calculating gap distances
+    final startGapDist = (passStart.latitude != 0.0 && passStart.longitude != 0.0)
+        ? MatchingUtils.calculateDistance(passStart.latitude, passStart.longitude, firstDriverLat, firstDriverLng)
+        : 0.0;
+
+    final endGapDist = (passEnd.latitude != 0.0 && passEnd.longitude != 0.0)
+        ? MatchingUtils.calculateDistance(passEnd.latitude, passEnd.longitude, lastDriverLat, lastDriverLng)
+        : 0.0;
+
+    if (startGapDist > 100) {
+      if (startGapDist > 1500) {
+        final boardStation = TransitUtils.findNearestStation(passStart);
+        if (boardStation != null) {
+          result.add(ActiveSubscriptionLeg(
+            type: LegType.walk,
+            name: 'Walk',
+            pickupLocation: 'Origin',
+            dropoffLocation: boardStation.name,
+            time: '',
+          ));
+          result.add(ActiveSubscriptionLeg(
+            type: LegType.transit,
+            name: 'Train',
+            pickupLocation: boardStation.name,
+            dropoffLocation: driverLegsData.first['pickup_location'],
+            time: '',
+          ));
+        }
+      } else {
+        result.add(ActiveSubscriptionLeg(
+          type: LegType.walk,
+          name: 'Walk',
+          pickupLocation: 'Origin',
+          dropoffLocation: driverLegsData.first['pickup_location'],
+          time: '',
+        ));
+      }
+    }
+
+    for (int i = 0; i < driverLegsData.length; i++) {
+      final leg = driverLegsData[i];
+
+      if (i > 0) {
+        final prevLat = FormatUtils.parseDouble(driverLegsData[i - 1]['dropoff_lat']);
+        final prevLng = FormatUtils.parseDouble(driverLegsData[i - 1]['dropoff_lng']);
+        final currentLat = FormatUtils.parseDouble(leg['pickup_lat']);
+        final currentLng = FormatUtils.parseDouble(leg['pickup_lng']);
+
+        if (MatchingUtils.calculateDistance(prevLat, prevLng, currentLat, currentLng) > 100) {
+          result.add(ActiveSubscriptionLeg(
+            type: LegType.transit,
+            name: 'Train',
+            pickupLocation: driverLegsData[i - 1]['dropoff_location'],
+            dropoffLocation: leg['pickup_location'],
+            time: '',
+          ));
+        }
+      }
+
+      result.add(ActiveSubscriptionLeg(
+        type: LegType.driver,
+        name: leg['name'],
+        imageUrl: leg['imageUrl'],
+        pickupLocation: leg['pickup_location'],
+        dropoffLocation: leg['dropoff_location'],
+        time: leg['pickup_time'],
+        exceptionButtonText: 'No need tumpang at...',
+        onCallPressed: () => UrlUtils.makePhoneCall(leg['phone']),
+        onDetailsPressed: () async {
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (ctx) => const Center(child: CircularProgressIndicator(color: AppColors.primaryYellow)),
+          );
+
+          final fullSubscription = await SubscriptionSupabaseService().fetchSubscriptionById(
+            leg['sub_id'] ?? leg['id'],
+            viewModel.currentUserRole,
+          );
+
+          if (context.mounted) Navigator.pop(context);
+
+          if (fullSubscription == null) {
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Could not load subscription details.'), backgroundColor: Colors.red),
+              );
+            }
+            return;
+          }
+
+          if (context.mounted) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => SubscriptionDetailScreen(
+                  currentUserId: viewModel.currentUserId ?? '',
+                  role: viewModel.currentUserRole,
+                  subscription: fullSubscription,
+                ),
+              ),
+            );
+          }
+        },
+        onExceptionPressed: () => viewModel.openNoNeedFetchPanel(leg),
+        isCompletedToday: false, // Passengers don't complete trips, drivers do
+        onCompleteTripPressed: null,
+      ));
+    }
+
+    if (endGapDist > 100) {
+      if (endGapDist > 1500) {
+        final alightStation = TransitUtils.findNearestStation(passEnd);
+        if (alightStation != null) {
+          result.add(ActiveSubscriptionLeg(
+            type: LegType.transit,
+            name: 'Train',
+            pickupLocation: driverLegsData.last['dropoff_location'],
+            dropoffLocation: alightStation.name,
+            time: '',
+          ));
+          result.add(ActiveSubscriptionLeg(
+            type: LegType.walk,
+            name: 'Walk',
+            pickupLocation: alightStation.name,
+            dropoffLocation: 'Destination',
+            time: '',
+          ));
+        }
+      } else {
+        result.add(ActiveSubscriptionLeg(
+          type: LegType.walk,
+          name: 'Walk',
+          pickupLocation: driverLegsData.last['dropoff_location'],
+          dropoffLocation: 'Destination',
+          time: '',
+        ));
+      }
+    }
+
+    return result;
   }
 }
