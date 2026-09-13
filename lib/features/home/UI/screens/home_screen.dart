@@ -355,7 +355,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 polylines: viewModel.mapRoutes.map((routeData) {
                   return Polyline(
                     points: routeData.points,
-                    strokeWidth: 5.0,
+                    // Draw a slightly thinner line for the train transit leg
+                    strokeWidth: routeData.isTransit ? 3.5 : 5.0,
                     color: routeData.color,
                     strokeJoin: StrokeJoin.round,
                     strokeCap: StrokeCap.round,
@@ -368,13 +369,21 @@ class _HomeScreenState extends State<HomeScreen> {
                   ...viewModel.mapMarkers.map((markerData) {
                     return Marker(
                       point: markerData.point,
-                      width: 32,
-                      height: 40,
-                      // Center the bounding box exactly on the coordinate
+                      // Shrink the bounding box if it's a small connection node
+                      width: markerData.isSmallNode ? 16.0 : 32.0,
+                      height: markerData.isSmallNode ? 16.0 : 40.0,
                       alignment: Alignment.center,
-                      // --- FIXED: Manually push the drawing UP by half its height (20px)
-                      // so the bottom tip perfectly hits the line endpoint ---
-                      child: Transform.translate(
+                      child: markerData.isSmallNode
+                      // Draw the small connection circle [-o-] centered exactly on the coordinate
+                          ? Container(
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: markerData.color, width: 4.0),
+                        ),
+                      )
+                      // Draw the standard large pin, pushed up so its tip hits the coordinate
+                          : Transform.translate(
                         offset: const Offset(0, -20),
                         child: MapPin(color: markerData.color),
                       ),
@@ -397,6 +406,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                     ),
+
                 ],
               ),
             ],
