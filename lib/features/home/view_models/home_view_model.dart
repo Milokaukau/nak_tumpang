@@ -49,8 +49,9 @@ class HomeViewModel extends ChangeNotifier {
   int _userFetchId = 0;
   String? _lastLoadedUserId;
 
-  int currentDirectLimit = 5;
-  int currentMixedLimit = 5;
+  // --- CAPPED AT 4 ---
+  int currentDirectLimit = 4;
+  int currentMixedLimit = 4;
   bool hasMoreDirect = false;
   bool hasMoreMixed = false;
 
@@ -66,10 +67,6 @@ class HomeViewModel extends ChangeNotifier {
   List<({LatLng point, Color color, bool isSmallNode})> mapMarkers = [];
 
   final Map<String, List<LatLng>> _routeCache = {};
-
-  // ==========================================
-  // EXCEPTION PANEL (can't fetch / no need fetch)
-  // ==========================================
 
   HomePanelMode panelMode = HomePanelMode.none;
 
@@ -209,7 +206,7 @@ class HomeViewModel extends ChangeNotifier {
 
   void loadMoreDirect() {
     if (isDirectLoadingMore) return;
-    currentDirectLimit += 5;
+    currentDirectLimit += 4; // CAPPED AT 4
     isDirectLoadingMore = true;
     notifyListeners();
     _findDirectDrivers();
@@ -217,7 +214,7 @@ class HomeViewModel extends ChangeNotifier {
 
   void loadMoreMixed() {
     if (isMixedLoadingMore) return;
-    currentMixedLimit += 5;
+    currentMixedLimit += 4; // CAPPED AT 4
     isMixedLoadingMore = true;
     notifyListeners();
     _findMixedRoutes();
@@ -355,8 +352,8 @@ class HomeViewModel extends ChangeNotifier {
 
     if (currentSelectedTrip?['id'] == trip['id']) {
       currentSelectedTrip = trip;
-      currentDirectLimit = 5;
-      currentMixedLimit = 5;
+      currentDirectLimit = 4;
+      currentMixedLimit = 4;
       isDirectLoadingMore = false;
       isMixedLoadingMore = false;
       hasMoreDirect = false;
@@ -377,8 +374,8 @@ class HomeViewModel extends ChangeNotifier {
     availableTrips.removeWhere((t) => t['id'] == tripId);
     if (currentSelectedTrip?['id'] == tripId) {
       currentSelectedTrip = availableTrips.isNotEmpty ? availableTrips.first : null;
-      currentDirectLimit = 5;
-      currentMixedLimit = 5;
+      currentDirectLimit = 4;
+      currentMixedLimit = 4;
       isDirectLoadingMore = false;
       isMixedLoadingMore = false;
       hasMoreDirect = false;
@@ -393,33 +390,30 @@ class HomeViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  // --- NEW: Added 'profile' parameter to generate accurate walking paths ---
   Future<List<LatLng>> _getCachedRoute(LatLng start, LatLng end, {String profile = 'driving-car'}) async {
     final cacheKey = '${profile}_${start.latitude},${start.longitude}-${end.latitude},${end.longitude}';
     if (_routeCache.containsKey(cacheKey)) return _routeCache[cacheKey]!;
 
-    while (true) {
-      if (NetworkService.isOfflineNotifier.value) {
-        // Genuinely offline — don't spin forever, use the straight-line fallback.
-        return [start, end];
-      }
+    if (NetworkService.isOfflineNotifier.value) return [];
 
+    for (int attempt = 0; attempt < 3; attempt++) {
       try {
         final route = await _orsService.getRoute(start, end, profile: profile);
-        if (route.isEmpty) {
-          // ORS can return [] on bad API key / non-200 / caught errors without throwing.
-          // Treat that the same as a failure — retry instead of caching a dead result.
-          debugPrint('⚠️ Route fetch returned empty for $profile — retrying...');
-          await Future.delayed(const Duration(milliseconds: 800));
-          continue;
+
+        if (route.isNotEmpty) {
+          _routeCache[cacheKey] = route;
+          return route;
         }
-        _routeCache[cacheKey] = route;
-        return route;
+        debugPrint('⚠️ Route fetch empty for $profile (Attempt ${attempt + 1}/3)');
       } catch (e) {
-        debugPrint('⚠️ Route fetch failed for $profile: $e — retrying...');
-        await Future.delayed(const Duration(milliseconds: 800));
+        debugPrint('⚠️ Route fetch error for $profile: $e (Attempt ${attempt + 1}/3)');
       }
+
+      if (attempt < 2) await Future.delayed(const Duration(milliseconds: 600));
     }
+
+    debugPrint('❌ Max retries reached. Returning empty route to prevent inaccurate matches.');
+    return [];
   }
 
   void toggleMatchingUI(bool show) {
@@ -531,8 +525,8 @@ class HomeViewModel extends ChangeNotifier {
     _hasFoundMixed = false;
     hasExceptedTripsToday = false;
 
-    currentDirectLimit = 5;
-    currentMixedLimit = 5;
+    currentDirectLimit = 4;
+    currentMixedLimit = 4;
     isDirectLoading = false;
     isMixedLoading = false;
     isDirectLoadingMore = false;
@@ -702,8 +696,8 @@ class HomeViewModel extends ChangeNotifier {
       final selected = availableTrips.firstWhere((t) => t['id'] == tripId);
       currentSelectedTrip = selected;
 
-      currentDirectLimit = 5;
-      currentMixedLimit = 5;
+      currentDirectLimit = 4;
+      currentMixedLimit = 4;
       isDirectLoadingMore = false;
       isMixedLoadingMore = false;
       hasMoreDirect = false;
@@ -756,6 +750,7 @@ class HomeViewModel extends ChangeNotifier {
       List<Map<String, dynamic>> tempMatchedDrivers = [];
       int matchCount = 0;
       bool moreAvailable = false;
+      int orsFailuresThisRun = 0; // Track total full failures
 
       for (int i = 0; i < driverTrips.length; i++) {
         if (_fetchId != currentFetchId) return;
@@ -786,6 +781,16 @@ class HomeViewModel extends ChangeNotifier {
         try {
           final driverRoute = await _getCachedRoute(drivStart, drivEnd);
           if (_fetchId != currentFetchId) return;
+
+          if (driverRoute.isEmpty) {
+            orsFailuresThisRun++;
+            if (orsFailuresThisRun >= 4) {
+              debugPrint('🛑 Stopping search: ORS failed completely 4 times.');
+              moreAvailable = true;
+              break;
+            }
+            continue;
+          }
 
           if (MatchingUtils.isRouteMatch(passPick, passDrop, driverRoute, 800)) {
             tempMatchedDrivers.add({
@@ -904,6 +909,7 @@ class HomeViewModel extends ChangeNotifier {
       }
 
       int validDriversFound = 0;
+      int orsFailuresThisRun = 0; // Track total full failures
 
       for (int i = 0; i < driverTrips.length; i++) {
         if (_fetchId != currentFetchId) return;
@@ -921,54 +927,57 @@ class HomeViewModel extends ChangeNotifier {
         bool foundAny = false;
 
         try {
-          if ((drivTime - passTime).abs() <= 30) {
-            final pickDist = MatchingUtils.calculateDistance(passPick.latitude, passPick.longitude, drivStart.latitude, drivStart.longitude);
-            final dropDistToStation = MatchingUtils.calculateDistance(pickStation.location.latitude, pickStation.location.longitude, drivEnd.latitude, drivEnd.longitude);
+          final pickDist = MatchingUtils.calculateDistance(passPick.latitude, passPick.longitude, drivStart.latitude, drivStart.longitude);
+          final dropDistToStation = MatchingUtils.calculateDistance(pickStation.location.latitude, pickStation.location.longitude, drivEnd.latitude, drivEnd.longitude);
+          final pickDistFromStation = MatchingUtils.calculateDistance(dropStation.location.latitude, dropStation.location.longitude, drivStart.latitude, drivStart.longitude);
+          final dropDistToDest = MatchingUtils.calculateDistance(passDrop.latitude, passDrop.longitude, drivEnd.latitude, drivEnd.longitude);
 
-            if (pickDist <= 15000 && dropDistToStation <= 15000) {
-              final driverRoute = await _getCachedRoute(drivStart, drivEnd);
-              if (_fetchId != currentFetchId) return;
+          bool potentialFirstMile = ((drivTime - passTime).abs() <= 30) && (pickDist <= 15000 && dropDistToStation <= 15000);
+          bool potentialLastMile = (drivTime > passTime) && (pickDistFromStation <= 15000 && dropDistToDest <= 15000);
 
-              if (MatchingUtils.isRouteMatch(passPick, pickStation.location, driverRoute, 800)) {
-                final routeDistToStation = MatchingUtils.calculateDistance(passPick.latitude, passPick.longitude, pickStation.location.latitude, pickStation.location.longitude);
-                final driveMinsToStation = (routeDistToStation / 400).ceil();
+          if (potentialFirstMile || potentialLastMile) {
+            final driverRoute = await _getCachedRoute(drivStart, drivEnd);
+            if (_fetchId != currentFetchId) return;
 
-                firstMileOptions.add({
-                  'type': 'Driver',
-                  'driver_id': driverTrip['user_id'],
-                  'trip_id': driverTrip['id'],
-                  'driver_name': driverName,
-                  'depart_time': FormatUtils.formatSqlTimeToUI(driverTrip['depart_time']),
-                  'depart_time_sql': driverTrip['depart_time'],
-                  'distance_km': pickDist / 1000,
-                  'arrival_at_board_station': drivTime + driveMinsToStation,
-                });
-                foundAny = true;
+            if (driverRoute.isEmpty) {
+              orsFailuresThisRun++;
+              if (orsFailuresThisRun >= 4) {
+                debugPrint('🛑 Stopping search: ORS failed completely 4 times.');
+                moreAvailable = true;
+                break;
               }
+              continue;
             }
-          }
 
-          if (drivTime > passTime) {
-            final pickDistFromStation = MatchingUtils.calculateDistance(dropStation.location.latitude, dropStation.location.longitude, drivStart.latitude, drivStart.longitude);
-            final dropDistToDest = MatchingUtils.calculateDistance(passDrop.latitude, passDrop.longitude, drivEnd.latitude, drivEnd.longitude);
+            if (potentialFirstMile && MatchingUtils.isRouteMatch(passPick, pickStation.location, driverRoute, 800)) {
+              final routeDistToStation = MatchingUtils.calculateDistance(passPick.latitude, passPick.longitude, pickStation.location.latitude, pickStation.location.longitude);
+              final driveMinsToStation = (routeDistToStation / 400).ceil();
 
-            if (pickDistFromStation <= 15000 && dropDistToDest <= 15000) {
-              final driverRoute = await _getCachedRoute(drivStart, drivEnd);
-              if (_fetchId != currentFetchId) return;
+              firstMileOptions.add({
+                'type': 'Driver',
+                'driver_id': driverTrip['user_id'],
+                'trip_id': driverTrip['id'],
+                'driver_name': driverName,
+                'depart_time': FormatUtils.formatSqlTimeToUI(driverTrip['depart_time']),
+                'depart_time_sql': driverTrip['depart_time'],
+                'distance_km': pickDist / 1000,
+                'arrival_at_board_station': drivTime + driveMinsToStation,
+              });
+              foundAny = true;
+            }
 
-              if (MatchingUtils.isRouteMatch(dropStation.location, passDrop, driverRoute, 800)) {
-                lastMileOptions.add({
-                  'type': 'Driver',
-                  'driver_id': driverTrip['user_id'],
-                  'trip_id': driverTrip['id'],
-                  'driver_name': driverName,
-                  'depart_time': FormatUtils.formatSqlTimeToUI(driverTrip['depart_time']),
-                  'depart_time_sql': driverTrip['depart_time'],
-                  'depart_time_mins': drivTime,
-                  'distance_km': pickDistFromStation / 1000,
-                });
-                foundAny = true;
-              }
+            if (potentialLastMile && MatchingUtils.isRouteMatch(dropStation.location, passDrop, driverRoute, 800)) {
+              lastMileOptions.add({
+                'type': 'Driver',
+                'driver_id': driverTrip['user_id'],
+                'trip_id': driverTrip['id'],
+                'driver_name': driverName,
+                'depart_time': FormatUtils.formatSqlTimeToUI(driverTrip['depart_time']),
+                'depart_time_sql': driverTrip['depart_time'],
+                'depart_time_mins': drivTime,
+                'distance_km': pickDistFromStation / 1000,
+              });
+              foundAny = true;
             }
           }
 
@@ -1163,9 +1172,9 @@ class HomeViewModel extends ChangeNotifier {
           if (requestId != _routeFetchId) return;
 
           mapRoutes = [
-            if (validDepart) (points: [depart, ...segments[0], pickup], color: Colors.blue, isTransit: false), // Changed from yellow
+            if (validDepart) (points: [depart, ...segments[0], pickup], color: Colors.blue, isTransit: false),
             (points: [pickup, ...segments[1], dropoff], color: Colors.indigo, isTransit: false),
-            if (validArrival) (points: [dropoff, ...segments[2], arrival], color: Colors.blue, isTransit: false), // Changed from yellow
+            if (validArrival) (points: [dropoff, ...segments[2], arrival], color: Colors.blue, isTransit: false),
           ];
           mapMarkers = [
             if (validDepart) (point: depart, color: Colors.blue, isSmallNode: false),
@@ -1209,7 +1218,6 @@ class HomeViewModel extends ChangeNotifier {
     final firstLegStart = FormatUtils.latLngFromMap(legs.first, 'pickup_lat', 'pickup_lng');
     final lastLegEnd = FormatUtils.latLngFromMap(legs.last, 'dropoff_lat', 'dropoff_lng');
 
-    // Guard missing passenger coordinates before calculating gap distances
     final startGapDist = (passStart.latitude != 0.0 && passStart.longitude != 0.0)
         ? MatchingUtils.calculateDistance(passStart.latitude, passStart.longitude, firstLegStart.latitude, firstLegStart.longitude)
         : 0.0;
@@ -1219,7 +1227,7 @@ class HomeViewModel extends ChangeNotifier {
         : 0.0;
 
     final isMixedRoute = isMultiDriver || startGapDist > 1500 || endGapDist > 1500;
-    final firstLegColor = isMixedRoute ? Colors.blue : Colors.indigo; // Changed from yellow
+    final firstLegColor = isMixedRoute ? Colors.blue : Colors.indigo;
 
     // 1. GAP AT START
     if (startGapDist > 100) {
