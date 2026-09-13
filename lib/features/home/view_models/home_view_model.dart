@@ -180,7 +180,6 @@ class HomeViewModel extends ChangeNotifier {
         reason: reasonText,
       );
 
-      // --- FIXED: Instantly refresh the UI if the exception is successfully filed! ---
       if (success) {
         closeExceptionPanel();
         await refreshHome();
@@ -393,12 +392,19 @@ class HomeViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<List<LatLng>> _getCachedRoute(LatLng start, LatLng end) async {
-    final cacheKey = '${start.latitude},${start.longitude}-${end.latitude},${end.longitude}';
+  // --- NEW: Added 'profile' parameter to generate accurate walking paths ---
+  Future<List<LatLng>> _getCachedRoute(LatLng start, LatLng end, {String profile = 'driving-car'}) async {
+    final cacheKey = '${profile}_${start.latitude},${start.longitude}-${end.latitude},${end.longitude}';
     if (_routeCache.containsKey(cacheKey)) return _routeCache[cacheKey]!;
-    final route = await _orsService.getRoute(start, end);
-    _routeCache[cacheKey] = route;
-    return route;
+
+    try {
+      final route = await _orsService.getRoute(start, end, profile: profile);
+      _routeCache[cacheKey] = route;
+      return route;
+    } catch (e) {
+      debugPrint('⚠️ Route fetch failed for $profile: $e');
+      return [start, end]; // Fallback to a straight line on failure so map doesn't crash
+    }
   }
 
   void toggleMatchingUI(bool show) {
@@ -1205,7 +1211,7 @@ class HomeViewModel extends ChangeNotifier {
       if (startGapDist > 1500) {
         final boardStation = TransitUtils.findNearestStation(passStart);
         if (boardStation != null) {
-          final walkRoute = await _getCachedRoute(passStart, boardStation.location);
+          final walkRoute = await _getCachedRoute(passStart, boardStation.location, profile: 'foot-walking');
           routes.add((points: [passStart, ...walkRoute, boardStation.location], color: walkColor, isTransit: false));
           routes.add((points: [boardStation.location, firstLegStart], color: transitColor, isTransit: true));
 
@@ -1214,7 +1220,7 @@ class HomeViewModel extends ChangeNotifier {
           markers.add((point: firstLegStart, color: transferColor, isSmallNode: true));
         }
       } else {
-        final walkRoute = await _getCachedRoute(passStart, firstLegStart);
+        final walkRoute = await _getCachedRoute(passStart, firstLegStart, profile: 'foot-walking');
         routes.add((points: [passStart, ...walkRoute, firstLegStart], color: walkColor, isTransit: false));
         markers.add((point: passStart, color: originColor, isSmallNode: false));
         markers.add((point: firstLegStart, color: transferColor, isSmallNode: true));
@@ -1256,14 +1262,14 @@ class HomeViewModel extends ChangeNotifier {
         final alightStation = TransitUtils.findNearestStation(passEnd);
         if (alightStation != null) {
           routes.add((points: [previousEnd, alightStation.location], color: transitColor, isTransit: true));
-          final walkRoute = await _getCachedRoute(alightStation.location, passEnd);
+          final walkRoute = await _getCachedRoute(alightStation.location, passEnd, profile: 'foot-walking');
           routes.add((points: [alightStation.location, ...walkRoute, passEnd], color: walkColor, isTransit: false));
 
           markers.add((point: alightStation.location, color: transferColor, isSmallNode: true));
           markers.add((point: passEnd, color: destinationColor, isSmallNode: false));
         }
       } else {
-        final walkRoute = await _getCachedRoute(previousEnd, passEnd);
+        final walkRoute = await _getCachedRoute(previousEnd, passEnd, profile: 'foot-walking');
         routes.add((points: [previousEnd, ...walkRoute, passEnd], color: walkColor, isTransit: false));
         markers.add((point: passEnd, color: destinationColor, isSmallNode: false));
       }
@@ -1349,7 +1355,7 @@ class HomeViewModel extends ChangeNotifier {
   }
 
   int _safeSqlTimeToMinutes(dynamic sqlTime) {
-    if (sqlTime == null) return 1 << 30;
+    if (sqlTime == null) return 1 << 30; // unknown time sorts last
     try {
       return FormatUtils.sqlTimeToMinutes(sqlTime);
     } catch (_) {
@@ -1364,7 +1370,6 @@ class HomeViewModel extends ChangeNotifier {
 
     return {
       'id': isMixed ? first['passenger_trip_id'].toString() : first['sub_id'],
-      'created_at': first['created_at'],
       'sub_ids': legs.map((l) => l['sub_id']).toList(),
       'passenger_trip_id': first['passenger_trip_id'],
       'trip_name': first['trip_name'],
@@ -1379,9 +1384,6 @@ class HomeViewModel extends ChangeNotifier {
       'legs': legs,
       if (!isMixed) ...{
         'driver_trip_id': first['driver_trip_id'],
-        'driver_id': first['driver_id'],
-        'passenger_id': first['passenger_id'],
-        'is_completed_today': first['is_completed_today'],
         'pickup_lat': first['pickup_lat'],
         'pickup_lng': first['pickup_lng'],
         'dropoff_lat': first['dropoff_lat'],
@@ -1433,7 +1435,6 @@ class HomeViewModel extends ChangeNotifier {
 
     _hasFoundDirect = false;
     _hasFoundMixed = false;
-    hasExceptedTripsToday = false;
     matchedDrivers.clear();
     mixedMatchedRoutes.clear();
 
