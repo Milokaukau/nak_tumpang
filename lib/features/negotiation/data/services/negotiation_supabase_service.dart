@@ -201,6 +201,13 @@ class NegotiationSupabaseService {
     if (!request.isExtension || request.extendsSubscriptionId == null) {
       throw StateError('Request $extensionRequestId is not an extension.');
     }
+    // Idempotency guard: if this request was already finalized (e.g. from a
+    // double-tap or duplicate call), don't create/update anything again —
+    // just return the subscription that was already produced.
+    if (request.subscriptionId != null) {
+      return request.subscriptionId!;
+    }
+
     if (!request.isFullyAgreed) {
       throw StateError('Extension request $extensionRequestId is not fully agreed yet.');
     }
@@ -244,9 +251,19 @@ class NegotiationSupabaseService {
         'status': 'active',
       });
 
+      // Attach subscription_id to the request IMMEDIATELY after creating it,
+      // so a later failure can't cause a retry to create ANOTHER duplicate.
+      await _supabase.from(_table).update({
+        'subscription_id': activeSubscriptionId,
+      }).eq('id', extensionRequestId);
+
       await _supabase
           .from('tumpang_subscription')
-          .update({'status': 'superseded'})
+          .update({
+        'status': 'inactive',
+        'ended_by': 'extended',
+        'ended_at': DateTime.now().toIso8601String(),
+      })
           .eq('id', oldSubscriptionId);
 
     } else {
@@ -254,6 +271,9 @@ class NegotiationSupabaseService {
       await _supabase.from('tumpang_subscription').update({
         'subscription_end_date': request.subscriptionEndDate.value,
         'deposit': newTotalDeposit, // Updated Deposit
+        'status': 'active',
+        'ended_by': null,
+        'ended_at': null,
       }).eq('id', oldSubscriptionId);
 
       await _supabase
