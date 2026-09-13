@@ -404,6 +404,13 @@ class HomeViewModel extends ChangeNotifier {
 
       try {
         final route = await _orsService.getRoute(start, end, profile: profile);
+        if (route.isEmpty) {
+          // ORS can return [] on bad API key / non-200 / caught errors without throwing.
+          // Treat that the same as a failure — retry instead of caching a dead result.
+          debugPrint('⚠️ Route fetch returned empty for $profile — retrying...');
+          await Future.delayed(const Duration(milliseconds: 800));
+          continue;
+        }
         _routeCache[cacheKey] = route;
         return route;
       } catch (e) {
