@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
+import 'package:flutter/foundation.dart';
 
 class SubscriptionSupabaseService {
   final _supabase = Supabase.instance.client;
@@ -132,36 +132,35 @@ class SubscriptionSupabaseService {
       final response = await _supabase
           .from('tumpang_subscription')
           .select('''
-            *,
-            passenger_trips:passenger_trip_id (*, users (*)),
-            driver_trips:driver_trip_id (*, users (*))
-          ''')
+          *,
+          passenger_trips:passenger_trip_id (*, users (*)),
+          driver_trips:driver_trip_id (*, users (*))
+        ''')
           .inFilter(tripIdField, tripIds);
 
       final rawList = List<Map<String, dynamic>>.from(response);
 
-      // Auto-expire any active subscription whose end date has passed
       for (var sub in rawList) {
         if (sub['status'] == 'active' && sub['subscription_end_date'] != null) {
           await _checkAndAutoExpire(sub['id'], sub['subscription_end_date']);
         }
       }
 
-      // Re-fetch so status reflects any auto-expiry that just happened
       final refreshedResponse = await _supabase
           .from('tumpang_subscription')
           .select('''
-            *,
-            passenger_trips:passenger_trip_id (*, users (*)),
-            driver_trips:driver_trip_id (*, users (*))
-          ''')
+          *,
+          passenger_trips:passenger_trip_id (*, users (*)),
+          driver_trips:driver_trip_id (*, users (*))
+        ''')
           .inFilter(tripIdField, tripIds);
 
       final refreshedList = List<Map<String, dynamic>>.from(refreshedResponse);
       return refreshedList.map((sub) => normalizeSubscription(sub, role)).toList();
     } catch (e) {
       print("Error in fetchSubscriptions: $e");
-      return [];
+      rethrow; // was: return []; — swallowing this hid the error from the
+      // caller's fallback try/catch, so offline cache never kicked in
     }
   }
 
@@ -339,6 +338,32 @@ class SubscriptionSupabaseService {
       return normalizeSubscription(response, role);
     } catch (e) {
       print('Error in fetchSubscriptionById: $e');
+      return null;
+    }
+  }
+
+  /// Fetches a single subscription for a tapped notification, with a
+  /// timeout since this runs from a transient overlay UI that shouldn't
+  /// hang indefinitely if the network is slow/unavailable.
+  Future<Map<String, dynamic>?> fetchSubscriptionForNotification(
+      String subscriptionId,
+      String role,
+      ) async {
+    try {
+      final rawSubscriptionData = await _supabase
+          .from('tumpang_subscription')
+          .select('''
+          *,
+          driver_trips(*, users(*)),
+          passenger_trips(*, users(*))
+        ''')
+          .eq('id', subscriptionId)
+          .single()
+          .timeout(const Duration(seconds: 5));
+
+      return normalizeSubscription(rawSubscriptionData, role);
+    } catch (e) {
+      debugPrint('🚨 Error in fetchSubscriptionForNotification: $e');
       return null;
     }
   }

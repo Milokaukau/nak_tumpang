@@ -124,7 +124,7 @@ class NoNeedFetchPanel extends StatelessWidget {
           infoBoxColor: AppColors.successGreenBg,
           infoBoxTextColor: AppColors.successGreenText,
           infoBoxText:
-          "$driverName will be notified and won't count you in for pickup on these dates. You won't be charged for this period. Your regular tumpang schedule resumes automatically after.",
+          "$driverName will be notified and won't count you in for pickup on these dates. Your regular tumpang schedule resumes automatically after.",
           confirmLabel: 'Confirm',
           isSubmitting: vm.isSubmittingException,
           minDate: minDate,

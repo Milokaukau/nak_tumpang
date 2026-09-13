@@ -79,7 +79,7 @@ class _HomeScreenState extends State<HomeScreen> {
     OverlayEntry? entry;
 
     entry = OverlayEntry(
-      builder: (overlayContext) => Positioned(   // renamed from `context`
+      builder: (overlayContext) => Positioned(
         top: MediaQuery.of(overlayContext).padding.top + 16,
         left: 16,
         right: 16,
@@ -103,59 +103,47 @@ class _HomeScreenState extends State<HomeScreen> {
 
               if (!mounted) return;
               showDialog(
-                context: context,               // now the State's own context
+                context: context,
                 barrierDismissible: false,
                 builder: (ctx) => const Center(
                   child: CircularProgressIndicator(color: AppColors.primaryYellow),
                 ),
               );
 
-              try {
-                final rawSubscriptionData = await Supabase.instance.client
-                    .from('tumpang_subscription')
-                    .select('''
-      *,
-      driver_trips(*, users(*)),
-      passenger_trips(*, users(*))
-    ''')
-                    .eq('id', subscriptionId)
-                    .single()
-                    .timeout(const Duration(seconds: 5));
+              final subscriptionData = await context.read<HomeViewModel>().fetchSubscriptionForNotification(
+                subscriptionId.toString(),
+                role,
+              );
 
-                final currentUserId = Supabase.instance.client.auth.currentUser?.id ?? '';
+              if (!mounted) return;
+              Navigator.pop(context); // close loading indicator
 
-                final subscriptionData = _subscriptionService.normalizeSubscription(
-                  rawSubscriptionData,
-                  role,
+              if (subscriptionData == null) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Failed to load subscription details.'),
+                    backgroundColor: Colors.red,
+                    duration: Duration(seconds: 4),
+                  ),
                 );
-                final initialTab = (notif['type'] == 'exception') ? 1 : 0;
+                return;
+              }
 
-                if (mounted) {
-                  Navigator.pop(context);
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => SubscriptionDetailScreen(
-                        subscription: subscriptionData,
-                        currentUserId: currentUserId,
-                        role: role,
-                        initialTabIndex: initialTab,
-                      ),
+              final currentUserId = Supabase.instance.client.auth.currentUser?.id ?? '';
+              final initialTab = (notif['type'] == 'exception') ? 1 : 0;
+
+              if (mounted) {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => SubscriptionDetailScreen(
+                      subscription: subscriptionData,
+                      currentUserId: currentUserId,
+                      role: role,
+                      initialTabIndex: initialTab,
                     ),
-                  );
-                }
-              } catch (e) {
-                debugPrint('🚨 NOTIF FETCH ERROR: $e');
-                if (mounted) {
-                  Navigator.pop(context); // Close loading indicator
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Failed to load subscription: $e'),
-                      backgroundColor: Colors.red,
-                      duration: const Duration(seconds: 4),
-                    ),
-                  );
-                }
+                  ),
+                );
               }
             },
             child: Container(
@@ -199,10 +187,8 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
-
     overlay.insert(entry!);
 
-    // Auto-dismiss duration
     Future.delayed(const Duration(seconds: 20), () {
       if (entry?.mounted ?? false) {
         entry?.remove();

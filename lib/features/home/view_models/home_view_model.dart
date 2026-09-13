@@ -10,6 +10,7 @@ import 'package:uuid/uuid.dart';
 import 'package:nak_tumpang/features/home/data/services/home_local_service.dart';
 import 'package:nak_tumpang/core/utils/format_utils.dart';
 import 'package:nak_tumpang/core/services/network_service.dart';
+import 'package:nak_tumpang/features/subscriptions/data/services/subscription_supabase_service.dart';
 
 enum HomePanelMode { none, cantFetch, noNeedFetch }
 
@@ -56,6 +57,7 @@ class HomeViewModel extends ChangeNotifier {
   final ORSService _orsService = ORSService();
   final HomeSupabaseService _homeService = HomeSupabaseService();
   final GoTrueClient _auth = Supabase.instance.client.auth;
+  final SubscriptionSupabaseService _subscriptionService = SubscriptionSupabaseService();
 
   List<Map<String, dynamic>> matchedDrivers = [];
   List<Map<String, dynamic>> mixedMatchedRoutes = [];
@@ -1452,5 +1454,12 @@ class HomeViewModel extends ChangeNotifier {
     mixedMatchedRoutes.clear();
 
     await fetchCurrentUser();
+  }
+
+  Future<Map<String, dynamic>?> fetchSubscriptionForNotification(
+      String subscriptionId,
+      String role,
+      ) {
+    return _subscriptionService.fetchSubscriptionForNotification(subscriptionId, role);
   }
 }

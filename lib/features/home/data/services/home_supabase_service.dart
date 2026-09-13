@@ -295,10 +295,18 @@ class HomeSupabaseService {
           'obtained_points': points,
           'avai_points': points,
           'obtained_at': now.toIso8601String(),
-          'expiration_date': _formatDate(now.add(const Duration(days: 90))),
-          'reason': 'Trip Completion',
-          'source_id': tripLogId,
-          'status': 'active'
+          'expired_at': now.add(const Duration(days: 90)).toIso8601String(),
+          'tumpang_trip_log_id': tripLogId,
+        });
+
+        await _supabase.from('points_ledger').insert({
+          'id': 'pl_${now.millisecondsSinceEpoch}_$userId',
+          'user_id': userId,
+          'change_amount': points,
+          'reason': 'trip_completed',
+          'reference_id': rewardId,
+          'description': 'Earned from completed trip (${distanceKm.toStringAsFixed(1)}km)',
+          'created_at': now.toIso8601String(),
         });
       }
       return true;
