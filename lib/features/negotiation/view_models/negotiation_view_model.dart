@@ -28,6 +28,7 @@ class NegotiationViewModel extends ChangeNotifier {
   List<TumpangRequest> completedRequests = [];
 
   final Map<String, Map<String, dynamic>> _userCache = {};
+  final Map<String, String> _tripNameCache = {};
   late final StreamSubscription<AuthState> _authSubscription;
 
   bool get isOffline => NetworkService.isOfflineNotifier.value;
@@ -45,6 +46,7 @@ class NegotiationViewModel extends ChangeNotifier {
         pendingRequests.clear();
         completedRequests.clear();
         _userCache.clear();
+        _tripNameCache.clear();
         currentUserRole = null;
         currentUserId = null;
         isLoading = false;
@@ -66,6 +68,7 @@ class NegotiationViewModel extends ChangeNotifier {
     pendingRequests.clear();
     completedRequests.clear();
     _userCache.clear();
+    _tripNameCache.clear();
     currentUserRole = null;
     currentUserId = null;
     isLoading = false;
@@ -214,10 +217,18 @@ class NegotiationViewModel extends ChangeNotifier {
       } else {
         final List<dynamic> trips = await _supabase
             .from(tripTable)
-            .select('id')
+            .select()
             .eq('user_id', sessionUserId);
 
         if (!isCurrentSessionValid()) return;
+
+        for (final t in trips) {
+          final id = t['id']?.toString();
+          final name = t['trip_name'] ?? t['name'] ?? t['title'];
+          if (id != null && name != null) {
+            _tripNameCache[id] = name.toString();
+          }
+        }
 
         final tripIds = trips.map((t) => t['id'] as String).toList();
 
@@ -313,6 +324,19 @@ class NegotiationViewModel extends ChangeNotifier {
       debugPrint('Error fetching user profile: $e');
     }
     return null;
+  }
+
+  String getCachedTripName(String tripId) {
+    if (_tripNameCache.containsKey(tripId) && _tripNameCache[tripId]!.isNotEmpty) {
+      return _tripNameCache[tripId]!;
+    }
+    if (_userCache.containsKey(tripId)) {
+      final cachedData = _userCache[tripId];
+      if (cachedData != null && cachedData['trip_name'] != null) {
+        return cachedData['trip_name'].toString();
+      }
+    }
+    return 'Your Trip';
   }
 
   Future<T> runNegotiationAction<T>(

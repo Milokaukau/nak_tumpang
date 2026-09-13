@@ -129,15 +129,22 @@ class ORSService {
     }
   }
 
-  Future<List<LatLng>> getRoute(LatLng start, LatLng end) async {
+  Future<List<LatLng>> getRoute(
+      LatLng start,
+      LatLng end, {
+        String profile = 'driving-car',
+      }) async {
     if (_apiKey.isEmpty) {
       print('❌ Error: ORS_API_KEY is missing from .env');
       return [];
     }
 
-    // --- UPDATED to use ApiConstants ---
+    final endpoint = (profile == 'foot-walking' || profile.contains('walk'))
+        ? ApiConstants.orsWalkingEndpoint
+        : ApiConstants.orsDrivingEndpoint;
+
     final url = Uri.parse(
-        '${ApiConstants.orsDrivingEndpoint}?api_key=$_apiKey&start=${start.longitude},${start.latitude}&end=${end.longitude},${end.latitude}');
+        '$endpoint?api_key=$_apiKey&start=${start.longitude},${start.latitude}&end=${end.longitude},${end.latitude}');
 
     try {
       final response = await http.get(url);
