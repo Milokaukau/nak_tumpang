@@ -39,6 +39,11 @@ class NegotiationViewModel extends ChangeNotifier {
           (data.event == AuthChangeEvent.signedIn && currentUserId != null && newUserId != currentUserId);
 
       if (isAccountChange) {
+        // Clear in-memory lists immediately and notify listeners to avoid sensitive data exposure
+        pendingRequests.clear();
+        completedRequests.clear();
+        notifyListeners();
+
         try {
           await _localService.clearRequestsCache();
         } catch (e) {
