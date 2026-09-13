@@ -47,7 +47,7 @@ class NegotiationViewModel extends ChangeNotifier {
         _userCache.clear();
         currentUserRole = null;
         currentUserId = null;
-        isLoading = false; // CodeRabbit Fix: prevent stuck loading state
+        isLoading = false;
         notifyListeners();
 
         try {
@@ -68,7 +68,7 @@ class NegotiationViewModel extends ChangeNotifier {
     _userCache.clear();
     currentUserRole = null;
     currentUserId = null;
-    isLoading = false; // CodeRabbit Fix: prevent stuck loading state
+    isLoading = false;
     notifyListeners();
 
     try {
@@ -104,7 +104,7 @@ class NegotiationViewModel extends ChangeNotifier {
   }
 
   Future<void> _initSession() async {
-    final generation = _sessionGeneration; // Capture generation at entry
+    final generation = _sessionGeneration;
     final user = _supabase.auth.currentUser;
     final sessionUserId = user?.id;
     currentUserId = sessionUserId;
@@ -112,7 +112,6 @@ class NegotiationViewModel extends ChangeNotifier {
     if (user != null && sessionUserId != null) {
       final cachedRole = await _readCachedRole(sessionUserId);
 
-      // CodeRabbit Fix: validate session generation hasn't changed mid-flight
       if (generation != _sessionGeneration || _supabase.auth.currentUser?.id != sessionUserId) return;
       currentUserRole ??= cachedRole;
 
@@ -123,7 +122,6 @@ class NegotiationViewModel extends ChangeNotifier {
             .eq('id', sessionUserId)
             .maybeSingle();
 
-        // CodeRabbit Fix: validate session generation again
         if (generation != _sessionGeneration || _supabase.auth.currentUser?.id != sessionUserId) return;
 
         final remoteRole = userData?['role']?.toString().replaceAll("'", "") ?? 'passenger';
@@ -133,7 +131,6 @@ class NegotiationViewModel extends ChangeNotifier {
         debugPrint('Error refreshing role from Supabase: $e');
       }
 
-      // CodeRabbit Fix: final check before delegating to fetchRequests
       if (generation != _sessionGeneration || _supabase.auth.currentUser?.id != sessionUserId) return;
 
       currentUserRole ??= 'passenger';
@@ -142,7 +139,7 @@ class NegotiationViewModel extends ChangeNotifier {
       currentUserRole = null;
       pendingRequests.clear();
       completedRequests.clear();
-      isLoading = false; // CodeRabbit Fix: prevent stuck loading state
+      isLoading = false;
       notifyListeners();
     }
   }
@@ -322,11 +319,21 @@ class NegotiationViewModel extends ChangeNotifier {
       Future<T> Function() action, {
         String fallbackMessage = 'An error occurred during negotiation.',
       }) async {
+    final startGeneration = _sessionGeneration;
+    final startUserId = currentUserId;
+
     try {
-      return await action();
+      final result = await action();
+
+      if (startGeneration != _sessionGeneration || startUserId != currentUserId) {
+        throw NegotiationException('Session changed. Request discarded.');
+      }
+
+      return result;
     } on PostgrestException catch (e) {
       throw NegotiationException(e.message);
     } catch (e) {
+      if (e is NegotiationException) rethrow;
       throw NegotiationException(fallbackMessage);
     }
   }
