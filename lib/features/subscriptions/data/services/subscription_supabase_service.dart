@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
+import 'package:flutter/foundation.dart';
 
 class SubscriptionSupabaseService {
   final _supabase = Supabase.instance.client;
@@ -339,6 +339,32 @@ class SubscriptionSupabaseService {
       return normalizeSubscription(response, role);
     } catch (e) {
       print('Error in fetchSubscriptionById: $e');
+      return null;
+    }
+  }
+
+  /// Fetches a single subscription for a tapped notification, with a
+  /// timeout since this runs from a transient overlay UI that shouldn't
+  /// hang indefinitely if the network is slow/unavailable.
+  Future<Map<String, dynamic>?> fetchSubscriptionForNotification(
+      String subscriptionId,
+      String role,
+      ) async {
+    try {
+      final rawSubscriptionData = await _supabase
+          .from('tumpang_subscription')
+          .select('''
+          *,
+          driver_trips(*, users(*)),
+          passenger_trips(*, users(*))
+        ''')
+          .eq('id', subscriptionId)
+          .single()
+          .timeout(const Duration(seconds: 5));
+
+      return normalizeSubscription(rawSubscriptionData, role);
+    } catch (e) {
+      debugPrint('🚨 Error in fetchSubscriptionForNotification: $e');
       return null;
     }
   }

@@ -21,6 +21,7 @@ import 'package:nak_tumpang/core/utils/format_utils.dart';
 import 'package:nak_tumpang/core/utils/matching_utils.dart';
 import 'package:nak_tumpang/core/utils/transit_utils.dart';
 import 'package:nak_tumpang/features/negotiation/view_models/negotiation_view_model.dart';
+import 'package:nak_tumpang/features/home/data/services/home_local_service.dart';
 
 class HomePanel extends StatelessWidget {
   const HomePanel({super.key});
@@ -514,42 +515,7 @@ class HomePanel extends StatelessWidget {
           time: leg['pickup_time'],
           exceptionButtonText: "Can't fetch at...",
           onCallPressed: () => UrlUtils.makePhoneCall(leg['phone']),
-          onDetailsPressed: () async {
-            showDialog(
-              context: context,
-              barrierDismissible: false,
-              builder: (ctx) => const Center(child: CircularProgressIndicator(color: AppColors.primaryYellow)),
-            );
-
-            final fullSubscription = await SubscriptionSupabaseService().fetchSubscriptionById(
-              leg['sub_id'] ?? leg['id'],
-              viewModel.currentUserRole,
-            );
-
-            if (context.mounted) Navigator.pop(context);
-
-            if (fullSubscription == null) {
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Could not load subscription details.'), backgroundColor: Colors.red),
-                );
-              }
-              return;
-            }
-
-            if (context.mounted) {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => SubscriptionDetailScreen(
-                    currentUserId: viewModel.currentUserId ?? '',
-                    role: viewModel.currentUserRole,
-                    subscription: fullSubscription,
-                  ),
-                ),
-              );
-            }
-          },
+          onDetailsPressed: () => _openSubscriptionDetails(context, viewModel, leg),
           onExceptionPressed: () => viewModel.openCantFetchPanel(leg),
           isCompletedToday: leg['is_completed_today'] ?? false,
           onCompleteTripPressed: !(leg['is_completed_today'] ?? false) ? () async {
@@ -671,42 +637,7 @@ class HomePanel extends StatelessWidget {
         time: leg['pickup_time'],
         exceptionButtonText: 'No need tumpang at...',
         onCallPressed: () => UrlUtils.makePhoneCall(leg['phone']),
-        onDetailsPressed: () async {
-          showDialog(
-            context: context,
-            barrierDismissible: false,
-            builder: (ctx) => const Center(child: CircularProgressIndicator(color: AppColors.primaryYellow)),
-          );
-
-          final fullSubscription = await SubscriptionSupabaseService().fetchSubscriptionById(
-            leg['sub_id'] ?? leg['id'],
-            viewModel.currentUserRole,
-          );
-
-          if (context.mounted) Navigator.pop(context);
-
-          if (fullSubscription == null) {
-            if (context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Could not load subscription details.'), backgroundColor: Colors.red),
-              );
-            }
-            return;
-          }
-
-          if (context.mounted) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => SubscriptionDetailScreen(
-                  currentUserId: viewModel.currentUserId ?? '',
-                  role: viewModel.currentUserRole,
-                  subscription: fullSubscription,
-                ),
-              ),
-            );
-          }
-        },
+        onDetailsPressed: () => _openSubscriptionDetails(context, viewModel, leg),
         onExceptionPressed: () => viewModel.openNoNeedFetchPanel(leg),
         isCompletedToday: false, // Passengers don't complete trips, drivers do
         onCompleteTripPressed: null,
@@ -744,5 +675,97 @@ class HomePanel extends StatelessWidget {
     }
 
     return result;
+  }
+
+  Future<void> _openSubscriptionDetails(
+      BuildContext context, HomeViewModel viewModel, Map<String, dynamic> leg) async {
+    final subscriptionId = (leg['sub_id'] ?? leg['id'])?.toString();
+    if (subscriptionId == null || subscriptionId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Missing subscription reference for this leg.'), backgroundColor: Colors.red),
+      );
+      return;
+    }
+
+    Map<String, dynamic>? fullSubscription;
+
+    if (NetworkService.isOfflineNotifier.value) {
+      // Offline: read from the local cache instead of hitting the network.
+      final isForPassenger = viewModel.currentUserRole != 'driver';
+      final cachedRawSubs = await HomeLocalService().getCachedSubscriptions(
+        viewModel.currentUserId ?? '',
+        isForPassenger: isForPassenger,
+      );
+      final rawMatch = cachedRawSubs.firstWhere(
+            (s) => s['id']?.toString() == subscriptionId,
+        orElse: () => <String, dynamic>{},
+      );
+
+      if (rawMatch.isNotEmpty) {
+        fullSubscription = SubscriptionSupabaseService().normalizeSubscription(
+          rawMatch,
+          viewModel.currentUserRole,
+        );
+      }
+
+      if (fullSubscription == null) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No cached details available offline for this trip.'), backgroundColor: Colors.red),
+          );
+        }
+        return;
+      }
+
+      if (context.mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => SubscriptionDetailScreen(
+              currentUserId: viewModel.currentUserId ?? '',
+              role: viewModel.currentUserRole,
+              subscription: fullSubscription!,
+            ),
+          ),
+        );
+      }
+      return;
+    }
+
+    // Online: fetch fresh from Supabase, as before.
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const Center(child: CircularProgressIndicator(color: AppColors.primaryYellow)),
+    );
+
+    fullSubscription = await SubscriptionSupabaseService().fetchSubscriptionById(
+      subscriptionId,
+      viewModel.currentUserRole,
+    );
+
+    if (context.mounted) Navigator.pop(context);
+
+    if (fullSubscription == null) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not load subscription details.'), backgroundColor: Colors.red),
+        );
+      }
+      return;
+    }
+
+    if (context.mounted) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => SubscriptionDetailScreen(
+            currentUserId: viewModel.currentUserId ?? '',
+            role: viewModel.currentUserRole,
+            subscription: fullSubscription!,
+          ),
+        ),
+      );
+    }
   }
 }
