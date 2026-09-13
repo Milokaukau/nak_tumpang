@@ -335,4 +335,29 @@ class RewardsSupabaseService {
 
     return {'type': 'points', 'points': points};
   }
+
+  /// Raw reward_points rows for [userId] — used to populate the local cache
+  /// so getCachedPointsSummary can recompute the same summary offline.
+  Future<List<Map<String, dynamic>>> fetchRawRewardPoints(String userId) async {
+    try {
+      final response = await _supabase.from('reward_points').select().eq('user_id', userId);
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      print('Error in fetchRawRewardPoints: $e');
+      return [];
+    }
+  }
+
+  /// The full voucher catalog, unfiltered — used to populate the local
+  /// cache. (fetchAvailableVouchers already filters out redeemed ones for
+  /// display; this is the raw table for offline storage.)
+  Future<List<Map<String, dynamic>>> fetchAllVouchers() async {
+    try {
+      final response = await _supabase.from('vouchers').select();
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      print('Error in fetchAllVouchers: $e');
+      return [];
+    }
+  }
 }

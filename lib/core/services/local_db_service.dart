@@ -19,12 +19,35 @@ class LocalDbService {
 
     return await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
       onCreate: _createDB,
+      onUpgrade: _upgradeDB,
     );
+  }
+
+  Future<void> _upgradeDB(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      // Widen points_ledger's reason CHECK to match the Supabase migration
+      // (added 'goyang_points'/'goyang_voucher'). SQLite can't ALTER a
+      // CHECK constraint in place, so recreate the table — safe, since
+      // this is purely a local cache, not the source of truth.
+      await db.execute('DROP TABLE IF EXISTS points_ledger');
+      await db.execute('''
+      CREATE TABLE points_ledger (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        change_amount INTEGER NOT NULL,
+        reason TEXT NOT NULL CHECK (reason IN ('trip_completed', 'voucher_redeemed', 'goyang_points', 'goyang_voucher')),
+        reference_id TEXT,
+        description TEXT NOT NULL,
+        created_at TEXT,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+      )
+    ''');
+    }
   }
 
   Future<void> _createDB(Database db, int version) async {
@@ -287,17 +310,17 @@ class LocalDbService {
 
     // 14. points_ledger
     await db.execute('''
-      CREATE TABLE points_ledger (
-        id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL,
-        change_amount INTEGER NOT NULL,
-        reason TEXT NOT NULL CHECK (reason IN ('trip_completed', 'voucher_redeemed')),
-        reference_id TEXT,
-        description TEXT NOT NULL,
-        created_at TEXT,
-        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-      )
-    ''');
+  CREATE TABLE points_ledger (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    change_amount INTEGER NOT NULL,
+    reason TEXT NOT NULL CHECK (reason IN ('trip_completed', 'voucher_redeemed', 'goyang_points', 'goyang_voucher')),
+    reference_id TEXT,
+    description TEXT NOT NULL,
+    created_at TEXT,
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+  )
+''');
 
     // 15. payout_settings
     await db.execute('''
