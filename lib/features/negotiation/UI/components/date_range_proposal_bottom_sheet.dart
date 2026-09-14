@@ -53,7 +53,10 @@ class _DateRangeProposalBottomSheetState extends State<DateRangeProposalBottomSh
     }
   }
 
-  String _format(DateTime d) =>
+  String _formatDisplay(DateTime d) =>
+      "${d.day.toString().padLeft(2, '0')}-${d.month.toString().padLeft(2, '0')}-${d.year}";
+
+  String _formatIso(DateTime d) =>
       "${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}";
 
   ThemeData _yellowTheme(BuildContext context) => Theme.of(context).copyWith(
@@ -126,7 +129,7 @@ class _DateRangeProposalBottomSheetState extends State<DateRangeProposalBottomSh
           TextFormField(
             readOnly: true,
             onTap: _pickStartDate,
-            controller: TextEditingController(text: _format(_startDate)),
+            controller: TextEditingController(text: _formatDisplay(_startDate)),
             style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.black),
             decoration: const InputDecoration(
               labelText: 'Start Date',
@@ -140,7 +143,7 @@ class _DateRangeProposalBottomSheetState extends State<DateRangeProposalBottomSh
           TextFormField(
             readOnly: true,
             onTap: _pickEndDate,
-            controller: TextEditingController(text: _format(_endDate)),
+            controller: TextEditingController(text: _formatDisplay(_endDate)),
             style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.black),
             decoration: const InputDecoration(
               labelText: 'End Date',
@@ -161,9 +164,15 @@ class _DateRangeProposalBottomSheetState extends State<DateRangeProposalBottomSh
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               ),
               onPressed: () {
+                if (!_endDate.isAfter(_startDate) || !DateRangeRules.isAtLeastTwoWeeks(_startDate, _endDate)) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('End date must be at least 14 days after the start date.'), backgroundColor: Colors.red),
+                  );
+                  return;
+                }
                 Navigator.pop(context, {
-                  'start': _format(_startDate),
-                  'end': _format(_endDate),
+                  'start': _formatIso(_startDate),
+                  'end': _formatIso(_endDate),
                 });
               },
               child: const Text('Submit Proposal', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),

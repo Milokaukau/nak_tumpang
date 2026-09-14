@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/entities/payment.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
+import 'package:nak_tumpang/features/payment/view_models/payment_view_model.dart';
 
 class ProformaInvoiceSheet extends StatefulWidget {
   final Payment payment;
@@ -22,13 +23,15 @@ class ProformaInvoiceSheet extends StatefulWidget {
 }
 
 class _ProformaInvoiceSheetState extends State<ProformaInvoiceSheet> {
-  final SupabaseClient _supabase = Supabase.instance.client;
   bool _loading = true;
 
   double _dailyFee = 0.0;
-  int _totalCycleDays = 30;
+  int _activeCycleDays = 0;
   int _missedDays = 0;
   List<String> _missedDateList = [];
+  String? _passengerTripName;
+  String? _driverTripName;
+  String? _loadError;
 
   @override
   void initState() {
@@ -36,56 +39,82 @@ class _ProformaInvoiceSheetState extends State<ProformaInvoiceSheet> {
     _loadInvoiceDetails();
   }
 
+  bool _isDayActive(DateTime date, Map<String, dynamic> schedule) {
+    switch (date.weekday) {
+      case DateTime.monday:
+        return schedule['active_monday'] == true;
+      case DateTime.tuesday:
+        return schedule['active_tuesday'] == true;
+      case DateTime.wednesday:
+        return schedule['active_wednesday'] == true;
+      case DateTime.thursday:
+        return schedule['active_thursday'] == true;
+      case DateTime.friday:
+        return schedule['active_friday'] == true;
+      case DateTime.saturday:
+        return schedule['active_saturday'] == true;
+      case DateTime.sunday:
+        return schedule['active_sunday'] == true;
+      default:
+        return false;
+    }
+  }
+
   Future<void> _loadInvoiceDetails() async {
     try {
-      // 1. Fetch daily fee and route from subscription
-      final sub = await _supabase
-          .from('tumpang_subscription')
-          .select('fee')
-          .eq('id', widget.payment.subscriptionId)
-          .maybeSingle();
-
-      _dailyFee = double.tryParse(sub?['fee']?.toString() ?? '') ?? 0.0;
-
-      // 2. Compute cycle days
       final start = widget.payment.cycleStartDate;
       final end = widget.payment.cycleEndDate;
+      final details = await context.read<PaymentViewModel>().loadProformaInvoiceDetails(
+        subscriptionId: widget.payment.subscriptionId,
+        cycleStart: start,
+        cycleEnd: end,
+      );
+      if (details == null) {
+        _loadError = context.read<PaymentViewModel>().proformaErrorMessage;
+        return;
+      }
+
+      _dailyFee = details['dailyFee'] as double;
+      _passengerTripName = details['passengerTripName'] as String?;
+      _driverTripName = details['driverTripName'] as String?;
+      final schedule = details['schedule'] as Map<String, dynamic>;
       if (start != null && end != null) {
-        _totalCycleDays = end.difference(start).inDays + 1;
-
-        // 3. Fetch missed trip exceptions within this cycle
-        final startStr = start.toIso8601String().split('T').first;
-        final endStr = end.toIso8601String().split('T').first;
-
-        // FIXED: Only count exceptions reported by the DRIVER for deductions!
-        final exceptions = await _supabase
-            .from('tumpang_exception')
-            .select('start_date, end_date, reason')
-            .eq('tumpang_subscription_id', widget.payment.subscriptionId)
-            .eq('reported_by_role', 'driver') // Passenger "no need fetch" is ignored
-            .lte('start_date', endStr)
-            .gte('end_date', startStr);
+        for (var date = start; !date.isAfter(end); date = date.add(const Duration(days: 1))) {
+          if (_isDayActive(date, schedule)) _activeCycleDays++;
+        }
 
         final dates = <String>{};
-        for (final row in (exceptions as List)) {
+        for (final row in (details['exceptions'] as List)) {
           final s = DateTime.parse(row['start_date'].toString());
           final e = DateTime.parse(row['end_date'].toString());
           final overlapStart = s.isBefore(start) ? start : s;
           final overlapEnd = e.isAfter(end) ? end : e;
           for (DateTime d = overlapStart; !d.isAfter(overlapEnd); d = d.add(const Duration(days: 1))) {
-            dates.add(d.toIso8601String().split('T').first);
+            if (_isDayActive(d, schedule)) {
+              dates.add(d.toIso8601String().split('T').first);
+            }
           }
         }
-        _missedDays = dates.length;
         _missedDateList = dates.toList()..sort();
-      } else {
-        // Fallback if cycle dates are not set (e.g. deposit row)
+        // The stored invoice amount is the backend's source of truth. Derive
+        // its deduction from the scheduled-day subtotal so this preview cannot
+        // drift from the amount the passenger will actually be charged.
         if (_dailyFee > 0) {
-          _totalCycleDays = (widget.payment.amount / _dailyFee).round();
+          final subtotal = _activeCycleDays * _dailyFee;
+          _missedDays = ((subtotal - widget.payment.amount) / _dailyFee)
+              .round()
+              .clamp(0, _activeCycleDays);
+        } else {
+          _missedDays = dates.length;
+        }
+      } else {
+        if (_dailyFee > 0) {
+          _activeCycleDays = (widget.payment.amount / _dailyFee).round();
         }
       }
     } catch (e) {
       debugPrint('Error loading proforma details: $e');
+      if (mounted) _loadError = 'Some invoice details could not be loaded.';
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -97,20 +126,25 @@ class _ProformaInvoiceSheetState extends State<ProformaInvoiceSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final dueDateStr = widget.payment.dueDate.toIso8601String().split('T').first;
-    final subtotal = _totalCycleDays * _dailyFee;
+    final dueDateStr = _formatDateDdMmYyyy(widget.payment.dueDate);
+    final subtotal = _activeCycleDays * _dailyFee;
     final deduction = _missedDays * _dailyFee;
+    final totalDue = _loadError != null
+        ? widget.payment.amount
+        : (subtotal - deduction).clamp(0, double.infinity);
 
-    // Check if the current date and time has passed the due date
     final isOverdue = DateTime.now().isAfter(widget.payment.dueDate);
 
-    // Construct Billing Period Text with Dates
     String billingPeriodText = widget.payment.dateRange;
     if (widget.payment.cycleStartDate != null && widget.payment.cycleEndDate != null) {
       final start = _formatDateDdMmYyyy(widget.payment.cycleStartDate!);
       final end = _formatDateDdMmYyyy(widget.payment.cycleEndDate!);
       billingPeriodText = '${widget.payment.dateRange}\n($start to $end)';
     }
+
+    final tripNameText = [_passengerTripName, _driverTripName]
+        .where((n) => n != null && n.isNotEmpty)
+        .join(' / ');
 
     return Container(
       decoration: const BoxDecoration(
@@ -151,7 +185,6 @@ class _ProformaInvoiceSheetState extends State<ProformaInvoiceSheet> {
                     ),
                   ],
                 ),
-                // Dynamic Overdue / Unpaid Badge
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
@@ -171,6 +204,21 @@ class _ProformaInvoiceSheetState extends State<ProformaInvoiceSheet> {
               ],
             ),
             const Divider(height: 24),
+            if (_loadError != null)
+              Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade50,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: Colors.orange.shade200),
+                ),
+                child: Text(
+                  '$_loadError The Total Amount Due below is still accurate.',
+                  style: const TextStyle(fontSize: 12, color: Colors.orange),
+                ),
+              ),
+            if (tripNameText.isNotEmpty) _infoRow('Trip Name', tripNameText),
             _infoRow('Service Route', widget.payment.direction),
             _infoRow('Billing Period', billingPeriodText),
             _infoRow('Due Date', dueDateStr, valueColor: isOverdue ? Colors.red : Colors.redAccent),
@@ -179,45 +227,41 @@ class _ProformaInvoiceSheetState extends State<ProformaInvoiceSheet> {
             if (_loading)
               const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator()))
             else ...[
-              // Breakdown Table Header
               Container(
                 color: Colors.grey.shade100,
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 child: const Row(
                   children: [
                     Expanded(flex: 4, child: Text('Description', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
-                    Expanded(flex: 2, child: Text('Days', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                    Expanded(flex: 2, child: Text('Scheduled Days', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
                     Expanded(flex: 2, child: Text('Fee', textAlign: TextAlign.right, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
                     Expanded(flex: 3, child: Text('Subtotal', textAlign: TextAlign.right, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
                   ],
                 ),
               ),
-              // Scheduled Days Row
               _tableRow(
-                description: 'Tumpang Rides (${widget.payment.dateRange})',
-                days: '$_totalCycleDays days',
+                description: 'Tumpang Fee (${widget.payment.dateRange})',
+                days: '$_activeCycleDays scheduled days',
                 fee: 'RM ${_dailyFee.toStringAsFixed(2)}',
                 subtotal: 'RM ${subtotal.toStringAsFixed(2)}',
               ),
-              // Missed Days Deduction Row
               if (_missedDays > 0)
                 _tableRow(
-                  description: "Driver Unfulfilled Days\n(${_missedDateList.join(', ')})",
-                  days: '-$_missedDays days',
+                  description: 'Cant Fetch Deduction',
+                  days: '-$_missedDays scheduled days',
                   fee: 'RM ${_dailyFee.toStringAsFixed(2)}',
                   subtotal: '-RM ${deduction.toStringAsFixed(2)}',
                   isDeduction: true,
                 )
               else
                 _tableRow(
-                  description: 'Missed Trips / Deductions',
-                  days: '0 days',
+                  description: 'Cant Fetch Deduction',
+                  days: '0 scheduled days',
                   fee: 'RM 0.00',
                   subtotal: 'RM 0.00',
                   isMuted: true,
                 ),
               const Divider(),
-              // Totals
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 child: Row(
@@ -225,7 +269,7 @@ class _ProformaInvoiceSheetState extends State<ProformaInvoiceSheet> {
                   children: [
                     const Text('Total Amount Due', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
                     Text(
-                      'RM ${widget.payment.amount.toStringAsFixed(2)}',
+                      'RM ${totalDue.toStringAsFixed(2)}',
                       style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: AppColors.black),
                     ),
                   ],

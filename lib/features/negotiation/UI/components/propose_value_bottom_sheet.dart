@@ -44,7 +44,21 @@ class _ProposeValueBottomSheetState extends State<ProposeValueBottomSheet> {
   Future<void> _submit() async {
     if (_isSubmitting) return;
     final value = _controller.text.trim();
-    if (value.isEmpty) return;
+    if (value.isEmpty) {
+      const message = 'Please enter a value before submitting.';
+      setState(() => _errorText = message);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text(message), backgroundColor: Colors.red));
+      return;
+    }
+    if (widget.title.toLowerCase().contains('fee')) {
+      final fee = double.tryParse(value);
+      if (fee == null || fee <= 0) {
+        const message = 'Please enter a valid fee greater than RM 0.';
+        setState(() => _errorText = message);
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text(message), backgroundColor: Colors.red));
+        return;
+      }
+    }
 
     setState(() {
       _isSubmitting = true;

@@ -30,6 +30,11 @@ class NegotiationScreen extends StatefulWidget {
 }
 
 class _NegotiationScreenState extends State<NegotiationScreen> {
+  String _formatDate(String value) {
+    final date = DateTime.tryParse(value);
+    if (date == null) return value;
+    return '${date.day.toString().padLeft(2, '0')}-${date.month.toString().padLeft(2, '0')}-${date.year}';
+  }
   final SubscriptionSupabaseService _subscriptionService = SubscriptionSupabaseService();
 
   String _formatAmPm(String dbTime) {
@@ -405,7 +410,7 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
 
                           NegotiationFieldRow(
                             title: 'Tumpang Dates',
-                            value: '${request.subscriptionStartDate.value} to ${request.subscriptionEndDate.value}',
+                            value: '${_formatDate(request.subscriptionStartDate.value)} to ${_formatDate(request.subscriptionEndDate.value)}',
                             isAccepted: request.subscriptionStartDate.isAccepted && request.subscriptionEndDate.isAccepted,
                             isRequestedByMe: request.subscriptionStartDate.requestedBy == controller.currentUserId,
                             isReadOnly: fieldsReadOnly,

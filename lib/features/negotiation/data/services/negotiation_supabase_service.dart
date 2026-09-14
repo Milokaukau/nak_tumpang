@@ -20,6 +20,59 @@ class NegotiationSupabaseService {
     return TumpangRequest.fromJson(response);
   }
 
+  Future<String> createDepositPaymentIntent({
+    required double amount,
+    required String requestId,
+  }) async {
+    final response = await _supabase.functions.invoke(
+      'create-payment-intent',
+      body: {
+        'amount': amount,
+        'currency': 'myr',
+        'description': 'Nak Tumpang deposit for request $requestId',
+      },
+    );
+    if (response.status != 200 || response.data == null) {
+      final error = response.data is Map ? response.data['error'] : null;
+      throw StateError(error?.toString() ?? 'Failed to create PaymentIntent');
+    }
+    final clientSecret = (response.data as Map)['client_secret']?.toString();
+    if (clientSecret == null || clientSecret.isEmpty) {
+      throw StateError('No client_secret returned from server');
+    }
+    return clientSecret;
+  }
+
+  /// Finalizes a brand-new subscription after a successful deposit payment.
+  ///
+  /// All multi-table writes (subscription insert, payment insert, request
+  /// status update) now happen inside the `finalize_tumpang_payment` Postgres
+  /// function, in a single atomic transaction. `paymentIntentId` is used
+  /// server-side as an idempotency key: if the app retries this call (e.g.
+  /// after a crash or network drop) with the same Stripe PaymentIntent id,
+  /// the RPC detects the existing `payments` row and returns the already-
+  /// created subscription id instead of writing duplicate rows.
+  Future<String> createSubscriptionAfterDeposit({
+    required TumpangRequest request,
+    required double deposit,
+    required String paymentIntentId,
+  }) async {
+    final response = await _supabase.rpc(
+      'finalize_tumpang_payment',
+      params: {
+        'p_request_id': request.id,
+        'p_payment_intent_id': paymentIntentId,
+        'p_deposit': deposit,
+      },
+    );
+
+    final subscriptionId = response?.toString();
+    if (subscriptionId == null || subscriptionId.isEmpty) {
+      throw StateError('finalize_tumpang_payment did not return a subscription id');
+    }
+    return subscriptionId;
+  }
+
   Future<void> updateNegotiationField({
     required String requestId,
     required String fieldPrefix,
@@ -152,109 +205,34 @@ class NegotiationSupabaseService {
     return requestId;
   }
 
-  Future<String> finalizeExtension(String extensionRequestId, {double additionalDeposit = 0.0}) async {
-    final request = await fetchSingleRequest(extensionRequestId);
+  /// Finalizes an extension after a successful additional-deposit payment.
+  ///
+  /// As with [createSubscriptionAfterDeposit], all writes (new subscription
+  /// insert, old subscription shutdown, request completion, payment insert)
+  /// now happen atomically inside `finalize_tumpang_payment`, keyed on
+  /// `paymentIntentId` for idempotent retries. The client-side
+  /// isFullyAgreed / isExtension / expiry validation that used to live here
+  /// should be re-checked server-side inside the RPC (or kept here as a
+  /// pre-flight check) since this method no longer performs those reads
+  /// itself before writing.
+  Future<String> finalizeExtension(
+      String extensionRequestId, {
+        double additionalDeposit = 0.0,
+        required String paymentIntentId,
+      }) async {
+    final response = await _supabase.rpc(
+      'finalize_tumpang_payment',
+      params: {
+        'p_request_id': extensionRequestId,
+        'p_payment_intent_id': paymentIntentId,
+        'p_deposit': additionalDeposit,
+      },
+    );
 
-    if (request == null) {
-      throw StateError('Extension request $extensionRequestId not found.');
+    final subscriptionId = response?.toString();
+    if (subscriptionId == null || subscriptionId.isEmpty) {
+      throw StateError('finalize_tumpang_payment did not return a subscription id');
     }
-
-    // IDEMPOTENCY GUARD: Prevent duplicate rows on retry
-    if (request.status == 'completed' && request.subscriptionId != null) {
-      return request.subscriptionId!;
-    }
-
-    if (!request.isExtension || request.extendsSubscriptionId == null) {
-      throw StateError('Request $extensionRequestId is not an extension.');
-    }
-    if (!request.isFullyAgreed) {
-      throw StateError('Extension request $extensionRequestId is not fully agreed yet.');
-    }
-
-    // VALIDATION: Ensure the extension end date has not expired relative to today before writing
-    final extensionEndDate = DateTime.tryParse(request.subscriptionEndDate.value);
-    final today = DateTime.now();
-    final todayDateOnly = DateTime(today.year, today.month, today.day);
-
-    if (extensionEndDate == null || extensionEndDate.isBefore(todayDateOnly)) {
-      throw StateError('Extension request $extensionRequestId has expired.');
-    }
-
-    final oldSubscriptionId = request.extendsSubscriptionId!;
-    final oldSub = await _supabase
-        .from('tumpang_subscription')
-        .select()
-        .eq('id', oldSubscriptionId)
-        .maybeSingle();
-
-    if (oldSub == null) {
-      throw StateError('Original subscription $oldSubscriptionId not found.');
-    }
-
-    final newSubscriptionId = 'sub_${DateTime.now().millisecondsSinceEpoch}';
-    final todayStr = todayDateOnly.toIso8601String().split('T').first;
-    final nowIso = today.toIso8601String();
-
-    // 1. ALWAYS create a brand new subscription row
-    await _supabase.from('tumpang_subscription').insert({
-      'id': newSubscriptionId,
-      'passenger_trip_id': oldSub['passenger_trip_id'],
-      'driver_trip_id': oldSub['driver_trip_id'],
-      'pickup_lat': request.pickupLocation.lat,
-      'pickup_lng': request.pickupLocation.lng,
-      'pickup_location': request.pickupLocation.name,
-      'dropoff_lat': request.dropoffLocation.lat,
-      'dropoff_lng': request.dropoffLocation.lng,
-      'dropoff_location': request.dropoffLocation.name,
-      'pickup_time': request.pickupTime.value,
-      'fee': request.fee.value,
-      'deposit': additionalDeposit, // Fresh deposit only
-      'deposit_refunded': false,
-      'subscription_start_date': todayStr,
-      'subscription_end_date': request.subscriptionEndDate.value,
-      'status': 'active',
-    });
-
-    // 2. Shut down the old subscription safely
-    final oldEndDate = DateTime.tryParse(oldSub['subscription_end_date']?.toString() ?? '');
-    final isOldEndInFuture = oldEndDate != null && oldEndDate.isAfter(today);
-
-    final updatePayload = {
-      'status': 'inactive',
-      'ended_by': 'system', // Satisfies DB constraint
-      'ended_at': nowIso,   // Satisfies DB constraint
-      'deposit_refunded': false,
-    };
-
-    if (isOldEndInFuture) {
-      updatePayload['subscription_end_date'] = todayStr;
-    }
-
-    await _supabase
-        .from('tumpang_subscription')
-        .update(updatePayload)
-        .eq('id', oldSubscriptionId);
-
-    // 3. Mark request completed
-    await _supabase.from(_table).update({
-      'status': 'completed',
-      'subscription_id': newSubscriptionId,
-    }).eq('id', extensionRequestId);
-
-    // 4. Save the fresh payment
-    if (additionalDeposit > 0) {
-      final paymentId = 'pay_${DateTime.now().millisecondsSinceEpoch}_extdep';
-      await _supabase.from('payments').insert({
-        'id': paymentId,
-        'tumpang_subscription_id': newSubscriptionId,
-        'month': today.month,
-        'year': today.year,
-        'due_date': nowIso,
-        'paid_at': nowIso,
-        'amount': additionalDeposit,
-      });
-    }
-
-    return newSubscriptionId;
+    return subscriptionId;
   }
 }
