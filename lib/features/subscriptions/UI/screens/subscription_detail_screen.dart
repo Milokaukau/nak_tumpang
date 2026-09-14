@@ -651,6 +651,8 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
     }
 
     final dailyFee = double.tryParse(widget.subscription['fee']?.toString() ?? '') ?? 0.0;
+    final today = DateTime.now();
+    final todayDateOnly = DateTime(today.year, today.month, today.day);
 
     return ListView.builder(
       padding: const EdgeInsets.all(16),
@@ -667,15 +669,26 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
             ? '$startDate → $endDate'
             : startDate;
 
-        Color statusColor = Colors.orange;
-        if (status == 'approved' || status == 'accepted' || status == 'active') statusColor = Colors.green;
-        if (status == 'rejected') statusColor = Colors.red;
+        // Treat a past end_date as "PAST" regardless of what the DB status
+        // column says — this is purely a display-time check, no schema change.
+        final parsedEndDate = DateTime.tryParse(endDate);
+        final isPast = parsedEndDate != null && parsedEndDate.isBefore(todayDateOnly);
 
-        // Refund calc: exception_days × daily_fee, only for driver-initiated
-        // "can't fetch" exceptions, only while the exception is still active.
+        Color statusColor;
+        String displayStatus;
+        if (isPast) {
+          statusColor = Colors.grey;
+          displayStatus = 'PAST';
+        } else {
+          statusColor = Colors.orange;
+          if (status == 'approved' || status == 'accepted' || status == 'active') statusColor = Colors.green;
+          if (status == 'rejected') statusColor = Colors.red;
+          displayStatus = status.toUpperCase();
+        }
+
         double? refundAmount;
         int? exceptionDays;
-        if (initiatedByRole == 'driver' && status == 'active') {
+        if (initiatedByRole == 'driver' && status == 'active' && !isPast) {
           final start = DateTime.tryParse(startDate);
           final end = DateTime.tryParse(endDate);
           if (start != null && end != null) {
@@ -700,10 +713,7 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Expanded(
-                    child: Text(
-                      'Date: $dateText',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                    ),
+                    child: Text('Date: $dateText', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                   ),
                   const SizedBox(width: 8),
                   Container(
@@ -713,7 +723,7 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(
-                      status.toUpperCase(),
+                      displayStatus,
                       style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 11),
                     ),
                   ),
@@ -751,17 +761,16 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
                 ),
               ],
 
-              if (isMyChanges && status == 'active' && isActive) ...[
+              // Edit is now hidden once the exception is in the past, in
+              // addition to the existing checks.
+              if (isMyChanges && status == 'active' && isActive && !isPast) ...[
                 const SizedBox(height: 16),
                 Row(
                   children: [
                     Expanded(
                       child: SizedBox(
                         height: 40,
-                        child: BaseButton(
-                          text: 'Edit',
-                          onPressed: () => _openEditException(item),
-                        ),
+                        child: BaseButton(text: 'Edit', onPressed: () => _openEditException(item)),
                       ),
                     ),
                   ],

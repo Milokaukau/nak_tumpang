@@ -122,6 +122,8 @@ class CantFetchPanel extends StatelessWidget {
           minDate: minDate,
           maxDate: maxDate,
           onCancel: () => vm.closeExceptionPanel(),
+          errorText: vm.exceptionFormError,
+          onDateError: vm.setExceptionFormError,
           onConfirm: () async {
             final success = await vm.submitException(
               tumpangSubscriptionId: tumpangSubscriptionId,

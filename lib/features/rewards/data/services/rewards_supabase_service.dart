@@ -200,7 +200,7 @@ class RewardsSupabaseService {
       final now = DateTime.now();
       final expiredAt = now.add(Duration(days: validityDays));
       final userVoucherId = 'uv_${DateTime.now().millisecondsSinceEpoch}';
-      final code = 'TUMPANG-${voucherId.toString().toUpperCase()}-${userId.substring(0, 6).toUpperCase()}';
+      final code = 'TUMPANG-${voucherId.toString().toUpperCase()}-${userId.substring(0, 6).toUpperCase()}-${now.millisecondsSinceEpoch}';
 
       await _supabase.from('user_vouchers').insert({
         'id': userVoucherId,
@@ -294,7 +294,7 @@ class RewardsSupabaseService {
         final validityDays = (voucher['validity_days'] as num).toInt();
         final expiredAt = now.add(Duration(days: validityDays));
         final userVoucherId = 'uv_${now.millisecondsSinceEpoch}_goyang';
-        final code = 'GOYANG-${voucherId.toString().toUpperCase()}-${userId.substring(0, 6).toUpperCase()}';
+        final code = 'GOYANG-${voucherId.toString().toUpperCase()}-${userId.substring(0, 6).toUpperCase()}-${now.millisecondsSinceEpoch}';
 
         await _supabase.from('user_vouchers').insert({
           'id': userVoucherId,

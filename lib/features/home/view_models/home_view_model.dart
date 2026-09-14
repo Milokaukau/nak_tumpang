@@ -19,6 +19,7 @@ class HomeViewModel extends ChangeNotifier {
   String currentUserRole = 'passenger';
   String? selectedSubscriptionId;
   String? get currentUserId => _auth.currentUser?.id;
+  String? exceptionFormError;
 
   Map<String, dynamic>? currentUser;
   Map<String, dynamic>? currentSelectedTrip;
@@ -128,11 +129,13 @@ class HomeViewModel extends ChangeNotifier {
     exceptionStartDate = null;
     exceptionEndDate = null;
     exceptionReason = null;
+    exceptionFormError = null;
     exceptionCustomReasonController.clear();
   }
 
   void setExceptionStartDate(DateTime date) {
     exceptionStartDate = date;
+    exceptionFormError = null;
     if (exceptionEndDate != null && exceptionEndDate!.isBefore(date)) {
       exceptionEndDate = date;
     }
@@ -141,6 +144,7 @@ class HomeViewModel extends ChangeNotifier {
 
   void setExceptionEndDate(DateTime date) {
     exceptionEndDate = date;
+    exceptionFormError = null;
     notifyListeners();
   }
 
@@ -149,6 +153,11 @@ class HomeViewModel extends ChangeNotifier {
     if (reason != 'Others') {
       exceptionCustomReasonController.clear();
     }
+    notifyListeners();
+  }
+
+  void setExceptionFormError(String? message) {
+    exceptionFormError = message;
     notifyListeners();
   }
 
@@ -162,6 +171,7 @@ class HomeViewModel extends ChangeNotifier {
     }
 
     isSubmittingException = true;
+    exceptionFormError = null;
     notifyListeners();
 
     final reasonText = exceptionReason == 'Others'
@@ -184,6 +194,9 @@ class HomeViewModel extends ChangeNotifier {
       }
 
       return success;
+    } on ExceptionConflictError catch (e) {
+      exceptionFormError = e.message;
+      return false;
     } catch (e) {
       debugPrint('⚠️ Error submitting exception: $e');
       return false;
@@ -1355,6 +1368,8 @@ class HomeViewModel extends ChangeNotifier {
       'driver_trip_id': sub['driver_trip_id'],
       'driver_id': driverId,
       'passenger_id': passengerId,
+      'subscription_start_date': sub['subscription_start_date'],
+      'subscription_end_date': sub['subscription_end_date'],
       'pickup_lat': sub['pickup_lat'],
       'pickup_lng': sub['pickup_lng'],
       'dropoff_lat': sub['dropoff_lat'],
@@ -1407,6 +1422,8 @@ class HomeViewModel extends ChangeNotifier {
       'legs': legs,
       if (!isMixed) ...{
         'driver_trip_id': first['driver_trip_id'],
+        'subscription_start_date': first['subscription_start_date'],
+        'subscription_end_date': first['subscription_end_date'],
         'pickup_lat': first['pickup_lat'],
         'pickup_lng': first['pickup_lng'],
         'dropoff_lat': first['dropoff_lat'],
