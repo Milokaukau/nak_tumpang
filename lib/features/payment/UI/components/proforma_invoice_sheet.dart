@@ -26,7 +26,7 @@ class _ProformaInvoiceSheetState extends State<ProformaInvoiceSheet> {
   bool _loading = true;
 
   double _dailyFee = 0.0;
-  int _totalCycleDays = 30;
+  int _activeCycleDays = 0;
   int _missedDays = 0;
   List<String> _missedDateList = [];
   String? _passengerTripName;
@@ -37,6 +37,27 @@ class _ProformaInvoiceSheetState extends State<ProformaInvoiceSheet> {
   void initState() {
     super.initState();
     _loadInvoiceDetails();
+  }
+
+  bool _isDayActive(DateTime date, Map<String, dynamic> schedule) {
+    switch (date.weekday) {
+      case DateTime.monday:
+        return schedule['active_monday'] == true;
+      case DateTime.tuesday:
+        return schedule['active_tuesday'] == true;
+      case DateTime.wednesday:
+        return schedule['active_wednesday'] == true;
+      case DateTime.thursday:
+        return schedule['active_thursday'] == true;
+      case DateTime.friday:
+        return schedule['active_friday'] == true;
+      case DateTime.saturday:
+        return schedule['active_saturday'] == true;
+      case DateTime.sunday:
+        return schedule['active_sunday'] == true;
+      default:
+        return false;
+    }
   }
 
   Future<void> _loadInvoiceDetails() async {
@@ -52,13 +73,15 @@ class _ProformaInvoiceSheetState extends State<ProformaInvoiceSheet> {
       final passengerTripId = sub?['passenger_trip_id']?.toString();
       final driverTripId = sub?['driver_trip_id']?.toString();
 
+      Map<String, dynamic> schedule = {};
       if (passengerTripId != null) {
         final pTrip = await _supabase
             .from('passenger_trips')
-            .select('trip_name')
+            .select('trip_name, active_monday, active_tuesday, active_wednesday, active_thursday, active_friday, active_saturday, active_sunday')
             .eq('id', passengerTripId)
             .maybeSingle();
         _passengerTripName = pTrip?['trip_name']?.toString();
+        if (pTrip != null) schedule = pTrip;
       }
 
       if (driverTripId != null) {
@@ -73,7 +96,9 @@ class _ProformaInvoiceSheetState extends State<ProformaInvoiceSheet> {
       final start = widget.payment.cycleStartDate;
       final end = widget.payment.cycleEndDate;
       if (start != null && end != null) {
-        _totalCycleDays = end.difference(start).inDays + 1;
+        for (var date = start; !date.isAfter(end); date = date.add(const Duration(days: 1))) {
+          if (_isDayActive(date, schedule)) _activeCycleDays++;
+        }
 
         final startStr = start.toIso8601String().split('T').first;
         final endStr = end.toIso8601String().split('T').first;
@@ -98,41 +123,16 @@ class _ProformaInvoiceSheetState extends State<ProformaInvoiceSheet> {
           final overlapStart = s.isBefore(start) ? start : s;
           final overlapEnd = e.isAfter(end) ? end : e;
           for (DateTime d = overlapStart; !d.isAfter(overlapEnd); d = d.add(const Duration(days: 1))) {
-            dates.add(d.toIso8601String().split('T').first);
+            if (_isDayActive(d, schedule)) {
+              dates.add(d.toIso8601String().split('T').first);
+            }
           }
         }
         _missedDateList = dates.toList()..sort();
-
-        // The missed-days COUNT (and therefore the deduction shown below)
-        // is derived from widget.payment.amount - the stored, backend
-        // self-healing value (PaymentSupabaseService.recalculateUnpaidInvoices
-        // keeps it in sync with tumpang_exception on every load) - NOT from
-        // re-summing the query above. Two independent computations of the
-        // same number can drift apart if either query has a bug, a stale
-        // cache, or a race; deriving from the authoritative amount instead
-        // makes it structurally impossible for this screen's breakdown to
-        // disagree with the total the passenger is actually charged.
-        if (_dailyFee > 0) {
-          final subtotal = _totalCycleDays * _dailyFee;
-          final derivedMissedDays = ((subtotal - widget.payment.amount) / _dailyFee).round();
-          _missedDays = derivedMissedDays.clamp(0, _totalCycleDays);
-
-          if (_missedDays != dates.length) {
-            // Surfaces a real mismatch (e.g. the exceptions query above
-            // found a different count than the amount implies) instead of
-            // silently hiding it - worth investigating if this ever fires.
-            debugPrint(
-              'Proforma mismatch for ${widget.payment.id}: amount implies '
-                  '$_missedDays missed day(s) but exceptions query found '
-                  '${dates.length}.',
-            );
-          }
-        } else {
-          _missedDays = dates.length;
-        }
+        _missedDays = dates.length;
       } else {
         if (_dailyFee > 0) {
-          _totalCycleDays = (widget.payment.amount / _dailyFee).round();
+          _activeCycleDays = (widget.payment.amount / _dailyFee).round();
         }
       }
     } catch (e) {
@@ -150,7 +150,7 @@ class _ProformaInvoiceSheetState extends State<ProformaInvoiceSheet> {
   @override
   Widget build(BuildContext context) {
     final dueDateStr = widget.payment.dueDate.toIso8601String().split('T').first;
-    final subtotal = _totalCycleDays * _dailyFee;
+    final subtotal = _activeCycleDays * _dailyFee;
     final deduction = _missedDays * _dailyFee;
     // The actual amount due is ALWAYS subtotal minus the deduction we just
     // computed - never the possibly-stale stored value. This is what
@@ -259,7 +259,7 @@ class _ProformaInvoiceSheetState extends State<ProformaInvoiceSheet> {
                 child: const Row(
                   children: [
                     Expanded(flex: 4, child: Text('Description', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
-                    Expanded(flex: 2, child: Text('Days', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                    Expanded(flex: 2, child: Text('Scheduled Days', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
                     Expanded(flex: 2, child: Text('Fee', textAlign: TextAlign.right, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
                     Expanded(flex: 3, child: Text('Subtotal', textAlign: TextAlign.right, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
                   ],
@@ -267,14 +267,14 @@ class _ProformaInvoiceSheetState extends State<ProformaInvoiceSheet> {
               ),
               _tableRow(
                 description: 'Tumpang Fee (${widget.payment.dateRange})',
-                days: '$_totalCycleDays days',
+                days: '$_activeCycleDays scheduled days',
                 fee: 'RM ${_dailyFee.toStringAsFixed(2)}',
                 subtotal: 'RM ${subtotal.toStringAsFixed(2)}',
               ),
               if (_missedDays > 0)
                 _tableRow(
                   description: 'Cant Fetch Deduction',
-                  days: '-$_missedDays days',
+                  days: '-$_missedDays scheduled days',
                   fee: 'RM ${_dailyFee.toStringAsFixed(2)}',
                   subtotal: '-RM ${deduction.toStringAsFixed(2)}',
                   isDeduction: true,
@@ -282,7 +282,7 @@ class _ProformaInvoiceSheetState extends State<ProformaInvoiceSheet> {
               else
                 _tableRow(
                   description: 'Cant Fetch Deduction',
-                  days: '0 days',
+                  days: '0 scheduled days',
                   fee: 'RM 0.00',
                   subtotal: 'RM 0.00',
                   isMuted: true,
