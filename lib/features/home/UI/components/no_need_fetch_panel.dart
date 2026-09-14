@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/components/base_profile_card.dart';
 import 'package:nak_tumpang/features/home/UI/components/exception_request_form/exception_request_form.dart';
@@ -137,25 +136,12 @@ class NoNeedFetchPanel extends StatelessWidget {
               initiatedByRole: 'passenger',
             );
             if (success) {
-              debugPrint('🔔 CantFetchPanel notify check — driverId="$driverId"');
-              if (driverId.isNotEmpty) {
-                try {
-                  await Supabase.instance.client.from('tumpang_notifications').insert({
-                    'id': 'NOTIF-${DateTime.now().millisecondsSinceEpoch}',
-                    'target_user_id': driverId,
-                    'title': 'New Schedule Exception',
-                    'message': 'Your passenger submitted a schedule exception request.',
-                    'type': 'exception',
-                    'is_read': false,
-                    'subscription_id': tumpangSubscriptionId,
-                  });
-                  debugPrint('✅ Notification inserted for passenger $driverId');
-                } catch (e) {
-                  debugPrint('🚨 Error sending notification: $e');
-                }
-              } else {
-                debugPrint('🚨 Skipped notification — driverId is empty!');
-              }
+              await vm.sendExceptionNotification(
+                targetUserId: driverId,
+                title: 'New Schedule Exception',
+                message: 'Your passenger submitted a schedule exception request.',
+                subscriptionId: tumpangSubscriptionId,
+              );
 
               vm.closeExceptionPanel();
               if (context.mounted) {

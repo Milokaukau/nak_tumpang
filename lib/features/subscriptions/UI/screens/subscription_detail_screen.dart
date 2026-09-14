@@ -9,7 +9,6 @@ import 'package:nak_tumpang/features/home/UI/components/no_need_fetch_panel.dart
 import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
 import 'package:nak_tumpang/features/negotiation/UI/components/route_map_header.dart';
 import 'package:nak_tumpang/features/subscriptions/UI/components/edit_exception_sheet.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nak_tumpang/core/services/network_service.dart';
 import 'package:nak_tumpang/features/subscriptions/data/services/subscription_local_service.dart';
 
@@ -74,13 +73,8 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
     }
 
     try {
-      final response = await Supabase.instance.client
-          .from('tumpang_exception')
-          .select('*')
-          .eq('tumpang_subscription_id', subscriptionId)
-          .order('start_date', ascending: false);
-
-      final fetched = List<Map<String, dynamic>>.from(response);
+      final vm = context.read<SubscriptionViewModel>();
+      final fetched = await vm.fetchAllExceptions(subscriptionId);
 
       // Populate the local cache so this still shows if we go offline
       // later. A caching failure shouldn't block showing the (successfully
@@ -296,23 +290,12 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
                     onSubmitted: () async {
                       Navigator.of(context).pop();
                       _refreshExceptions();
-                      // Notify other side
-                      final otherUserId = passengerId;
-                      if (otherUserId != null && otherUserId.toString().isNotEmpty) {
-                        try {
-                          await Supabase.instance.client.from('tumpang_notifications').insert({
-                            'id': 'NOTIF-${DateTime.now().millisecondsSinceEpoch}',
-                            'target_user_id': otherUserId,
-                            'title': 'New Schedule Exception Request',
-                            'message': 'Driver submitted a schedule exception request.',
-                            'type': 'exception',
-                            'is_read': false,
-                            'subscription_id': widget.subscription['id'],
-                          });
-                        } catch (e) {
-                          debugPrint('Error notifying exception: $e');
-                        }
-                      }
+                      await context.read<HomeViewModel>().sendExceptionNotification(
+                        targetUserId: passengerId ?? '',
+                        title: 'New Schedule Exception Request',
+                        message: 'Driver submitted a schedule exception request.',
+                        subscriptionId: widget.subscription['id'],
+                      );
                     },
                   )
                 else
@@ -330,23 +313,12 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
                     onSubmitted: () async {
                       Navigator.of(context).pop();
                       _refreshExceptions();
-                      // Notify other side
-                      final otherUserId = driverId;
-                      if (otherUserId != null && otherUserId.toString().isNotEmpty) {
-                        try {
-                          await Supabase.instance.client.from('tumpang_notifications').insert({
-                            'id': 'NOTIF-${DateTime.now().millisecondsSinceEpoch}',
-                            'target_user_id': otherUserId,
-                            'title': 'New Schedule Exception Request',
-                            'message': 'Passenger submitted a schedule exception request.',
-                            'type': 'exception',
-                            'is_read': false,
-                            'subscription_id': widget.subscription['id'],
-                          });
-                        } catch (e) {
-                          debugPrint('Error notifying exception: $e');
-                        }
-                      }
+                      await context.read<HomeViewModel>().sendExceptionNotification(
+                        targetUserId: driverId ?? '',
+                        title: 'New Schedule Exception Request',
+                        message: 'Passenger submitted a schedule exception request.',
+                        subscriptionId: widget.subscription['id'],
+                      );
                     },
                   ),
               ],

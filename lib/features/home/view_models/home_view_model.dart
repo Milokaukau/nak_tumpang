@@ -1470,4 +1470,35 @@ class HomeViewModel extends ChangeNotifier {
       ) {
     return _subscriptionService.fetchSubscriptionForNotification(subscriptionId, role);
   }
+
+  Future<List<Map<String, dynamic>>> fetchUnreadNotifications(String userId) {
+    return _subscriptionService.fetchUnreadNotifications(userId);
+  }
+
+  Future<void> markNotificationsAsRead(List<String> notificationIds) {
+    return _subscriptionService.markNotificationsAsRead(notificationIds);
+  }
+
+  Future<bool> sendExceptionNotification({
+    required String targetUserId,
+    required String title,
+    required String message,
+    required String subscriptionId,
+  }) async {
+    debugPrint('🔔 Notify check — targetUserId="$targetUserId"');
+    if (targetUserId.isEmpty) {
+      debugPrint('🚨 Skipped notification — targetUserId is empty!');
+      return false;
+    }
+
+    final success = await _homeService.sendExceptionNotification(
+      targetUserId: targetUserId,
+      title: title,
+      message: message,
+      subscriptionId: subscriptionId,
+    );
+
+    debugPrint(success ? '✅ Notification inserted for $targetUserId' : '🚨 Error sending notification');
+    return success;
+  }
 }

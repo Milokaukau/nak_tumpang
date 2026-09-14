@@ -368,6 +368,24 @@ class SubscriptionSupabaseService {
     }
   }
 
+  /// All exceptions for a subscription, any status, newest start_date
+  /// first. Used by the Schedule Changes tab, which shows a full history
+  /// (unlike fetchExceptionsForSubscription, which only returns 'active'
+  /// ones for the exception-list-summary component).
+  Future<List<Map<String, dynamic>>> fetchAllExceptionsForSubscription(String subscriptionId) async {
+    try {
+      final response = await _supabase
+          .from('tumpang_exception')
+          .select('*')
+          .eq('tumpang_subscription_id', subscriptionId)
+          .order('start_date', ascending: false);
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      print('Error in fetchAllExceptionsForSubscription: $e');
+      return [];
+    }
+  }
+
   String _formatDate(DateTime d) =>
       '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 }

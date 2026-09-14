@@ -316,6 +316,29 @@ class HomeSupabaseService {
     }
   }
 
+  Future<bool> sendExceptionNotification({
+    required String targetUserId,
+    required String title,
+    required String message,
+    required String subscriptionId,
+  }) async {
+    try {
+      await _supabase.from('tumpang_notifications').insert({
+        'id': 'NOTIF-${DateTime.now().millisecondsSinceEpoch}',
+        'target_user_id': targetUserId,
+        'title': title,
+        'message': message,
+        'type': 'exception',
+        'is_read': false,
+        'subscription_id': subscriptionId,
+      });
+      return true;
+    } catch (e) {
+      print('Error sending exception notification: $e');
+      return false;
+    }
+  }
+
   String _formatDate(DateTime date) => "${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}";
 
   double _calculateDistance(double lat1, double lon1, double lat2, double lon2) {
