@@ -382,7 +382,7 @@ class SubscriptionSupabaseService {
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
       print('Error in fetchAllExceptionsForSubscription: $e');
-      return [];
+      rethrow;
     }
   }
 

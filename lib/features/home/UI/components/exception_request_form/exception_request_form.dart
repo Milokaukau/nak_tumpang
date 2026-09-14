@@ -52,19 +52,34 @@ class ExceptionRequestForm extends StatelessWidget {
     final today = DateTime.now();
     final todayDateOnly = DateTime(today.year, today.month, today.day);
 
-    // Effective lower bound: whichever is LATER — today, or the
-    // subscription's own start date (if the subscription hasn't started
-    // yet, minDate could itself be in the future).
     final effectiveFirstDate = (minDate != null && minDate!.isAfter(todayDateOnly))
         ? minDate!
         : todayDateOnly;
 
+    final effectiveLastDate = maxDate ?? DateTime(2100);
+
+    // Guard: if the valid range is empty (e.g. subscription already ended,
+    // or maxDate is somehow before effectiveFirstDate), there's nothing
+    // pickable — don't open the picker at all.
+    if (effectiveLastDate.isBefore(effectiveFirstDate)) {
+      onDateError('No valid dates are available to select.');
+      return;
+    }
+
+    // Clamp the initial date into range, since a previously-saved value
+    // (e.g. editing an existing exception) may fall outside today's
+    // selectable window.
+    final rawInitial = (isStart ? startDate : endDate) ?? effectiveFirstDate;
+    DateTime initial = rawInitial;
+    if (initial.isBefore(effectiveFirstDate)) initial = effectiveFirstDate;
+    if (initial.isAfter(effectiveLastDate)) initial = effectiveLastDate;
+
     final picked = await showDatePicker(
       context: context,
-      initialDate: (isStart ? startDate : endDate) ?? effectiveFirstDate,
+      initialDate: initial,
       firstDate: effectiveFirstDate,
-      lastDate: maxDate ?? DateTime(2100),
-      locale: const Locale('en', 'GB'), // forces DD/MM/YYYY in the picker UI itself
+      lastDate: effectiveLastDate,
+      locale: const Locale('en', 'GB'),
     );
 
     if (picked != null) {
