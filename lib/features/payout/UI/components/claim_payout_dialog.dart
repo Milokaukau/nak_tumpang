@@ -258,24 +258,29 @@ class _MethodTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: selected ? AppColors.lightYellow : AppColors.white,
-          border: Border.all(color: selected ? AppColors.primaryYellow : AppColors.greyBorder),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Row(
-          children: [
-            Icon(icon, color: selected ? AppColors.primaryYellow : AppColors.greyText, size: 20),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
-            ),
-          ],
+    return Semantics(
+      selected: selected,
+      button: true,
+      label: label,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: selected ? AppColors.lightYellow : AppColors.white,
+            border: Border.all(color: selected ? AppColors.primaryYellow : AppColors.greyBorder),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, color: selected ? AppColors.primaryYellow : AppColors.greyText, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+              ),
+            ],
+          ),
         ),
       ),
     );

@@ -84,7 +84,7 @@ class _LocationAutocompleteFieldState extends State<LocationAutocompleteField> {
     if (place.isWater) {
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
-        ..showSnackBar(const SnackBar(content: Text('Please pick a location on lan')));
+        ..showSnackBar(const SnackBar(content: Text("Please pick a location on land — sea and ocean locations aren't allowed.")));
       setState(() => _suggestions = []);
       return;
     }

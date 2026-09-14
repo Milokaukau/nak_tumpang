@@ -138,6 +138,13 @@ class AddEditTripViewModel extends ChangeNotifier {
   void clearFromPlace() {
     if (fromPlace == null) return;
     fromPlace = null;
+    // _revalidateLocations() early-returns once either place is null, so
+    // it can never clear this itself — the same-location conflict is
+    // moot with only one place picked, but any other toError (e.g. "pick
+    // a valid destination") is still real and stays.
+    if (toError == "Pickup and drop-off can't be the same location") {
+      toError = null;
+    }
     notifyListeners();
   }
 
@@ -151,6 +158,12 @@ class AddEditTripViewModel extends ChangeNotifier {
   void clearToPlace() {
     if (toPlace == null) return;
     toPlace = null;
+    // Same reasoning as clearFromPlace — the same-location conflict no
+    // longer applies once toPlace is unset, but leave any other toError
+    // (e.g. "pick a valid destination") alone.
+    if (toError == "Pickup and drop-off can't be the same location") {
+      toError = null;
+    }
     notifyListeners();
   }
 

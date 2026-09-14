@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nak_tumpang/core/utils/validators.dart';
+import 'package:nak_tumpang/features/profile/data/services/profile_local_service.dart';
 import 'package:nak_tumpang/features/profile/data/services/profile_storage_service.dart';
 
 /// What the screen should do after [ProfileViewModel.save] returns.
@@ -27,6 +28,7 @@ class ProfileViewModel extends ChangeNotifier {
 
   final supabase = Supabase.instance.client;
   final _storageService = ProfileStorageService();
+  final _localService = ProfileLocalService();
 
   final nameController = TextEditingController();
   final phoneController = TextEditingController();
@@ -125,6 +127,19 @@ class ProfileViewModel extends ChangeNotifier {
       }
       _email = data?['email'] as String? ?? supabase.auth.currentUser?.email;
 
+      // Cache what we just fetched so a later loadProfile() can fall
+      // back to this if Supabase is unreachable — see the catch below.
+      if (data != null) {
+        await _localService.cacheUserProfile(
+          userId: userId,
+          name: data['name'] as String? ?? '',
+          email: _email ?? '',
+          phone: data['phone'] as String? ?? '',
+          role: _role,
+          avatarUrl: avatarUrl,
+        );
+      }
+
       // License number/photo live on driver_profiles, not users — only
       // drivers have a row there, so only look it up for drivers.
       if (_role == 'driver') {
@@ -141,6 +156,38 @@ class ProfileViewModel extends ChangeNotifier {
             path: _licensePath!,
           );
         }
+        await _localService.cacheDriverLicense(
+          userId: userId,
+          licenseNumber: licenseNumberController.text,
+          licenseUrl: _licensePath,
+        );
+      }
+    } catch (e) {
+      // Supabase unreachable (offline, DNS failure, etc.) — fall back to
+      // whatever was cached from the last successful load, so the
+      // screen shows the driver's last-known profile instead of a blank
+      // or crashed one.
+      debugPrint('loadProfile failed, falling back to local cache: $e');
+      final cached = await _localService.getCachedUserProfile(userId);
+      if (cached != null) {
+        nameController.text = cached['name'] as String? ?? '';
+        phoneController.text = Validators.localDigitsFromStored(cached['phone'] as String?);
+        _role = cached['role'] as String? ?? 'passenger';
+        _originalRole = _role;
+        avatarUrl = cached['avatar_url'] as String?;
+        _email = cached['email'] as String?;
+
+        if (_role == 'driver') {
+          final cachedLicense = await _localService.getCachedDriverLicense(userId);
+          licenseNumberController.text = cachedLicense?['license_number'] as String? ?? '';
+          _licensePath = cachedLicense?['license_url'] as String?;
+          // Signed URLs are short-lived and Storage isn't reachable
+          // right now anyway, so there's no photo to show offline —
+          // the license number still displays.
+        }
+        errorMessage = "Showing your last saved profile — you're offline.";
+      } else {
+        errorMessage = 'Could not load your profile. Please check your connection.';
       }
     } finally {
       isLoading = false;
@@ -432,6 +479,25 @@ class ProfileViewModel extends ChangeNotifier {
             'license_url': _licensePath,
           });
         }
+
+        // Mirror what just committed to Supabase into the local cache,
+        // so an offline loadProfile() afterward reflects this save
+        // rather than whatever was cached before it.
+        await _localService.cacheUserProfile(
+          userId: userId,
+          name: nameController.text.trim(),
+          email: _email ?? '',
+          phone: Validators.toStoredPhone(phoneController.text),
+          role: roleToSave,
+          avatarUrl: avatarUrl,
+        );
+        if (roleToSave == 'driver') {
+          await _localService.cacheDriverLicense(
+            userId: userId,
+            licenseNumber: licenseNumberController.text.trim(),
+            licenseUrl: _licensePath,
+          );
+        }
       } catch (e) {
         // Neither DB write can be trusted to have committed (upsert
         // isn't itself transactional across the two calls), so roll
@@ -454,6 +520,13 @@ class ProfileViewModel extends ChangeNotifier {
         rethrow;
       }
       _pendingAvatarFileName = null;
+      // Committed — the DB row now points at the uploaded file(s), so
+      // drop the in-memory copies. Without this, saving again in the
+      // same screen session (e.g. after just editing the name) would
+      // re-upload the same avatar/license under a new filename and
+      // delete the file this save just committed, for no reason.
+      avatarBytes = null;
+      licenseBytes = null;
 
       // The new file(s) are now safely referenced by the DB row that
       // just committed — the previous avatar/license (if this save

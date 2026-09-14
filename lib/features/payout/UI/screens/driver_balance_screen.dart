@@ -95,21 +95,26 @@ class _ToggleTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        decoration: BoxDecoration(
-          color: selected ? AppColors.primaryYellow : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Text(
-          label,
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            color: selected ? AppColors.black : AppColors.greyText,
+    return Semantics(
+      selected: selected,
+      button: true,
+      label: label,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            color: selected ? AppColors.primaryYellow : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: selected ? AppColors.black : AppColors.greyText,
+            ),
           ),
         ),
       ),
@@ -215,11 +220,42 @@ class _HistoryTab extends StatelessWidget {
       return const Center(child: CircularProgressIndicator());
     }
     if (vm.historyError != null) {
-      return Center(child: Text(vm.historyError!, style: const TextStyle(color: AppColors.greyText)));
+      return RefreshIndicator(
+        onRefresh: vm.refreshHistory,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            SizedBox(
+              height: 300,
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(vm.historyError!, style: const TextStyle(color: AppColors.greyText)),
+                    const SizedBox(height: 12),
+                    TextButton(onPressed: vm.refreshHistory, child: const Text('Retry')),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
     }
     if (!vm.hasAnyHistory) {
-      return const Center(
-        child: Text('No payout history yet.', style: TextStyle(color: AppColors.greyText)),
+      return RefreshIndicator(
+        onRefresh: vm.refreshHistory,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: const [
+            SizedBox(
+              height: 300,
+              child: Center(
+                child: Text('No payout history yet.', style: TextStyle(color: AppColors.greyText)),
+              ),
+            ),
+          ],
+        ),
       );
     }
 
@@ -242,8 +278,19 @@ class _HistoryTab extends StatelessWidget {
         ),
         Expanded(
           child: filtered.isEmpty
-              ? const Center(
-            child: Text('No payouts in this month.', style: TextStyle(color: AppColors.greyText)),
+              ? RefreshIndicator(
+            onRefresh: vm.refreshHistory,
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              children: const [
+                SizedBox(
+                  height: 300,
+                  child: Center(
+                    child: Text('No payouts in this month.', style: TextStyle(color: AppColors.greyText)),
+                  ),
+                ),
+              ],
+            ),
           )
               : RefreshIndicator(
             onRefresh: vm.refreshHistory,
@@ -258,6 +305,7 @@ class _HistoryTab extends StatelessWidget {
                 return false;
               },
               child: ListView.builder(
+                physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.all(16),
                 itemCount: filtered.length + (vm.hasMoreHistory ? 1 : 0),
                 itemBuilder: (context, index) {

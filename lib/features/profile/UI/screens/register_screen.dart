@@ -40,28 +40,26 @@ class _RegisterViewState extends State<_RegisterView> {
     final choice = await GetStartedDialog.show(context);
     if (!mounted) return;
 
-    if (choice == 'add_trip' && vm.role == 'driver') {
+    if (choice == 'add_trip') {
       // Land on Home first (replacing RegisterScreen, whose only path
       // back is LoginScreen — confusing to land on once already
       // registered and signed in), then push the same add-trip screen
       // used from the sidebar on top of it. That way the back stack is
       // [Home, AddEditTrip], so backing out lands on Home instead of
-      // Login. role: 'driver' is passed explicitly — see
+      // Login. role is passed explicitly (rather than left to
+      // AddEditTripScreen's MyTripsViewModel fallback) — see
       // AddEditTripScreen's doc comment for why it can't just read
       // MyTripsViewModel.currentUserRole here.
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const HomeScreen()),
       );
       Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const AddEditTripScreen(role: 'driver')),
+        MaterialPageRoute(builder: (_) => AddEditTripScreen(role: vm.role)),
       );
       return;
     }
 
-    // 'later', or a passenger choosing 'add_trip' — the real passenger
-    // add-trip flow doesn't exist yet, so fall through to home for now.
-    // TODO: once the real add-trip screen exists, push into that flow
-    // instead of the home page placeholder.
+    // 'later' — just go to Home.
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(builder: (_) => const HomeScreen()),
     );
@@ -219,7 +217,7 @@ class _RegisterViewState extends State<_RegisterView> {
               Padding(
                 padding: const EdgeInsets.only(top: 2),
                 child: Text(
-                  'At least 6 characters, with a lowercase letter, an uppercase letter, a number and a special character',
+                  'At least 6 characters, with a lowercase letter, an uppercase letter, a number and a special character (e.g. ! @ # \$ % & *)',
                   style: TextStyle(color: AppColors.greyText, fontSize: 11),
                 ),
               ),

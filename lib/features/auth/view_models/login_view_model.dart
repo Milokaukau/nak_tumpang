@@ -120,16 +120,31 @@ class LoginViewModel extends ChangeNotifier {
         });
 
         if (role == 'driver') {
-          // The license was never uploaded here — there's no local copy
-          // of the picked photo left to fall back on this far after
-          // registration — so nudge them to add it from their profile.
-          await _supabase.from('driver_profiles').upsert({
-            'user_id': userId,
-            'total_earnings': 0,
-            'available_balance': 0,
-            'total_withdrawn': 0,
-          });
-          driverLicenseNeedsReupload = true;
+          // Same existence check as the self-heal branch below, and for
+          // the same reason: `existingRow == null` means no `users` row
+          // was found, but that's not proof driver_profiles is also
+          // missing — maybeSingle() also returns null on an RLS-hidden
+          // row, and if driver_profiles genuinely already has a real
+          // balance, upserting zeros here would silently wipe it.
+          final driverProfile = await _supabase
+              .from('driver_profiles')
+              .select('user_id')
+              .eq('user_id', userId)
+              .maybeSingle();
+
+          if (driverProfile == null) {
+            // The license was never uploaded here — there's no local
+            // copy of the picked photo left to fall back on this far
+            // after registration — so nudge them to add it from their
+            // profile.
+            await _supabase.from('driver_profiles').upsert({
+              'user_id': userId,
+              'total_earnings': 0,
+              'available_balance': 0,
+              'total_withdrawn': 0,
+            });
+            driverLicenseNeedsReupload = true;
+          }
         }
       } else if (existingRow['role'] == 'driver') {
         // Self-heal: a driver's `users` and `driver_profiles` rows are

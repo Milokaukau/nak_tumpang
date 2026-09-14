@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nak_tumpang/core/utils/validators.dart';
+import 'package:nak_tumpang/features/profile/data/services/profile_local_service.dart';
 import 'package:nak_tumpang/features/profile/data/services/profile_storage_service.dart';
 
 class RegisterViewModel extends ChangeNotifier {
@@ -36,6 +37,7 @@ class RegisterViewModel extends ChangeNotifier {
   String? licenseStoragePath;
 
   final _storageService = ProfileStorageService();
+  final _localService = ProfileLocalService();
 
   bool obscurePassword = true;
   bool obscureConfirmPassword = true;
@@ -239,6 +241,24 @@ class RegisterViewModel extends ChangeNotifier {
             'license_number': trimmedLicenseNumber,
             'license_url': licenseStoragePath,
           });
+        }
+
+        // Seed the local cache with the account that was just created,
+        // so ProfileViewModel.loadProfile() has something to fall back
+        // to even before the very first successful load from Supabase.
+        await _localService.cacheUserProfile(
+          userId: newUserId,
+          name: nameController.text.trim(),
+          email: emailController.text.trim(),
+          phone: fullPhoneForStorage,
+          role: role,
+        );
+        if (role == 'driver') {
+          await _localService.cacheDriverLicense(
+            userId: newUserId,
+            licenseNumber: trimmedLicenseNumber,
+            licenseUrl: licenseStoragePath,
+          );
         }
       } catch (e) {
         // Neither write can be trusted to have committed — clean up the

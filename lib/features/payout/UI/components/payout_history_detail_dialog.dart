@@ -14,71 +14,73 @@ class PayoutHistoryDetailDialog extends StatelessWidget {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  entry.isEwallet ? Icons.account_balance_wallet : Icons.account_balance,
-                  color: AppColors.primaryYellow,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    entry.isEwallet ? Icons.account_balance_wallet : Icons.account_balance,
+                    color: AppColors.primaryYellow,
+                  ),
+                  const SizedBox(width: 8),
+                  const Text('Payout details', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                  const Spacer(),
+                  _StatusPill(status: entry.status),
+                ],
+              ),
+              const SizedBox(height: 16),
+              _DetailRow(
+                icon: Icons.monetization_on_outlined,
+                label: 'Amount',
+                value: 'RM${entry.amount.toStringAsFixed(2)}',
+              ),
+              if (entry.resolvedFee > 0) ...[
+                const SizedBox(height: 12),
+                _DetailRow(
+                  icon: Icons.remove_circle_outline,
+                  label: 'Processing fee',
+                  value: '-RM${entry.resolvedFee.toStringAsFixed(2)}',
                 ),
-                const SizedBox(width: 8),
-                const Text('Payout details', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-                const Spacer(),
-                _StatusPill(status: entry.status),
+                const SizedBox(height: 12),
+                _DetailRow(
+                  icon: Icons.check_circle_outline,
+                  label: 'Net received',
+                  value: 'RM${entry.netAmount.toStringAsFixed(2)}',
+                ),
               ],
-            ),
-            const SizedBox(height: 16),
-            _DetailRow(
-              icon: Icons.monetization_on_outlined,
-              label: 'Amount',
-              value: 'RM${entry.amount.toStringAsFixed(2)}',
-            ),
-            if (entry.resolvedFee > 0) ...[
               const SizedBox(height: 12),
               _DetailRow(
-                icon: Icons.remove_circle_outline,
-                label: 'Processing fee',
-                value: '-RM${entry.resolvedFee.toStringAsFixed(2)}',
+                icon: entry.isEwallet ? Icons.account_balance_wallet_outlined : Icons.account_balance_outlined,
+                label: 'Method',
+                value: entry.isEwallet ? "Touch 'n Go eWallet" : 'Bank transfer',
               ),
+              if (!entry.isEwallet) ...[
+                const SizedBox(height: 12),
+                _DetailRow(icon: Icons.account_balance_outlined, label: 'Bank', value: entry.bankName ?? '-'),
+              ],
               const SizedBox(height: 12),
               _DetailRow(
-                icon: Icons.check_circle_outline,
-                label: 'Net received',
-                value: 'RM${entry.netAmount.toStringAsFixed(2)}',
+                icon: Icons.tag,
+                label: entry.isEwallet ? 'Phone number' : 'Account number',
+                value: entry.maskedDestination,
               ),
-            ],
-            const SizedBox(height: 12),
-            _DetailRow(
-              icon: entry.isEwallet ? Icons.account_balance_wallet_outlined : Icons.account_balance_outlined,
-              label: 'Method',
-              value: entry.isEwallet ? "Touch 'n Go eWallet" : 'Bank transfer',
-            ),
-            if (!entry.isEwallet) ...[
               const SizedBox(height: 12),
-              _DetailRow(icon: Icons.account_balance_outlined, label: 'Bank', value: entry.bankName ?? '-'),
-            ],
-            const SizedBox(height: 12),
-            _DetailRow(
-              icon: Icons.tag,
-              label: entry.isEwallet ? 'Phone number' : 'Account number',
-              value: entry.maskedDestination,
-            ),
-            const SizedBox(height: 12),
-            _DetailRow(icon: Icons.calendar_today_outlined, label: 'Requested', value: _formatDate(entry.requestedAt)),
-            const SizedBox(height: 12),
-            _DetailRow(icon: Icons.receipt_long_outlined, label: 'Transaction ID', value: entry.id),
-            const SizedBox(height: 20),
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Close'),
+              _DetailRow(icon: Icons.calendar_today_outlined, label: 'Requested', value: _formatDate(entry.requestedAt)),
+              const SizedBox(height: 12),
+              _DetailRow(icon: Icons.receipt_long_outlined, label: 'Transaction ID', value: entry.id),
+              const SizedBox(height: 20),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Close'),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

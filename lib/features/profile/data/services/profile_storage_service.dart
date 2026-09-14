@@ -59,10 +59,18 @@ class ProfileStorageService {
     }
     try {
       final codec = await ui.instantiateImageCodec(bytes);
-      final frame = await codec.getNextFrame();
-      final image = frame.image;
-      final tooSmall = image.width < _minDimension || image.height < _minDimension;
-      image.dispose();
+      final bool tooSmall;
+      try {
+        final frame = await codec.getNextFrame();
+        final image = frame.image;
+        tooSmall = image.width < _minDimension || image.height < _minDimension;
+        image.dispose();
+      } finally {
+        // Codec.dispose() releases native decoder resources that aren't
+        // guaranteed to be freed just because the decoded image was —
+        // matters here since this runs on every photo pick, not just once.
+        codec.dispose();
+      }
       if (tooSmall) {
         return const ImageCheckResult.invalid('This image is too low-resolution to be readable. Please choose a clearer photo.');
       }

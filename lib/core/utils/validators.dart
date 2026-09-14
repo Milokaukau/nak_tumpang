@@ -8,6 +8,7 @@ class Validators {
   static String? name(String? v) {
     if (v == null || v.trim().isEmpty) return 'Full name is required';
     if (v.trim().length < 2) return 'Name is too short';
+    if (RegExp(r'[0-9]').hasMatch(v)) return 'Name cannot contain numbers';
     return null;
   }
 
@@ -78,7 +79,7 @@ class Validators {
         !RegExp(r'[A-Z]').hasMatch(v) ||
         !RegExp(r'[0-9]').hasMatch(v) ||
         !_specialCharRegex.hasMatch(v)) {
-      return 'Include a lowercase letter, an uppercase letter, a number, and a special character';
+      return 'Include a lowercase letter, an uppercase letter, a number, and a special character (e.g. ! @ # \$ % & *)';
     }
     return null;
   }
