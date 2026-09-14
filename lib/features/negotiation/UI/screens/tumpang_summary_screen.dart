@@ -199,14 +199,33 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
           }
 
           final request = snapshot.data!['request'] as TumpangRequest;
+          final schedule = (snapshot.data!['schedule'] as Map<String, dynamic>?) ?? {};
           final dailyFee = request.fee.value;
           final depositDays = _calculateDepositDays(request.subscriptionDays);
-          final targetTotalDeposit = depositDays * dailyFee;
+          final startDate = DateTime.tryParse(request.subscriptionStartDate.value);
+          final endDate = DateTime.tryParse(request.subscriptionEndDate.value);
+          if (startDate == null || endDate == null) {
+            return const Center(child: Text('Invalid subscription dates.'));
+          }
+          final depositEndDate = startDate
+              .add(const Duration(days: 59))
+              .isAfter(endDate)
+              ? endDate
+              : startDate.add(const Duration(days: 59));
+          final depositActiveDays = NegotiationViewModel.countActiveDays(
+            startDate,
+            depositEndDate,
+            schedule,
+          );
+          final targetTotalDeposit = depositActiveDays * dailyFee;
           final bool depositCapped = request.subscriptionDays > 60;
+          final totalActiveDays = NegotiationViewModel.countActiveDays(startDate, endDate, schedule);
 
           final invoicePeriods = NegotiationViewModel.calculateInvoicePeriods(
-            subscriptionDays: request.subscriptionDays,
+            startDate: startDate,
+            endDate: endDate,
             dailyFee: dailyFee,
+            schedule: schedule,
             depositDays: depositDays,
           );
           final int remainingDays = invoicePeriods.fold<int>(0, (sum, p) => sum + (p['days'] as int));
@@ -261,7 +280,7 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
                         _SummaryRow(
                           label: 'Tumpang Fee',
                           value: 'RM ${dailyFee.toStringAsFixed(2)}/day\n'
-                              'RM ${request.totalFee.toStringAsFixed(2)} for ${request.subscriptionDays} day${request.subscriptionDays == 1 ? '' : 's'}',
+                              'RM ${(dailyFee * totalActiveDays).toStringAsFixed(2)} for $totalActiveDays active day${totalActiveDays == 1 ? '' : 's'}',
                           isBold: true,
                         ),
                         const SizedBox(height: 8),
@@ -269,8 +288,8 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
                         _SummaryRow(
                           label: request.isExtension ? 'Required Deposit' : 'Deposit',
                           value: 'RM ${targetTotalDeposit.toStringAsFixed(2)} '
-                              '($depositDays day${depositDays == 1 ? '' : 's'}'
-                              '${depositCapped ? ' deposit, capped at 60 days' : ' deposit'})',
+                              '($depositActiveDays active day${depositActiveDays == 1 ? '' : 's'} charged'
+                              '${depositCapped ? ' in the first 60 calendar days' : ''})',
                           isBold: true,
                         ),
 

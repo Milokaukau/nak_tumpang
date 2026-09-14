@@ -536,6 +536,20 @@ class NegotiationViewModel extends ChangeNotifier {
     final req = await getSingleRequest(requestId);
     if (req == null) return null;
 
+    Map<String, dynamic> schedule = {};
+    if (!isOffline) {
+      try {
+        final trip = await _supabase
+            .from('passenger_trips')
+            .select('active_monday, active_tuesday, active_wednesday, active_thursday, active_friday, active_saturday, active_sunday')
+            .eq('id', req.passengerTripId)
+            .maybeSingle();
+        if (trip != null) schedule = trip;
+      } catch (e) {
+        debugPrint('Error fetching passenger schedule for summary: $e');
+      }
+    }
+
     double oldDeposit = 0.0;
     if (req.isExtension && req.extendsSubscriptionId != null) {
       final oldSub = await getSubscriptionById(req.extendsSubscriptionId!);
@@ -545,6 +559,7 @@ class NegotiationViewModel extends ChangeNotifier {
     return {
       'request': req,
       'oldDeposit': oldDeposit,
+      'schedule': schedule,
     };
   }
 
@@ -559,25 +574,71 @@ class NegotiationViewModel extends ChangeNotifier {
     });
   }
 
+  /// Whether [date] is an active ride day in a passenger trip schedule.
+  static bool isDayActive(DateTime date, Map<String, dynamic> schedule) {
+    switch (date.weekday) {
+      case DateTime.monday:
+        return schedule['active_monday'] == true;
+      case DateTime.tuesday:
+        return schedule['active_tuesday'] == true;
+      case DateTime.wednesday:
+        return schedule['active_wednesday'] == true;
+      case DateTime.thursday:
+        return schedule['active_thursday'] == true;
+      case DateTime.friday:
+        return schedule['active_friday'] == true;
+      case DateTime.saturday:
+        return schedule['active_saturday'] == true;
+      case DateTime.sunday:
+        return schedule['active_sunday'] == true;
+      default:
+        return false;
+    }
+  }
+
+  /// Counts scheduled ride days inclusively between [start] and [end].
+  static int countActiveDays(
+    DateTime start,
+    DateTime end,
+    Map<String, dynamic> schedule,
+  ) {
+    if (end.isBefore(start)) return 0;
+
+    var count = 0;
+    for (var date = DateTime(start.year, start.month, start.day);
+        !date.isAfter(end);
+        date = date.add(const Duration(days: 1))) {
+      if (isDayActive(date, schedule)) count++;
+    }
+    return count;
+  }
+
   static List<Map<String, dynamic>> calculateInvoicePeriods({
-    required int subscriptionDays,
+    required DateTime startDate,
+    required DateTime endDate,
     required double dailyFee,
+    required Map<String, dynamic> schedule,
     int depositDays = 60,
     int invoiceCycleDays = 30,
   }) {
     final periods = <Map<String, dynamic>>[];
-    int remaining = subscriptionDays - depositDays;
-    int cursor = depositDays;
-    while (remaining > 0) {
-      final periodDays = remaining >= invoiceCycleDays ? invoiceCycleDays : remaining;
+    if (endDate.isBefore(startDate)) return periods;
+
+    var cycleStart = startDate.add(Duration(days: depositDays));
+    while (!cycleStart.isAfter(endDate)) {
+      final cycleEnd = cycleStart
+          .add(Duration(days: invoiceCycleDays - 1))
+          .isAfter(endDate)
+          ? endDate
+          : cycleStart.add(Duration(days: invoiceCycleDays - 1));
+      final activeDays = countActiveDays(cycleStart, cycleEnd, schedule);
       periods.add({
-        'startDay': cursor,
-        'endDay': cursor + periodDays,
-        'days': periodDays,
-        'amount': dailyFee * periodDays,
+        'startDay': cycleStart.difference(startDate).inDays + 1,
+        'endDay': cycleEnd.difference(startDate).inDays + 1,
+        'days': activeDays,
+        'amount': dailyFee * activeDays,
       });
-      cursor += periodDays;
-      remaining -= periodDays;
+      cycleStart = cycleEnd.add(const Duration(days: 1));
     }
     return periods;
   }

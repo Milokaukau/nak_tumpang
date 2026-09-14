@@ -6,18 +6,59 @@ class PaymentSupabaseService {
   final SupabaseClient _supabase = Supabase.instance.client;
   final String _table = 'payments';
 
-  DateTime _addOneMonthClamped(DateTime d) {
-    final year = d.month == 12 ? d.year + 1 : d.year;
-    final month = d.month == 12 ? 1 : d.month + 1;
-    final daysInTargetMonth = DateTime(year, month + 1, 0).day;
-    final day = d.day > daysInTargetMonth ? daysInTargetMonth : d.day;
-    return DateTime(year, month, day);
+  /// Returns whether [date] is one of the passenger's scheduled ride days.
+  bool _isDayActive(DateTime date, Map<String, dynamic> schedule) {
+    switch (date.weekday) {
+      case 1: return schedule['active_monday'] == true;
+      case 2: return schedule['active_tuesday'] == true;
+      case 3: return schedule['active_wednesday'] == true;
+      case 4: return schedule['active_thursday'] == true;
+      case 5: return schedule['active_friday'] == true;
+      case 6: return schedule['active_saturday'] == true;
+      case 7: return schedule['active_sunday'] == true;
+      default: return false;
+    }
+  }
+
+  /// Counts driver-caused missed days within [cycleStart]..[cycleEnd].
+  /// Passenger-initiated exceptions ("no need fetch") are NOT deducted -
+  /// only the driver failing to provide the ride reduces what's billed.
+  Future<int> _countDriverMissedDays(
+    String subscriptionId,
+    DateTime cycleStart,
+    DateTime cycleEnd,
+    Map<String, dynamic> schedule,
+  ) async {
+    final cycleStartStr = cycleStart.toIso8601String().split('T').first;
+    final cycleEndStr = cycleEnd.toIso8601String().split('T').first;
+
+    final exceptions = await _supabase
+        .from('tumpang_exception')
+        .select('start_date, end_date')
+        .eq('tumpang_subscription_id', subscriptionId)
+        .eq('initiated_by_role', 'driver')
+        .lte('start_date', cycleEndStr)
+        .gte('end_date', cycleStartStr);
+
+    final missedDates = <String>{};
+    for (final row in (exceptions as List)) {
+      final excStart = DateTime.parse(row['start_date'].toString());
+      final excEnd = DateTime.parse(row['end_date'].toString());
+      final overlapStart = excStart.isBefore(cycleStart) ? cycleStart : excStart;
+      final overlapEnd = excEnd.isAfter(cycleEnd) ? cycleEnd : excEnd;
+      for (DateTime d = overlapStart; !d.isAfter(overlapEnd); d = d.add(const Duration(days: 1))) {
+        if (_isDayActive(d, schedule)) {
+          missedDates.add(d.toIso8601String().split('T').first);
+        }
+      }
+    }
+    return missedDates.length;
   }
 
   Future<void> generateDueInvoicesForSubscription(String subscriptionId) async {
     final sub = await _supabase
         .from('tumpang_subscription')
-        .select('subscription_start_date, subscription_end_date, fee')
+        .select('subscription_start_date, subscription_end_date, fee, passenger_trip_id')
         .eq('id', subscriptionId)
         .maybeSingle();
 
@@ -27,6 +68,15 @@ class PaymentSupabaseService {
     final endDate = DateTime.tryParse(sub['subscription_end_date']?.toString() ?? '');
     final dailyFee = double.tryParse(sub['fee']?.toString() ?? '') ?? 0.0;
     if (startDate == null || endDate == null) return;
+
+    final passengerTripId = sub['passenger_trip_id']?.toString();
+    if (passengerTripId == null) return;
+    final schedule = await _supabase
+        .from('passenger_trips')
+        .select('active_monday, active_tuesday, active_wednesday, active_thursday, active_friday, active_saturday, active_sunday')
+        .eq('id', passengerTripId)
+        .maybeSingle();
+    if (schedule == null) return;
 
     final totalDays = endDate.difference(startDate).inDays + 1;
     if (totalDays <= 60) return;
@@ -38,49 +88,42 @@ class PaymentSupabaseService {
     DateTime cycleStart = depositEndDate.add(const Duration(days: 1));
 
     while (!cycleStart.isAfter(endDate)) {
-      DateTime cycleEnd = _addOneMonthClamped(cycleStart).subtract(const Duration(days: 1));
+      DateTime cycleEnd = cycleStart.add(const Duration(days: 29));
+
       if (cycleEnd.isAfter(endDate)) {
         cycleEnd = endDate;
       }
 
-      if (!cycleEnd.isAfter(today)) {
+      DateTime nextCycleStart = cycleEnd.add(const Duration(days: 1));
+
+      if (!cycleStart.isAfter(today)) {
         final cycleStartStr = cycleStart.toIso8601String().split('T').first;
         final cycleEndStr = cycleEnd.toIso8601String().split('T').first;
 
-        final existing = await _supabase
+        final existingOverlap = await _supabase
             .from(_table)
-            .select('id')
+            .select('id, cycle_start_date, cycle_end_date')
             .eq('tumpang_subscription_id', subscriptionId)
-            .eq('cycle_start_date', cycleStartStr)
-            .maybeSingle();
+            .lte('cycle_start_date', cycleEndStr)
+            .gte('cycle_end_date', cycleStartStr);
 
-        if (existing == null) {
-          final cycleDays = cycleEnd.difference(cycleStart).inDays + 1;
-
-          final exceptions = await _supabase
-              .from('tumpang_exception')
-              .select('start_date, end_date')
-              .eq('tumpang_subscription_id', subscriptionId)
-              .lte('start_date', cycleEndStr)
-              .gte('end_date', cycleStartStr);
-
-          final missedDates = <String>{};
-          for (final row in (exceptions as List)) {
-            final excStart = DateTime.parse(row['start_date'].toString());
-            final excEnd = DateTime.parse(row['end_date'].toString());
-            final overlapStart = excStart.isBefore(cycleStart) ? cycleStart : excStart;
-            final overlapEnd = excEnd.isAfter(cycleEnd) ? cycleEnd : excEnd;
-            for (DateTime d = overlapStart; !d.isAfter(overlapEnd); d = d.add(const Duration(days: 1))) {
-              missedDates.add(d.toIso8601String().split('T').first);
+        if ((existingOverlap as List).isNotEmpty) {
+          for (final row in existingOverlap) {
+            final existingEnd = DateTime.tryParse(row['cycle_end_date']?.toString() ?? '');
+            if (existingEnd != null && existingEnd.add(const Duration(days: 1)).isAfter(nextCycleStart)) {
+              nextCycleStart = existingEnd.add(const Duration(days: 1));
             }
           }
-          final missedDays = missedDates.length;
-
-          final billableDays = (cycleDays - missedDays).clamp(0, cycleDays);
+        } else {
+          var activeCycleDays = 0;
+          for (var date = cycleStart; !date.isAfter(cycleEnd); date = date.add(const Duration(days: 1))) {
+            if (_isDayActive(date, schedule)) activeCycleDays++;
+          }
+          final missedDays = await _countDriverMissedDays(subscriptionId, cycleStart, cycleEnd, schedule);
+          final billableDays = (activeCycleDays - missedDays).clamp(0, activeCycleDays);
           final amount = dailyFee * billableDays;
 
           final dueDate = DateTime(cycleEnd.year, cycleEnd.month + 1, 1);
-
           final paymentId = 'pay_${DateTime.now().millisecondsSinceEpoch}_${cycleStartStr.replaceAll('-', '')}';
 
           await _supabase.from(_table).insert({
@@ -96,7 +139,56 @@ class PaymentSupabaseService {
           });
         }
       }
-      cycleStart = cycleEnd.add(const Duration(days: 1));
+      cycleStart = nextCycleStart;
+    }
+  }
+
+  Future<void> recalculateUnpaidInvoices(List<Map<String, dynamic>> unpaidPaymentRows) async {
+    for (final row in unpaidPaymentRows) {
+      try {
+        final paymentId = row['id']?.toString();
+        final subscriptionId = row['tumpang_subscription_id']?.toString();
+        final cycleStartStr = row['cycle_start_date']?.toString();
+        final cycleEndStr = row['cycle_end_date']?.toString();
+        if (paymentId == null || subscriptionId == null || cycleStartStr == null || cycleEndStr == null) {
+          continue;
+        }
+
+        final cycleStart = DateTime.tryParse(cycleStartStr);
+        final cycleEnd = DateTime.tryParse(cycleEndStr);
+        if (cycleStart == null || cycleEnd == null) continue;
+
+        final sub = await _supabase
+            .from('tumpang_subscription')
+            .select('fee, passenger_trip_id')
+            .eq('id', subscriptionId)
+            .maybeSingle();
+        final dailyFee = double.tryParse(sub?['fee']?.toString() ?? '') ?? 0.0;
+        final passengerTripId = sub?['passenger_trip_id']?.toString();
+        if (passengerTripId == null) continue;
+        final schedule = await _supabase
+            .from('passenger_trips')
+            .select('active_monday, active_tuesday, active_wednesday, active_thursday, active_friday, active_saturday, active_sunday')
+            .eq('id', passengerTripId)
+            .maybeSingle();
+        if (schedule == null) continue;
+
+        var activeCycleDays = 0;
+        for (var date = cycleStart; !date.isAfter(cycleEnd); date = date.add(const Duration(days: 1))) {
+          if (_isDayActive(date, schedule)) activeCycleDays++;
+        }
+        final missedDays = await _countDriverMissedDays(subscriptionId, cycleStart, cycleEnd, schedule);
+        final billableDays = (activeCycleDays - missedDays).clamp(0, activeCycleDays);
+        final correctAmount = dailyFee * billableDays;
+
+        final currentAmount = double.tryParse(row['amount']?.toString() ?? '') ?? 0.0;
+        if ((correctAmount - currentAmount).abs() > 0.005) {
+          await _supabase.from(_table).update({'amount': correctAmount}).eq('id', paymentId);
+          row['amount'] = correctAmount;
+        }
+      } catch (e) {
+        debugPrint('Error recalculating invoice ${row['id']}: $e');
+      }
     }
   }
 
@@ -153,7 +245,10 @@ class PaymentSupabaseService {
           .isFilter('paid_at', null)
           .order('due_date', ascending: true);
 
-      return response.map((json) => Payment.fromJson(json)).toList();
+      final rows = (response as List).cast<Map<String, dynamic>>();
+      await recalculateUnpaidInvoices(rows);
+
+      return rows.map((json) => Payment.fromJson(json)).toList();
     } catch (e, stack) {
       debugPrint('Error fetching pending payments: $e\n$stack');
       rethrow;
@@ -204,9 +299,6 @@ class PaymentSupabaseService {
   // CANCELLATION BILLING LOGIC
   // =========================================================================
 
-  /// Calculates the exact cancellation fee based on ACTUAL fetched days.
-  /// Core Requirement: Fee = Fee Per Day × Actual Fetched Days.
-  /// Completely ignores total subscription days to prevent overcharging.
   Future<Map<String, dynamic>> calculateCancellationFee(String subscriptionId) async {
     final sub = await _supabase
         .from('tumpang_subscription')
@@ -219,7 +311,6 @@ class PaymentSupabaseService {
     final dailyFee = double.tryParse(sub['fee']?.toString() ?? '') ?? 0.0;
     final deposit = double.tryParse(sub['deposit']?.toString() ?? '') ?? 0.0;
 
-    // 1. Determine actual fetched/used days by strictly counting completed trip logs
     final logs = await _supabase
         .from('tumpang_trip_log')
         .select('id')
@@ -227,11 +318,8 @@ class PaymentSupabaseService {
         .eq('status', 'completed');
 
     final int actualFetchedDays = (logs as List).length;
-
-    // 2. Core Calculation: feePerDay × actualFetchedDays (Handles 0, 1, or N days naturally)
     final double totalIncurredFee = dailyFee * actualFetchedDays;
 
-    // 3. Calculate already paid amounts (Deposit + any paid monthly invoices)
     final paidInvoices = await _supabase
         .from(_table)
         .select('amount')
@@ -243,9 +331,6 @@ class PaymentSupabaseService {
       totalPaidSoFar += double.tryParse(row['amount']?.toString() ?? '') ?? 0.0;
     }
 
-    // 4. Calculate final payable amount
-    // Positive means passenger owes money for trips not covered by the deposit.
-    // Negative means passenger is owed a refund.
     final double payableAmount = totalIncurredFee - totalPaidSoFar;
 
     return {
@@ -257,9 +342,7 @@ class PaymentSupabaseService {
     };
   }
 
-  /// Generates the final cancellation bill based ONLY on the actual fetched days logic.
   Future<void> generateCancellationInvoice(String subscriptionId) async {
-    // 1. Idempotency Check: Prevent duplicate cancellation invoices
     final existing = await _supabase
         .from(_table)
         .select('id')
@@ -288,7 +371,6 @@ class PaymentSupabaseService {
         'cycle_end_date': todayStr,
       });
     } else if (payableAmount < 0) {
-      // 2. Handle negative balances as a Refund Transaction
       final refundId = 'pay_${now.millisecondsSinceEpoch}_refund';
       await _supabase.from(_table).insert({
         'id': refundId,
@@ -296,18 +378,16 @@ class PaymentSupabaseService {
         'month': now.month,
         'year': now.year,
         'due_date': now.toIso8601String(),
-        'paid_at': now.toIso8601String(), // Settled instantly
-        'amount': payableAmount, // Negative amount
+        'paid_at': now.toIso8601String(),
+        'amount': payableAmount,
         'cycle_start_date': todayStr,
         'cycle_end_date': todayStr,
       });
-      // Update the subscription deposit status only after refund succeeds
       await _supabase.from('tumpang_subscription')
           .update({'deposit_refunded': true})
           .eq('id', subscriptionId);
     }
 
-    // 3. Void any pending monthly invoices to prevent double-charging
     await _supabase
         .from(_table)
         .delete()
