@@ -132,14 +132,11 @@ class PayoutDetailsDialog extends StatelessWidget {
         ),
       );
     }
-    // On failure, vm.errorMessage / field errors are already set and
-    // shown inline in this dialog — nothing else to do here.
   }
 }
 
-/// Touch 'n Go phone entry, styled to match register_screen's phone
-/// field: fixed '+60' prefix, digits-only input capped at 9 digits, and
-/// a border that turns yellow on focus / red on error.
+// tng entry same as register_screen phone field
+// digit only input capped at 9 digits only
 class _TngPhoneField extends StatelessWidget {
   final PayoutViewModel vm;
   const _TngPhoneField({required this.vm});

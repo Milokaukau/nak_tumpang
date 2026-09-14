@@ -1,26 +1,11 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:nak_tumpang/core/services/local_db_service.dart';
 
-/// Local SQLite cache for the payout module — mirrors the wallet
-/// balance columns on `driver_profiles`, `payout_history` rows, and
-/// the single `payout_settings` row (bank transfer fee). Supabase is
-/// always the source of truth; everything here is only ever written
-/// *after* the matching Supabase call already succeeded (see
-/// PayoutViewModel).
-///
-/// Note: `request_payout` and `set_payout_status` are live server
-/// transactions (they move real balance) — there's no offline write
-/// path for either, only read caching so the Wallet/History tabs have
-/// something to show when offline.
+// read caching to show wallet and history tabs when offline
 class PayoutLocalService {
   final _dbService = LocalDbService.instance;
 
-  /// Inserts if [pkColumn]'s value isn't present yet, otherwise updates
-  /// only the columns in [data] — never touches columns the caller
-  /// didn't include. Matters here because this cache writes wallet
-  /// balance columns to the *same* `driver_profiles` row
-  /// ProfileLocalService writes license columns to — a naive INSERT OR
-  /// REPLACE from either side would wipe out the other's columns.
+  // inserts if pkColumn's value isnt present yet
   Future<void> _upsert(
       Database db,
       String table,
@@ -61,9 +46,8 @@ class PayoutLocalService {
 
   // ---------------- payout_history ----------------
 
-  /// payout_history rows are always fetched as a full `select()` (never
-  /// a partial column list, unlike driver_profiles above), so a plain
-  /// insert-or-replace is safe here — no risk of wiping sibling columns.
+  // payout_history rows are always fetched as a full `select()`
+  //a plain insert-or-replace is safe here — no risk of wiping sibling column
   Future<void> cachePayoutHistoryPage(List<Map<String, dynamic>> rows) async {
     final db = await _dbService.database;
     final batch = db.batch();
@@ -78,8 +62,7 @@ class PayoutLocalService {
     await db.insert('payout_history', row, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
-  /// Mirrors PayoutService.fetchPayoutHistoryPage's year/month scoping
-  /// so the offline fallback behaves the same way the live query does.
+  // offline behaves same way as live query
   Future<List<Map<String, dynamic>>> getCachedPayoutHistoryPage(
       String userId, {
         required int limit,
@@ -124,14 +107,8 @@ class PayoutLocalService {
         .toList();
   }
 
-  Future<void> deleteCachedPayoutHistoryRow(String id) async {
-    final db = await _dbService.database;
-    await db.delete('payout_history', where: 'id = ?', whereArgs: [id]);
-  }
-
-  /// Updates just the status (and processed_at) of an already-cached
-  /// row — used by runPayoutStatusAnimation's terminal-status sync,
-  /// which only knows the new status, not the row's other columns.
+  // updates the status of an already cached row
+  // used by runPayoutStatusAnimation's terminal-status sync
   Future<void> updateCachedPayoutStatus(String id, String status, {DateTime? processedAt}) async {
     final db = await _dbService.database;
     await db.update(

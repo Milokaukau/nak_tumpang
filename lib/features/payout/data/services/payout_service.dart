@@ -9,22 +9,14 @@ class PayoutService {
     return _supabase.from('driver_profiles').select().eq('user_id', userId).maybeSingle();
   }
 
-  /// Reads the same fee value request_payout() applies server-side, so
-  /// the app's pre-submission preview and the actual charged fee can
-  /// never drift apart — there's exactly one place (payout_settings)
-  /// that sets the number. Falls back to RM1 only if that row is
-  /// somehow missing (matches payout_settings' own DEFAULT, so the
-  /// preview still shows something sane rather than erroring out).
+  // reads the fee value in payout_settings
+  // falls back to 1rm if that row is missing
   Future<double> fetchBankTransferFee() async {
     final row = await _supabase.from('payout_settings').select('bank_transfer_fee').maybeSingle();
     return (row?['bank_transfer_fee'] as num?)?.toDouble() ?? 1.00;
   }
 
-  /// Completed trips within [start, end) only — used for the "this
-  /// month" stat cards. Filtered server-side by date range instead of
-  /// fetching every completed trip a driver has ever done and summing
-  /// client-side, so this stays cheap no matter how long the driver's
-  /// been active (same reasoning as payout_history's paginated fetch).
+  // filtered server-side by date range (not full)
   Future<List<Map<String, dynamic>>> fetchCompletedTripsInRange(
       String userId, {
         required DateTime start,
@@ -41,10 +33,7 @@ class PayoutService {
     return List<Map<String, dynamic>>.from(response);
   }
 
-  /// The [limit] most recent completed trips — used for the "Recent
-  /// trips" list. Capped server-side with `.limit()` rather than
-  /// fetching the driver's whole history and only using the first 10
-  /// client-side.
+  // capped server-side with .limit() rather than fetching whole history and only using the first 10 client-side
   Future<List<Map<String, dynamic>>> fetchRecentCompletedTrips(
       String userId, {
         int limit = 10,
@@ -71,8 +60,8 @@ class PayoutService {
   // e-wallet payment method will have null bank name/bank_acc_no;
   // bank_transfer will have null ewallet_phone. request_payout()
   // enforces this pairing server-side too, so the two never end up
-  // populated for the same row regardless of what the client sends.
-  //
+  // populated for the same row regardless of what the client sends
+
   // Runs as one atomic call via the `request_payout` Postgres function
   // (see request_payout.sql) — the balance deduction and the
   // payout_history insert happen in a single transaction on the server,
@@ -97,12 +86,9 @@ class PayoutService {
   }
 
 // payout history
-  /// Every requested_at timestamp for this driver, nothing else — used
-  /// only to compute which years/months have payouts in them for the
-  /// History tab's filter chips. Deliberately not `select('*')`: this
-  /// stays cheap even for a driver with years of history, since it's
-  /// just one narrow timestamp column per row rather than the full
-  /// bank_name/bank_acc_no/status/etc payload.
+  // every requested_at timestamp for this driver
+  // compute which years and month payout in them for the filter chips in History tab
+
   Future<List<DateTime>> fetchPayoutHistoryDates(String userId) async {
     final response = await _supabase
         .from('payout_history')
@@ -115,10 +101,9 @@ class PayoutService {
         .toList();
   }
 
-  /// One page of full payout rows, newest first, optionally scoped to a
-  /// specific year and/or year+month. The filtering happens here (in the
-  /// query) rather than client-side, so selecting a year doesn't require
-  /// ever having loaded the driver's whole history into memory first.
+  // one page of all payout rows, sorted by newest
+  // can be scoped to specific year and month
+  // filtering happens here so selecting year don't require driver's whole memory being loaded in memory
   Future<List<Map<String, dynamic>>> fetchPayoutHistoryPage(
       String userId, {
         required int limit,
@@ -141,14 +126,9 @@ class PayoutService {
   }
 
 
-  /// Was previously a raw `.update()` on payout_history — that let any
-  /// signed-in client set ANY payout row's status to anything, with only
-  /// RLS (not present in this repo) standing between that and abuse.
-  /// Now goes through `set_payout_status`, a SECURITY DEFINER function
-  /// (see sql/payout_status_rpc.sql) that checks the payout belongs to
-  /// the caller and is still 'pending' before writing — the same
-  /// server-enforced pattern request_payout() already uses for the
-  /// balance/fee side.
+  // check if the payout belongs to caller
+  // set payout status to needed status currently
+  // mock status
   Future<void> updatePayoutStatus(String payoutId, String status) async {
     await _supabase.rpc('set_payout_status', params: {
       'p_payout_id': payoutId,

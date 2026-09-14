@@ -14,19 +14,11 @@ class ClaimPayoutDialog extends StatelessWidget {
     final vm = context.watch<PayoutViewModel>();
 
     return Dialog(
-      // Explicit white — Dialog's default background otherwise picks up
-      // the app's yellow-seeded Material 3 surface tint instead of
-      // staying plain white.
       backgroundColor: AppColors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(20),
-        // The keyboard pushes this dialog up to stay above it, which can
-        // leave less vertical room than the content needs — without
-        // this, that showed as a render overflow AND made Confirm
-        // physically unreachable (it was being laid out below the
-        // visible area, not just visually clipped). Scrolling lets the
-        // same content fit in whatever space is actually left.
+        // layout suitable for android phone
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -118,11 +110,10 @@ class ClaimPayoutDialog extends StatelessWidget {
   }
 }
 
-/// Amount entry, styled to match _TngPhoneField / the register screen's
-/// phone field: a fixed 'RM' prefix that's always visible (not just on
-/// focus, the way InputDecoration.prefixText behaves), a border that
-/// turns yellow on focus / red on error, and a left-aligned error/helper
-/// message under the box instead of InputDecoration's own error slot.
+// fixed RM prefix
+// border turns yellow on focus
+// border turn red on error
+
 class _AmountField extends StatefulWidget {
   final PayoutViewModel vm;
   const _AmountField({required this.vm});
@@ -150,9 +141,7 @@ class _AmountFieldState extends State<_AmountField> {
   }
 
   void _onFocusChange() {
-    // Selects the default '0' the moment the field gains focus, so the
-    // first digit typed replaces it instead of appending after it
-    // (e.g. typing '5' would otherwise leave '05').
+    // replaces default 0 with the first digit typed
     if (_focusNode.hasFocus && widget.vm.amountController.text == '0') {
       widget.vm.amountController.selection = TextSelection(
         baseOffset: 0,
@@ -202,11 +191,7 @@ class _AmountFieldState extends State<_AmountField> {
                   controller: vm.amountController,
                   focusNode: _focusNode,
                   keyboardType: TextInputType.number,
-                  // Blocks any non-digit keystroke (including '.') —
-                  // matches the whole-number-only format
-                  // PayoutViewModel.validateAmount enforces, so a driver
-                  // can't even type something the validator will just
-                  // reject a moment later.
+                  // blocks any other input that are not whole number
                   inputFormatters: [
                     FilteringTextInputFormatter.digitsOnly,
                     _leadingZeroFormatter,

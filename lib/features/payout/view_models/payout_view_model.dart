@@ -8,48 +8,23 @@ import 'package:nak_tumpang/features/payout/data/services/payout_service.dart';
 
 enum PayoutMethod { bankTransfer, tngEwallet }
 
-/// Fallback used only for two narrow cases where a live value from
-/// payout_settings isn't available: (1) briefly, before load() finishes
-/// its first fetch, and (2) PayoutHistoryDisplay.resolvedFee's fallback
-/// for payout_history rows that predate the `fee` column entirely (all
-/// of which were backfilled to exactly this value — see
-/// migration_add_payout_fee.sql). It is NOT what request_payout()
-/// charges — that reads payout_settings.bank_transfer_fee at request
-/// time, which is the actual single source of truth and can be changed
-/// without touching this app's code at all.
+// fallback for live cases where payout_settings in supabase is not available
 const double kFallbackBankTransferFee = 1.00;
 
-/// Smallest amount a driver can request in one payout. Mainly guards
-/// against a near-zero request that a flat RM1 bank transfer fee would
-/// wipe out (or exceed) — e.g. requesting RM0.50 nets RM0 after the fee.
+// minimum amount for a payout, avoid rm1 payout that would return 0 when deducted the transfer fee
 const double kMinPayoutAmount = 10.00;
 
-/// Whole numbers only — payouts can't be requested in cents. Matches
-/// "50" but rejects "50.5", "50.00", and any non-numeric junk that
-/// double.tryParse would otherwise silently round away.
+// whole numbers only
 final RegExp _amountFormatRegex = RegExp(r'^\d+$');
 
-/// Pre-submission preview only (claim/success dialogs, before a
-/// payout_history row exists to read an actual stored fee from).
-/// [bankTransferFee] should be PayoutViewModel.bankTransferFee — the
-/// live value fetched from payout_settings — not the fallback constant,
-/// so the preview always matches whatever request_payout() will
-/// actually charge.
+// pre-submission preview before a payout history exist
+// should refer to payout_settings, not the fallback constant
 double payoutNetAmount(double grossAmount, PayoutMethod method, double bankTransferFee) =>
     method == PayoutMethod.bankTransfer
         ? (grossAmount - bankTransferFee < 0 ? 0 : grossAmount - bankTransferFee)
         : grossAmount;
 
-/// payout_history.status only allows 'pending' | 'completed' | 'failed'
-/// (a DB CHECK constraint — see request_payout.sql). 'processing' is a
-/// transient, UI-only value that PayoutViewModel.payoutStatus can hold
-/// mid-animation but never writes to the DB.
-///
-/// 'Paid' reads better than 'Completed' for a payout specifically, so
-/// that's what's shown for the 'completed' status — this is purely
-/// display wording, the stored value is still 'completed'. Shared here
-/// so the wallet screen, the history detail dialog, and the payout
-/// success dialog can't drift out of sync with each other.
+
 String payoutStatusLabel(String status) => switch (status) {
   'completed' => 'Paid',
   'processing' => 'Processing',
@@ -64,14 +39,13 @@ Color payoutStatusColor(String status) => switch (status) {
   _ => AppColors.greyText,
 };
 
-/// Points are always shown as a whole number, floored rather than
-/// rounded — a driver should never see a points figure bigger than the
-/// RM value it maps to (rounding up, e.g. 250.50 -> "251 pts" next to
-/// "RM250.50", looked like two different balances).
+// points shown as whole number
+// floored, not rounded
+// driver cant see a point figure bigger than the RM value
 String pointsLabel(double amount) => amount.floor().toString();
 
 extension PayoutMethodDb on PayoutMethod {
-  /// The value stored in payout_history.payment_method.
+  // value stores in payout_history payment_method
   String get dbValue => this == PayoutMethod.bankTransfer ? 'bank_transfer' : 'tng_ewallet';
 
   static PayoutMethod fromDb(String? value) =>
@@ -89,9 +63,6 @@ class PayoutHistoryDisplay {
   final String? bankAccNo;
   final String? ewalletPhone;
   final DateTime? requestedAt;
-  // Nullable because rows created before the `fee` column existed have
-  // none stored — resolvedFee below falls back to the old compile-time
-  // calculation for exactly those legacy rows.
   final double? fee;
 
   PayoutHistoryDisplay({
@@ -110,28 +81,18 @@ class PayoutHistoryDisplay {
 
   String get destinationLabel => isEwallet ? "Touch 'n Go eWallet" : (bankName ?? 'Bank transfer');
 
-  /// The fee actually charged on this payout. Uses the stored value when
-  /// present (every payout made after the fee column was added); falls
-  /// back to [kFallbackBankTransferFee] only for older rows that predate
-  /// the column (all of which were backfilled to that exact value).
+  // fee charged at payout
+  // only uses fallback transfer fee for older rows that predate the column
   double get resolvedFee => fee ?? (paymentMethod == PayoutMethod.bankTransfer ? kFallbackBankTransferFee : 0);
 
-  /// [amount] minus [resolvedFee], floored at 0.
   double get netAmount {
     final net = amount - resolvedFee;
     return net < 0 ? 0 : net;
   }
 
-  /// The raw destination value for this payout — [bankAccNo] for a bank
-  /// transfer, [ewalletPhone] for e-wallet. Never both: request_payout()
-  /// only ever writes one of the two columns, matching [paymentMethod].
   String get _destination => (isEwallet ? ewalletPhone : bankAccNo) ?? '-';
 
-  /// [_destination] with everything but the last 4 characters hidden
-  /// behind dots, for display in a persistent history list — e.g.
-  /// "•••• 5521". Short values (4 characters or fewer) are masked in
-  /// full rather than shown outright, since there'd be nothing
-  /// meaningful left hidden.
+  // masked bank acc no and ewallet phone num besides the final 4 values
   String get maskedDestination {
     final value = _destination;
     if (value.length <= 4) return '•' * value.length;
@@ -181,25 +142,19 @@ class PayoutViewModel extends ChangeNotifier {
 
   final _service = PayoutService();
   final _localService = PayoutLocalService();
-  // Whatever actually processes the payout after it's recorded — see
-  // payout_gateway.dart for why this is still a mock and how to swap it.
+  // Whatever actually processes the payout after it's recorded
   final PayoutGateway _gateway;
 
   bool isLoading = true;
   String? errorMessage;
-  // Non-fatal notice shown as a banner above existing content (stale
-  // cache while offline, a failed refresh) — distinct from
-  // errorMessage, which means "nothing to show at all" and replaces
-  // the whole screen.
   String? walletNotice;
 
   double totalEarnings = 0;
   double availableBalance = 0;
   double totalWithdrawn = 0;
 
-  // Fetched from payout_settings in load() — starts at the fallback so
-  // the claim dialog has something reasonable to show if it's opened
-  // before that fetch resolves, but is corrected the moment it does.
+  // starts at fallback so claim dialog can show if it's open before the fetch resolves
+  // corrected the moment it resolved
   double bankTransferFee = kFallbackBankTransferFee;
 
   int tripsCompletedCount = 0;
@@ -212,46 +167,31 @@ class PayoutViewModel extends ChangeNotifier {
   bool isLoadingMoreHistory = false;
   bool hasMoreHistory = true;
   String? historyError;
+  // Non-fatal notice for the History tab (stale cache while offline) —
+  // same reasoning as walletNotice: historyError means "nothing to
+  // show", this means "showing something, but it's not fresh".
+  String? historyNotice;
   List<PayoutHistoryDisplay> payoutHistory = [];
 
   static const int _historyPageSize = 20;
   int _historyOffset = 0;
 
-  // Every requested_at timestamp for this driver (id/amount/etc not
-  // included — see PayoutService.fetchPayoutHistoryDates). Loaded once,
-  // separately from the paginated rows below, purely so the year/month
-  // filter chips can show every year/month that actually has payouts in
-  // it without requiring the driver's entire history to be loaded first.
+  // every timestamp for this driver
   List<DateTime> _historyDates = [];
   bool _historyDatesLoaded = false;
 
-  // null = "All" — no year filter applied to the History tab.
   int? selectedHistoryYear;
-  // null = "All" — no month filter applied (always scoped within
-  // selectedHistoryYear when that's also set).
   DateTime? selectedHistoryMonth;
-
-  /// Whether this driver has *any* payout history at all, independent of
-  /// whatever year/month is currently selected — used to decide whether
-  /// to show the History tab's empty state or its filter chips. Backed
-  /// by [_historyDates] (loaded once, in full) rather than [payoutHistory]
-  /// (now just the current scope's page), so filtering to a month with
-  /// zero results doesn't get mistaken for "no history at all".
   bool get hasAnyHistory => _historyDates.isNotEmpty;
 
-  /// Distinct years present in the driver's payout history, newest
-  /// first. First filter tier on the History tab — narrows
-  /// [historyMonths] before the month chips are picked from.
+  // first filter tier narrow history month before month chips can be picked from
   List<int> get historyYears {
     final years = _historyDates.map((d) => d.year).toSet().toList();
     years.sort((a, b) => b.compareTo(a));
     return years;
   }
 
-  /// Distinct year-month values present in the driver's payout history,
-  /// newest first — scoped to [selectedHistoryYear] when one is picked,
-  /// so the month row only ever shows months within that year instead of
-  /// every month across a driver's whole history at once.
+  // only the history of the selected month will be shown
   List<DateTime> get historyMonths {
     final year = selectedHistoryYear;
     final months = <DateTime>{};
@@ -263,20 +203,11 @@ class PayoutViewModel extends ChangeNotifier {
     return list;
   }
 
-  /// The currently loaded page(s) of payout rows for whatever scope is
-  /// selected. Unlike the old client-side filter, [selectHistoryYear] and
-  /// [selectHistoryMonth] now trigger a fresh, server-scoped fetch rather
-  /// than filtering an already-fully-loaded list — so [payoutHistory]
-  /// itself is always already "the filtered list". Kept as a getter
-  /// (rather than renaming every call site) so nothing else needs to
-  /// change.
   List<PayoutHistoryDisplay> get filteredPayoutHistory => payoutHistory;
 
   void selectHistoryYear(int? year) {
     selectedHistoryYear = year;
-    // A month from a different year can no longer be valid once the
-    // year filter changes — always reset back to "All months" here
-    // rather than leaving a stale, now-invisible month selected.
+    // a month from a different year can no longer be valid once year filter changes
     selectedHistoryMonth = null;
     _reloadHistoryForCurrentScope();
   }
@@ -288,9 +219,6 @@ class PayoutViewModel extends ChangeNotifier {
 
 // payout form state
   PayoutMethod selectedMethod = PayoutMethod.bankTransfer;
-  // Defaults to '0' rather than empty or the full balance, so the field
-  // always shows a concrete starting amount next to the always-visible
-  // 'RM' prefix.
   final amountController = TextEditingController(text: '0');
 
 // bank name is a fixed dropdown of malaysian banks
@@ -309,18 +237,14 @@ class PayoutViewModel extends ChangeNotifier {
   String payoutStatus = 'pending';
 
   // payoutIds whose terminal status ('completed'/'failed') was decided
-  // locally but failed to persist to payout_history — see
-  // runPayoutStatusAnimation(). Surfaced so a caller (e.g. the History
+  // locally but failed to persist to payout_history — .g.see
+  //   // runPayoutStatusAnimation(). Surfaced so a caller (e the History
   // screen, on next load) can retry the write instead of the DB silently
   // staying on 'pending' forever after the driver already saw "Paid".
   final Set<String> pendingReconciliation = {};
 
   bool _disposed = false;
 
-  /// Guards notifyListeners() calls made from inside async work (like
-  /// runPayoutStatusAnimation's awaited delays) that may still be
-  /// in-flight after this ViewModel has been disposed — calling
-  /// notifyListeners() post-dispose throws.
   void _safeNotify() {
     if (!_disposed) notifyListeners();
   }
@@ -339,29 +263,19 @@ class PayoutViewModel extends ChangeNotifier {
   void setView(PayoutView view) {
     currentView = view;
     notifyListeners();
-    // Gate on _historyDatesLoaded rather than payoutHistory.isEmpty: a
-    // driver who claims a payout before ever opening this tab gets an
-    // optimistic row spliced into payoutHistory (see submitPayout), which
-    // would make it non-empty and skip the real loadHistory() call below.
-    // hasMoreHistory then defaults to true, so "Load more" would append a
-    // freshly-fetched page — that already contains that same row — right
-    // after the optimistic one, showing it twice. Checking the dates flag
-    // instead means the very first tab visit always does a full
-    // loadHistory(), which fetches page 1 as a clean replace, not an
-    // append, so the optimistic row is folded in exactly once.
     if (view == PayoutView.history && !_historyDatesLoaded && historyError == null) {
       loadHistory();
     }
   }
 
-  /// Initial load for the History tab: fetches the lightweight date list
-  /// (for the filter chips) once, then the first page of the "All" scope.
+  // fetches lightweight date list once then the first page for all
   Future<void> loadHistory() async {
     final userId = Supabase.instance.client.auth.currentUser?.id;
     if (userId == null) return;
 
     isHistoryLoading = true;
     historyError = null;
+    historyNotice = null;
     notifyListeners();
 
     try {
@@ -385,8 +299,12 @@ class PayoutViewModel extends ChangeNotifier {
         payoutHistory = cachedRows.map(PayoutHistoryDisplay.fromRow).toList();
         _historyOffset = payoutHistory.length;
         hasMoreHistory = false; // cache has no reliable "more pages" signal
-        historyError = "Showing your last saved history — you're offline.";
+        // Cached rows exist, so this is informational, not fatal — the
+        // list, filters, and refresh all stay usable.
+        historyNotice = "Showing your last saved history — you're offline.";
       } else {
+        // Nothing to show at all — this is the one case that should
+        // replace the whole tab with an error + retry.
         historyError = 'Could not load payout history. Please try again.';
       }
     } finally {
@@ -395,23 +313,16 @@ class PayoutViewModel extends ChangeNotifier {
     }
   }
 
-  /// Public pull-to-refresh entry point for the History tab — re-fetches
-  /// the currently selected year/month scope from scratch, so a status
-  /// change made outside the app (e.g. the bank-payout auto-settle cron
-  /// job) shows up without the driver having to leave and re-enter this
-  /// screen.
+  // pull to refresh point so user dont need to exit page and return to see changes
   Future<void> refreshHistory() => _reloadHistoryForCurrentScope();
 
-  /// Re-fetches from scratch under whatever year/month is now selected —
-  /// called whenever the filter changes rather than filtering an
-  /// already-loaded list, since the list itself is no longer guaranteed
-  /// to contain every row for the new scope.
   Future<void> _reloadHistoryForCurrentScope() async {
     final userId = Supabase.instance.client.auth.currentUser?.id;
     if (userId == null) return;
 
     isHistoryLoading = true;
     historyError = null;
+    historyNotice = null;
     payoutHistory = [];
     notifyListeners();
 
@@ -430,7 +341,7 @@ class PayoutViewModel extends ChangeNotifier {
         payoutHistory = cachedRows.map(PayoutHistoryDisplay.fromRow).toList();
         _historyOffset = payoutHistory.length;
         hasMoreHistory = false;
-        historyError = "Showing your last saved history — you're offline.";
+        historyNotice = "Showing your last saved history — you're offline.";
       } else {
         historyError = 'Could not load payout history. Please try again.';
       }
@@ -440,9 +351,7 @@ class PayoutViewModel extends ChangeNotifier {
     }
   }
 
-  /// Fetches the next page under the current scope and appends it. Safe
-  /// to call from a "Load more" button or a scroll-end listener; a no-op
-  /// while a fetch is already in flight or once the scope is exhausted.
+  // fetches the next page under the current scope and appends it
   Future<void> loadMoreHistory() async {
     if (isLoadingMoreHistory || isHistoryLoading || !hasMoreHistory) return;
     final userId = Supabase.instance.client.auth.currentUser?.id;
@@ -453,9 +362,7 @@ class PayoutViewModel extends ChangeNotifier {
     try {
       await _fetchHistoryPage(userId, reset: false);
     } catch (e) {
-      // Leave whatever's already loaded on screen; the driver can just
-      // scroll/tap "Load more" again to retry rather than losing the
-      // page they already have.
+      // driver can scroll or tap load more to retry without losing the page they already have
       hasMoreHistory = true;
     } finally {
       isLoadingMoreHistory = false;
@@ -507,12 +414,10 @@ class PayoutViewModel extends ChangeNotifier {
         totalWithdrawn = (cached['total_withdrawn'] as num?)?.toDouble() ?? 0;
         final cachedFee = await _localService.getCachedBankTransferFee();
         if (cachedFee != null) bankTransferFee = cachedFee;
-        // Cached data exists, so this is informational, not fatal — the
-        // wallet, toggle, and refresh all stay usable.
+        // Cached data exists, so this is informational, not fatal (the wallet, toggle, and refresh all stay usable).
         walletNotice = "Showing your last saved wallet — you're offline.";
       } else {
-        // Nothing to show at all — this is the one case that should
-        // replace the whole screen.
+        // nothing to show
         errorMessage = 'Could not load wallet. Please try again.';
       }
     } finally {
@@ -521,10 +426,7 @@ class PayoutViewModel extends ChangeNotifier {
     }
   }
 
-  /// Re-fetches balance/earnings/recent trips without the full-screen
-  /// loading spinner load() shows — used for pull-to-refresh on the
-  /// Wallet tab, where the existing content should stay visible (with
-  /// RefreshIndicator's own spinner up top) rather than being replaced.
+
   Future<void> refreshWallet() async {
     final userId = Supabase.instance.client.auth.currentUser?.id;
     if (userId == null) return;
@@ -648,14 +550,7 @@ class PayoutViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Rounds a RM amount to the nearest cent, as an integer cent count.
-  /// Used instead of comparing raw doubles: [setAmountToMax] round-trips
-  /// availableBalance through toStringAsFixed(2) -> double.tryParse, and
-  /// a direct `>` comparison on the resulting doubles can occasionally
-  /// flag the reparsed value as infinitesimally larger than the
-  /// original (floating-point representation, not an actual amount
-  /// difference) — which would incorrectly block the driver's own "Max"
-  /// shortcut. Comparing whole cents sidesteps that.
+  /// no cents
   int _toCents(double rm) => (rm * 100).round();
 
   bool validateAmount() {

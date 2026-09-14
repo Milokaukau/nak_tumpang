@@ -95,9 +95,7 @@ class _PayoutStatusIndicatorState extends State<_PayoutStatusIndicator>
   @override
   void initState() {
     super.initState();
-    // Loops only while status == 'pending' — that's now just the brief
-    // moment before runPayoutStatusAnimation's mocked gateway resolves
-    // to 'completed' (both payment methods), not an indefinite wait.
+    // mocked gateway resolves pending to completed in a brief moment only
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 900),

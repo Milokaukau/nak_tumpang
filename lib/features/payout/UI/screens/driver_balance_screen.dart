@@ -36,7 +36,7 @@ class _DriverBalanceView extends StatelessWidget {
           : SafeArea(
         child: Column(
           children: [
-            if (vm.walletNotice != null) _WalletNoticeBanner(text: vm.walletNotice!),
+            if (vm.walletNotice != null) _InlineNoticeBanner(text: vm.walletNotice!),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
               child: _WalletHistoryToggle(vm: vm),
@@ -53,12 +53,10 @@ class _DriverBalanceView extends StatelessWidget {
   }
 }
 
-/// Informational banner for a non-fatal wallet notice (offline/stale
-/// cache, a failed refresh) — sits above the toggle so the wallet,
-/// history, and refresh stay usable underneath it.
-class _WalletNoticeBanner extends StatelessWidget {
+// informational banner for wallet notice (e.g. offline cache or failed refresh)
+class _InlineNoticeBanner extends StatelessWidget {
   final String text;
-  const _WalletNoticeBanner({required this.text});
+  const _InlineNoticeBanner({required this.text});
 
   @override
   Widget build(BuildContext context) {
@@ -226,8 +224,7 @@ class _WalletTab extends StatelessWidget {
       return;
     }
 
-    // Reset any stale details from a previous attempt so the dialogs
-    // start clean each time they're opened.
+    // reset all data so dialog appear clean each time
     vm.resetDetailsFields();
     showDialog(
       context: context,
@@ -239,8 +236,7 @@ class _WalletTab extends StatelessWidget {
   }
 }
 
-/// "History" tab — every payout_history row for this driver, most
-/// recent first, with its amount, destination and status.
+// all payout history for the specific driver, most recent first
 class _HistoryTab extends StatelessWidget {
   final PayoutViewModel vm;
   const _HistoryTab({required this.vm});
@@ -294,11 +290,9 @@ class _HistoryTab extends StatelessWidget {
 
     return Column(
       children: [
+        if (vm.historyNotice != null) _InlineNoticeBanner(text: vm.historyNotice!),
         _YearFilterChips(vm: vm),
-        // Month tier only ever appears once a specific year is picked —
-        // and only if that year actually has more than one month to
-        // choose from — so the filter stays out of the way until it's
-        // relevant, then slides in instead of popping into place.
+        // month filter only appears after a year filter is applied
         AnimatedSize(
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOut,
@@ -326,9 +320,7 @@ class _HistoryTab extends StatelessWidget {
               : RefreshIndicator(
             onRefresh: vm.refreshHistory,
             child: NotificationListener<ScrollNotification>(
-              // Loads the next page a little before the driver actually
-              // hits the bottom, so the list keeps feeling continuous
-              // instead of pausing right at the edge.
+              // loads next page before driver reaches the bottom so list feels continuous, instead of pausing
               onNotification: (notification) {
                 if (notification.metrics.pixels >= notification.metrics.maxScrollExtent - 200) {
                   vm.loadMoreHistory();
@@ -375,9 +367,7 @@ class _HistoryTab extends StatelessWidget {
   }
 }
 
-/// Row of "All" + one chip per year that appears in the driver's payout
-/// history, newest first. Sits above _MonthFilterChips as the first
-/// filter tier — picking a year narrows which months that row offers.
+// row of all + one chip per year that appears in payout history
 class _YearFilterChips extends StatelessWidget {
   final PayoutViewModel vm;
   const _YearFilterChips({required this.vm});
@@ -424,9 +414,9 @@ class _YearFilterChips extends StatelessWidget {
   }
 }
 
-/// Row of "All" + one chip per month within the currently selected year,
-/// newest first. Only ever mounted (by _HistoryTab) once a specific year
-/// has been picked and that year has more than one month on record.
+
+// row of all and one chip per month within the currently selected year
+// only appears if a year is picked and there is more than one month in that year
 class _MonthFilterChips extends StatelessWidget {
   final PayoutViewModel vm;
   const _MonthFilterChips({required this.vm});
