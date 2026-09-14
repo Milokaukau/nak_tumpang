@@ -19,7 +19,7 @@ class LocalDbService {
 
     return await openDatabase(
       path,
-      version: 5,
+      version: 7,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -100,6 +100,69 @@ class LocalDbService {
     if (oldVersion < 5) {
       await _createPendingPayoutReconciliationTable(db);
     }
+
+    if (oldVersion < 6) {
+      // Re-apply the payout_history fix from the oldVersion < 4 block
+      // above, unconditionally. Devices that had already reached
+      // version 4 or 5 before that migration was added never ran it —
+      // onUpgrade only fires for oldVersion < the declared version, so
+      // their local payout_history table is still stuck with the
+      // dropped payout_at column / missing ewallet_phone. Bumping the
+      // version and redoing the drop-and-recreate here (safe: this
+      // table is a pure read cache of Supabase's payout_history) makes
+      // sure every device actually gets the corrected schema, not just
+      // ones upgrading from a version older than 4.
+      await db.execute('DROP TABLE IF EXISTS payout_history');
+      await db.execute('''
+        CREATE TABLE payout_history (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          amount REAL NOT NULL,
+          bank_name TEXT,
+          bank_acc_no TEXT,
+          ewallet_phone TEXT,
+          status TEXT NOT NULL CHECK (status IN ('pending', 'completed', 'failed')),
+          requested_at TEXT,
+          processed_at TEXT,
+          payment_method TEXT NOT NULL CHECK (payment_method IN ('bank_transfer', 'tng_ewallet')),
+          fee REAL NOT NULL DEFAULT 0,
+          FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        )
+      ''');
+    }
+
+    if (oldVersion < 7) {
+      // Correction to the oldVersion < 4/6 fix above, which *removed*
+      // payout_at from this table on the theory that nothing supplied
+      // it. That was wrong: Supabase's real payout_history table has
+      // payout_at as a genuine NOT NULL column, and
+      // PayoutService.fetchPayoutHistoryPage() does a bare .select(),
+      // so every row fetched from the server legitimately includes a
+      // payout_at key. PayoutLocalService.cachePayoutHistoryPage()
+      // passes that row straight to db.insert(), so with the column
+      // missing locally, EVERY successful online history fetch has been
+      // failing to cache ever since v4 — not just the local
+      // just-submitted-payout insert in PayoutViewModel.submitPayout()
+      // (which never sets payout_at itself, hence nullable here).
+      await db.execute('DROP TABLE IF EXISTS payout_history');
+      await db.execute('''
+        CREATE TABLE payout_history (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          amount REAL NOT NULL,
+          payout_at TEXT,
+          bank_name TEXT,
+          bank_acc_no TEXT,
+          ewallet_phone TEXT,
+          status TEXT NOT NULL CHECK (status IN ('pending', 'completed', 'failed')),
+          requested_at TEXT,
+          processed_at TEXT,
+          payment_method TEXT NOT NULL CHECK (payment_method IN ('bank_transfer', 'tng_ewallet')),
+          fee REAL NOT NULL DEFAULT 0,
+          FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        )
+      ''');
+    }
   }
 
   Future<void> _createDB(Database db, int version) async {
@@ -144,6 +207,7 @@ class LocalDbService {
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
         amount REAL NOT NULL,
+        payout_at TEXT,
         bank_name TEXT,
         bank_acc_no TEXT,
         ewallet_phone TEXT,

@@ -1,4 +1,8 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/utils/validators.dart';
@@ -253,6 +257,26 @@ class PayoutViewModel extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
+  // NetworkService's device-level connectivity flag (see
+  // core/services/network_service.dart) is what we tried first, but it
+  // can misreport — some emulators/simulators, VPNs, and corporate
+  // networks confuse connectivity_plus, and it can lag right after
+  // reconnecting. What actually tells us whether the driver is offline
+  // is the exception the failed request threw: a PostgrestException or
+  // AuthException means the request reached Supabase and got a real
+  // response back (so the device is online, whatever else went wrong);
+  // only a genuine network failure — no route to host, DNS failure,
+  // timeout — means the driver is actually offline.
+  bool _isConnectivityError(Object error) =>
+      error is SocketException || error is TimeoutException || error is http.ClientException;
+
+  String _fetchFailureMessage(Object error, {required String whenOffline, required String whenOnline}) {
+    // Raw error no longer shown in the UI — it's still logged via the
+    // debugPrint calls at each catch site, which is enough to diagnose
+    // issues without exposing stack-trace-shaped text to drivers.
+    return _isConnectivityError(error) ? whenOffline : whenOnline;
+  }
+
   @override
   void dispose() {
     _disposed = true;
@@ -301,16 +325,24 @@ class PayoutViewModel extends ChangeNotifier {
         month: selectedHistoryMonth?.month,
       );
       if (cachedRows.isNotEmpty) {
-        payoutHistory = cachedRows.map(PayoutHistoryDisplay.fromRow).toList();
+        payoutHistory = _applyReconciliationOverlay(cachedRows.map(PayoutHistoryDisplay.fromRow).toList());
         _historyOffset = payoutHistory.length;
         hasMoreHistory = false; // cache has no reliable "more pages" signal
         // Cached rows exist, so this is informational, not fatal — the
         // list, filters, and refresh all stay usable.
-        historyNotice = "Showing your last saved history — you're offline.";
+        historyNotice = _fetchFailureMessage(
+          e,
+          whenOffline: "Showing your last saved history — you're offline.",
+          whenOnline: 'Could not load the latest history — showing your last saved version.',
+        );
       } else {
         // Nothing to show at all — this is the one case that should
         // replace the whole tab with an error + retry.
-        historyError = 'Could not load payout history. Please try again.';
+        historyError = _fetchFailureMessage(
+          e,
+          whenOffline: "You're offline and there's no saved history yet.",
+          whenOnline: 'Could not load payout history. Please try again.',
+        );
       }
     } finally {
       isHistoryLoading = false;
@@ -344,12 +376,20 @@ class PayoutViewModel extends ChangeNotifier {
         month: selectedHistoryMonth?.month,
       );
       if (cachedRows.isNotEmpty) {
-        payoutHistory = cachedRows.map(PayoutHistoryDisplay.fromRow).toList();
+        payoutHistory = _applyReconciliationOverlay(cachedRows.map(PayoutHistoryDisplay.fromRow).toList());
         _historyOffset = payoutHistory.length;
         hasMoreHistory = false;
-        historyNotice = "Showing your last saved history — you're offline.";
+        historyNotice = _fetchFailureMessage(
+          e,
+          whenOffline: "Showing your last saved history — you're offline.",
+          whenOnline: 'Could not load the latest history — showing your last saved version.',
+        );
       } else {
-        historyError = 'Could not load payout history. Please try again.';
+        historyError = _fetchFailureMessage(
+          e,
+          whenOffline: "You're offline and there's no saved history yet.",
+          whenOnline: 'Could not load payout history. Please try again.',
+        );
       }
     } finally {
       isHistoryLoading = false;
@@ -396,27 +436,34 @@ class PayoutViewModel extends ChangeNotifier {
     // yet), the server's copy is stale — keep showing the terminal
     // status the driver already saw locally instead of regressing it
     // back to 'pending'.
-    final reconciled = [
-      for (final row in page)
-        if (pendingReconciliation.containsKey(row.id))
-          PayoutHistoryDisplay(
-            id: row.id,
-            amount: row.amount,
-            status: pendingReconciliation[row.id]!,
-            paymentMethod: row.paymentMethod,
-            bankName: row.bankName,
-            bankAccNo: row.bankAccNo,
-            ewalletPhone: row.ewalletPhone,
-            requestedAt: row.requestedAt,
-            fee: row.fee,
-          )
-        else
-          row,
-    ];
+    final reconciled = _applyReconciliationOverlay(page);
     payoutHistory = reset ? reconciled : [...payoutHistory, ...reconciled];
     _historyOffset += page.length;
     hasMoreHistory = page.length == _historyPageSize;
   }
+
+  // Overlays any pending local reconciliation status onto a list of rows,
+  // leaving rows without one untouched. Shared by _fetchHistoryPage (server
+  // rows) and the offline-cache fallbacks in loadHistory() and
+  // _reloadHistoryForCurrentScope(), so a cached 'pending' row can't show
+  // through stale just because it came from the cache instead of the server.
+  List<PayoutHistoryDisplay> _applyReconciliationOverlay(List<PayoutHistoryDisplay> rows) => [
+    for (final row in rows)
+      if (pendingReconciliation.containsKey(row.id))
+        PayoutHistoryDisplay(
+          id: row.id,
+          amount: row.amount,
+          status: pendingReconciliation[row.id]!,
+          paymentMethod: row.paymentMethod,
+          bankName: row.bankName,
+          bankAccNo: row.bankAccNo,
+          ewalletPhone: row.ewalletPhone,
+          requestedAt: row.requestedAt,
+          fee: row.fee,
+        )
+      else
+        row,
+  ];
 
   // Retries any payout statuses that were decided locally but never made
   // it into payout_history (see runPayoutStatusAnimation). Runs before
@@ -472,10 +519,18 @@ class PayoutViewModel extends ChangeNotifier {
         final cachedFee = await _localService.getCachedBankTransferFee();
         if (cachedFee != null) bankTransferFee = cachedFee;
         // Cached data exists, so this is informational, not fatal (the wallet, toggle, and refresh all stay usable).
-        walletNotice = "Showing your last saved wallet — you're offline.";
+        walletNotice = _fetchFailureMessage(
+          e,
+          whenOffline: "Showing your last saved wallet — you're offline.",
+          whenOnline: 'Could not load the latest wallet — showing your last saved version.',
+        );
       } else {
         // nothing to show
-        errorMessage = 'Could not load wallet. Please try again.';
+        errorMessage = _fetchFailureMessage(
+          e,
+          whenOffline: "You're offline and there's no saved wallet yet.",
+          whenOnline: 'Could not load wallet. Please try again.',
+        );
       }
     } finally {
       isLoading = false;
@@ -493,7 +548,11 @@ class PayoutViewModel extends ChangeNotifier {
     } catch (e) {
       // The wallet is already populated from the previous successful
       // load — a failed refresh is never fatal here, just a banner.
-      walletNotice = 'Could not refresh wallet. Please try again.';
+      walletNotice = _fetchFailureMessage(
+        e,
+        whenOffline: "You're offline — showing your last saved wallet.",
+        whenOnline: 'Could not refresh wallet. Please try again.',
+      );
     } finally {
       notifyListeners();
     }
@@ -864,7 +923,17 @@ class PayoutViewModel extends ChangeNotifier {
           // what the driver saw. Flag it for reconciliation and retry
           // once, rather than losing the failure entirely.
           pendingReconciliation[payoutId] = status;
-          await _localService.savePendingReconciliation(payoutId, status);
+          // Local persistence is independent of the remote retry below —
+          // a database error here (e.g. sqflite hiccup) must not skip
+          // the immediate remote retry, which is the more time-sensitive
+          // of the two.
+          var localSaveOk = true;
+          try {
+            await _localService.savePendingReconciliation(payoutId, status);
+          } catch (localError) {
+            localSaveOk = false;
+            debugPrint('Failed to queue payout reconciliation for $payoutId: $localError');
+          }
           debugPrint('Failed to persist payout status for $payoutId: $e');
           await Future.delayed(const Duration(seconds: 3));
           try {
@@ -873,11 +942,19 @@ class PayoutViewModel extends ChangeNotifier {
             await _localService.removePendingReconciliation(payoutId);
             pendingReconciliation.remove(payoutId);
           } catch (e2) {
-            // Still unresolved after the immediate retry — it stays
-            // recorded in pending_payout_reconciliation and will be
-            // retried again the next time history loads or refreshes
-            // (see _applyPendingReconciliations), including across app
-            // restarts.
+            // Still unresolved after the immediate retry — it needs to
+            // stay recorded in pending_payout_reconciliation so
+            // _applyPendingReconciliations can retry it later (including
+            // across app restarts). If the earlier local save above
+            // failed, that record was never written, so try once more
+            // here rather than silently losing the reconciliation.
+            if (!localSaveOk) {
+              try {
+                await _localService.savePendingReconciliation(payoutId, status);
+              } catch (localError2) {
+                debugPrint('Still failed to queue payout reconciliation for $payoutId: $localError2');
+              }
+            }
             debugPrint('Retry also failed to persist payout status for $payoutId: $e2');
           }
         }

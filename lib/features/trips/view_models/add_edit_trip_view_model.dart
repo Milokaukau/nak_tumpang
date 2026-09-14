@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'package:nak_tumpang/core/entities/geocoded_place.dart';
+import 'package:nak_tumpang/core/utils/matching_utils.dart';
 import 'package:nak_tumpang/features/trips/data/services/trip_supabase_service.dart';
 
 class AddEditTripViewModel extends ChangeNotifier {
@@ -38,13 +39,29 @@ class AddEditTripViewModel extends ChangeNotifier {
 
   int _minutesOf(TimeOfDay t) => t.hour * 60 + t.minute;
 
+  // Same-location threshold, in meters. Not exact-equality: a location
+  // picked by tapping the map (see ORSService.reverseGeocode) keeps the
+  // raw tapped coordinates rather than snapping to a venue's official
+  // point, so two taps on the same real place almost never land on the
+  // exact same lat/lng — exact equality let genuinely-duplicate
+  // pickup/drop-off pairs through as long as they came from separate
+  // taps. Anything picked via search (ORSService.geocodeAutocomplete)
+  // returns the same official coordinates every time, so those still
+  // match at 0m and are caught either way.
+  static const double _sameLocationThresholdMeters = 50;
+
   /// Shared by setFromPlace/setToPlace (live, as soon as both places are
   /// picked) and _validate() (final check before submit) — one place
   /// for this rule instead of two copies that could drift apart.
   void _revalidateLocations() {
     if (fromPlace == null || toPlace == null) return;
-    final samePlace =
-        fromPlace!.latitude == toPlace!.latitude && fromPlace!.longitude == toPlace!.longitude;
+    final distance = MatchingUtils.calculateDistance(
+      fromPlace!.latitude,
+      fromPlace!.longitude,
+      toPlace!.latitude,
+      toPlace!.longitude,
+    );
+    final samePlace = distance < _sameLocationThresholdMeters;
     if (samePlace) {
       toError = "Pickup and drop-off can't be the same location";
     } else if (toError == "Pickup and drop-off can't be the same location") {

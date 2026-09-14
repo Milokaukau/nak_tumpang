@@ -36,7 +36,6 @@ class _DriverBalanceView extends StatelessWidget {
           : SafeArea(
         child: Column(
           children: [
-            if (vm.walletNotice != null) _InlineNoticeBanner(text: vm.walletNotice!),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
               child: _WalletHistoryToggle(vm: vm),
