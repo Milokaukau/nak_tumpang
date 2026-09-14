@@ -11,10 +11,9 @@ class NegotiationSummaryCard extends StatelessWidget {
   final bool isRejected;
   final bool isOffline;
   final VoidCallback onReject;
-  final VoidCallback onCancelRequest; // Added for pending passenger cancellation
+  final VoidCallback onCancelRequest;
   final VoidCallback onProceedToSummary;
 
-  // Lifecycle Callbacks
   final VoidCallback? onRenew;
   final VoidCallback? onRenegotiate;
   final VoidCallback? onCancelSubscription;
@@ -28,7 +27,7 @@ class NegotiationSummaryCard extends StatelessWidget {
     this.isRejected = false,
     this.isOffline = false,
     required this.onReject,
-    required this.onCancelRequest, // Added to constructor
+    required this.onCancelRequest,
     required this.onProceedToSummary,
     this.onRenew,
     this.onRenegotiate,
@@ -39,15 +38,11 @@ class NegotiationSummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final endDate = DateTime.tryParse(request.subscriptionEndDate.value) ?? DateTime.now();
     final now = DateTime.now();
-    // Normalize to midnight for accurate day difference
     final endDateOnly = DateTime(endDate.year, endDate.month, endDate.day);
     final nowOnly = DateTime(now.year, now.month, now.day);
 
     final isExpired = nowOnly.isAfter(endDateOnly);
     final daysSinceExpiry = isExpired ? nowOnly.difference(endDateOnly).inDays : 0;
-
-    // Updated to < 7 to prevent the UI from showing "0 days left" while active.
-    // This perfectly aligns the 7-day window.
     final canStillExtend = isExpired && daysSinceExpiry < 7;
 
     return Container(
@@ -196,9 +191,37 @@ class NegotiationSummaryCard extends StatelessWidget {
 
                   if (!isOffline) ...[
                     if (!isDriver)
-                      BaseButton(
-                        text: 'View Tumpang Summary',
-                        onPressed: onProceedToSummary,
+                      Column(
+                        children: [
+                          SizedBox(
+                            width: double.infinity,
+                            height: 50,
+                            child: ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppColors.primaryYellow,
+                                foregroundColor: AppColors.black,
+                                elevation: 0,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                              onPressed: onProceedToSummary,
+                              child: const Text('View Tumpang Summary', style: TextStyle(fontWeight: FontWeight.bold)),
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                          SizedBox(
+                            width: double.infinity,
+                            height: 50,
+                            child: OutlinedButton(
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.red,
+                                side: const BorderSide(color: Colors.redAccent),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                              onPressed: onCancelRequest,
+                              child: const Text('Cancel Request', style: TextStyle(fontWeight: FontWeight.bold)),
+                            ),
+                          ),
+                        ],
                       )
                     else
                       Container(
@@ -232,8 +255,7 @@ class NegotiationSummaryCard extends StatelessWidget {
                   const SizedBox(height: 12),
                 ],
 
-                // Universally render Cancel (Passenger) or Reject (Driver) for pending requests
-                if (!isReadOnly && !isRejected && !isOffline) ...[
+                if (!isReadOnly && !isRejected && !isOffline && !isFullyAgreed) ...[
                   const SizedBox(height: 4),
                   SizedBox(
                     width: double.infinity,

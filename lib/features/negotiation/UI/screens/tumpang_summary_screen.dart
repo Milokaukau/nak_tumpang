@@ -7,7 +7,6 @@ import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/entities/tumpang_request.dart';
 import 'package:nak_tumpang/features/negotiation/view_models/negotiation_view_model.dart';
 import 'package:nak_tumpang/features/negotiation/UI/components/summary_route_map.dart';
-// NOTE: adjust this path to match where HomeViewModel actually lives in your project.
 import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
 
 class TumpangSummaryScreen extends StatefulWidget {
@@ -48,33 +47,14 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
   Future<void> _handlePayDeposit({
     required TumpangRequest request,
     required double totalDeposit,
-    required double additionalDeposit,
   }) async {
     setState(() => _isProcessing = true);
 
     try {
-      // 1. If it's an extension and no new deposit is needed, skip Stripe entirely!
-      if (request.isExtension && additionalDeposit <= 0) {
-        await Provider.of<NegotiationViewModel>(context, listen: false)
-            .finalizeExtensionRequest(
-          extensionRequestId: request.id,
-          additionalDeposit: 0.0,
-        );
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Extension Finalized!'), backgroundColor: Colors.green),
-        );
-        Navigator.of(context).popUntil((route) => route.isFirst);
-        return;
-      }
-
-      // 2. Otherwise, charge the Required Amount via Stripe (either full or additional top-up)
-      final chargeAmount = request.isExtension ? additionalDeposit : totalDeposit;
-
       final response = await _supabase.functions.invoke(
         'create-payment-intent',
         body: {
-          'amount': chargeAmount,
+          'amount': totalDeposit,
           'currency': 'myr',
           'description': 'Nak Tumpang deposit for request ${request.id}',
         },
@@ -111,20 +91,15 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
 
       await Stripe.instance.presentPaymentSheet();
 
-      // Widget may have been disposed while the Stripe sheet was open.
       if (!mounted) return;
 
-      // 3. Backend Finalization
       if (request.isExtension) {
-        // Route to the Extension logic. finalizeExtensionRequest is expected to
-        // update the underlying request/subscription status itself.
         await Provider.of<NegotiationViewModel>(context, listen: false)
             .finalizeExtensionRequest(
           extensionRequestId: request.id,
-          additionalDeposit: additionalDeposit,
+          additionalDeposit: totalDeposit,
         );
       } else {
-        // Standard Fresh Subscription Logic
         final startDate = DateTime.parse(request.subscriptionStartDate.value);
         final endDate = DateTime.tryParse(request.subscriptionEndDate.value) ?? startDate;
         final subId = 'sub_${DateTime.now().millisecondsSinceEpoch}';
@@ -167,7 +142,6 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
         }).eq('id', request.id);
       }
 
-      // --- Shared success path for BOTH extension and fresh-subscription flows ---
       if (!mounted) return;
 
       try {
@@ -225,18 +199,10 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
           }
 
           final request = snapshot.data!['request'] as TumpangRequest;
-          final oldDeposit = snapshot.data!['oldDeposit'] as double;
-
           final dailyFee = request.fee.value;
-
           final depositDays = _calculateDepositDays(request.subscriptionDays);
           final targetTotalDeposit = depositDays * dailyFee;
           final bool depositCapped = request.subscriptionDays > 60;
-
-          // Calculate "Top-Up" for extensions
-          final double additionalDeposit = request.isExtension
-              ? (targetTotalDeposit - oldDeposit).clamp(0.0, double.infinity).toDouble()
-              : targetTotalDeposit;
 
           final invoicePeriods = NegotiationViewModel.calculateInvoicePeriods(
             subscriptionDays: request.subscriptionDays,
@@ -264,9 +230,9 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
                       borderRadius: BorderRadius.vertical(top: Radius.circular(11)),
                     ),
                     child: Text(
-                        request.isExtension ? 'Extension Summary' : 'Tumpang Summary',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: AppColors.black)
+                      request.isExtension ? 'Extension Summary' : 'Tumpang Summary',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: AppColors.black),
                     ),
                   ),
                   Padding(
@@ -300,32 +266,13 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
                         ),
                         const SizedBox(height: 8),
 
-                        // Render Deposit details dynamically based on if it's an extension
-                        if (request.isExtension) ...[
-                          _SummaryRow(
-                            label: 'Total Required Deposit',
-                            value: 'RM ${targetTotalDeposit.toStringAsFixed(2)} '
-                                '($depositDays day${depositDays == 1 ? '' : 's'}'
-                                '${depositCapped ? ' deposit, capped at 60 days' : ' deposit'})',
-                          ),
-                          _SummaryRow(
-                            label: 'Prev. Paid Deposit',
-                            value: 'RM ${oldDeposit.toStringAsFixed(2)}',
-                          ),
-                          _SummaryRow(
-                            label: 'Additional Deposit',
-                            value: 'RM ${additionalDeposit.toStringAsFixed(2)}',
-                            isBold: true,
-                          ),
-                        ] else ...[
-                          _SummaryRow(
-                            label: 'Deposit',
-                            value: 'RM ${targetTotalDeposit.toStringAsFixed(2)} '
-                                '($depositDays day${depositDays == 1 ? '' : 's'}'
-                                '${depositCapped ? ' deposit, capped at 60 days' : ' deposit'})',
-                            isBold: true,
-                          ),
-                        ],
+                        _SummaryRow(
+                          label: request.isExtension ? 'Required Deposit' : 'Deposit',
+                          value: 'RM ${targetTotalDeposit.toStringAsFixed(2)} '
+                              '($depositDays day${depositDays == 1 ? '' : 's'}'
+                              '${depositCapped ? ' deposit, capped at 60 days' : ' deposit'})',
+                          isBold: true,
+                        ),
 
                         if (invoicePeriods.isNotEmpty) ...[
                           const SizedBox(height: 8),
@@ -351,16 +298,17 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
                             onPressed: _isProcessing
                                 ? null
                                 : () => _handlePayDeposit(
-                                request: request,
-                                totalDeposit: targetTotalDeposit,
-                                additionalDeposit: additionalDeposit
+                              request: request,
+                              totalDeposit: targetTotalDeposit,
                             ),
                             child: _isProcessing
-                                ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.black))
+                                ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.black),
+                            )
                                 : Text(
-                              request.isExtension && additionalDeposit <= 0
-                                  ? 'Confirm Extension (No Deposit Required)'
-                                  : 'Pay RM ${(request.isExtension ? additionalDeposit : targetTotalDeposit).toStringAsFixed(2)} to confirm',
+                              'Pay RM ${targetTotalDeposit.toStringAsFixed(2)} to confirm',
                               style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
                               textAlign: TextAlign.center,
                             ),
@@ -393,9 +341,28 @@ class _SummaryRow extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(width: 130, child: Text(label, style: TextStyle(color: AppColors.black, fontSize: 14, fontWeight: isBold ? FontWeight.bold : FontWeight.normal))),
+          SizedBox(
+            width: 130,
+            child: Text(
+              label,
+              style: TextStyle(
+                color: AppColors.black,
+                fontSize: 14,
+                fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+          ),
           Text(' : ', style: TextStyle(color: AppColors.black, fontWeight: isBold ? FontWeight.bold : FontWeight.normal)),
-          Expanded(child: Text(value, style: TextStyle(fontSize: 14, color: AppColors.black, fontWeight: isBold ? FontWeight.bold : FontWeight.normal))),
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(
+                fontSize: 14,
+                color: AppColors.black,
+                fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+          ),
         ],
       ),
     );
