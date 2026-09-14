@@ -6,6 +6,7 @@ class PointsSummaryCard extends StatelessWidget {
   final int usedPoints;
   final int voucherCount;
   final DateTime? nearestExpiry;
+  final int expiredPoints; // NEW
 
   const PointsSummaryCard({
     super.key,
@@ -13,6 +14,7 @@ class PointsSummaryCard extends StatelessWidget {
     required this.usedPoints,
     required this.voucherCount,
     this.nearestExpiry,
+    this.expiredPoints = 0, // NEW
   });
 
   @override
@@ -49,6 +51,23 @@ class PointsSummaryCard extends StatelessWidget {
                 '$availablePoints points will expire by ${_formatDate(nearestExpiry!)}',
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.black),
+              ),
+            ),
+          ],
+          if (expiredPoints > 0) ...[
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: Colors.red.shade200),
+              ),
+              child: Text(
+                '$expiredPoints points have expired and are no longer available.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red.shade700, fontSize: 13),
               ),
             ),
           ],

@@ -6,15 +6,6 @@ class RewardsSupabaseService {
 
   Future<Map<String, dynamic>> fetchPointsSummary(String userId) async {
     try {
-      // Sweep: zero out any batches that expired since we last checked, so
-      // avai_points in the DB itself stays accurate for any other query
-      // that might read this table directly.
-      await _supabase
-          .from('reward_points')
-          .update({'avai_points': 0})
-          .eq('user_id', userId)
-          .gt('avai_points', 0)
-          .lt('expired_at', DateTime.now().toIso8601String());
       final response = await _supabase
           .from('reward_points')
           .select()
@@ -25,8 +16,9 @@ class RewardsSupabaseService {
 
       int obtained = 0;
       int available = 0;
-      int expiredUnused = 0; // points that lapsed without being spent
+      int expiredUnused = 0;
       DateTime? nearestExpiry;
+      final List<String> idsToZeroOut = [];
 
       for (var row in rows) {
         final obtainedPts = (row['obtained_points'] as num).toInt();
@@ -37,9 +29,12 @@ class RewardsSupabaseService {
         final isExpired = expiry != null && now.isAfter(expiry);
 
         if (isExpired) {
-          // Expired batches no longer count toward available balance,
-          // regardless of how many points were left unspent in them.
-          expiredUnused += avai;
+          // Capture whatever was still available in THIS row before any
+          // sweep zeroes it out — this is the amount that lapsed unspent.
+          if (avai > 0) {
+            expiredUnused += avai;
+            idsToZeroOut.add(row['id'].toString());
+          }
         } else {
           available += avai;
           if (avai > 0 && expiry != null &&
@@ -47,6 +42,16 @@ class RewardsSupabaseService {
             nearestExpiry = expiry;
           }
         }
+      }
+
+      // Sweep AFTER accounting, using the ids we already identified above —
+      // so the summary numbers reflect the state at read-time, not
+      // whatever's left after this same call's own side-effect.
+      if (idsToZeroOut.isNotEmpty) {
+        await _supabase
+            .from('reward_points')
+            .update({'avai_points': 0})
+            .inFilter('id', idsToZeroOut);
       }
 
       final voucherCountResponse = await _supabase
