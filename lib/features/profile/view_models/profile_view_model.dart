@@ -352,8 +352,11 @@ class ProfileViewModel extends ChangeNotifier {
     final roleToSave = _originalRole ?? _role;
 
     // Driver must have a license photo on file (either already uploaded,
-    // or picked just now) before they can continue.
-    if (roleToSave == 'driver' && licenseUrl == null && licenseBytes == null) {
+    // or picked just now) before they can continue. Check _licensePath,
+    // not licenseUrl — licenseUrl is just the signed display URL, which
+    // is null whenever it was loaded from the offline cache (no
+    // network to sign it), even though a license is genuinely on file.
+    if (roleToSave == 'driver' && _licensePath == null && licenseBytes == null) {
       errorMessage = 'Please upload your driving license.';
       notifyListeners();
       return ProfileSaveResult.failure;
@@ -480,24 +483,6 @@ class ProfileViewModel extends ChangeNotifier {
           });
         }
 
-        // Mirror what just committed to Supabase into the local cache,
-        // so an offline loadProfile() afterward reflects this save
-        // rather than whatever was cached before it.
-        await _localService.cacheUserProfile(
-          userId: userId,
-          name: nameController.text.trim(),
-          email: _email ?? '',
-          phone: Validators.toStoredPhone(phoneController.text),
-          role: roleToSave,
-          avatarUrl: avatarUrl,
-        );
-        if (roleToSave == 'driver') {
-          await _localService.cacheDriverLicense(
-            userId: userId,
-            licenseNumber: licenseNumberController.text.trim(),
-            licenseUrl: _licensePath,
-          );
-        }
       } catch (e) {
         // Neither DB write can be trusted to have committed (upsert
         // isn't itself transactional across the two calls), so roll
@@ -519,7 +504,39 @@ class ProfileViewModel extends ChangeNotifier {
         }
         rethrow;
       }
+
+      // Both Supabase writes have committed by this point — mirror them
+      // into the local cache so an offline loadProfile() afterward
+      // reflects this save. This is deliberately its own try/catch,
+      // outside the rollback scope above: a SQLite-only failure here
+      // must never delete the avatar/license Supabase already committed
+      // to, or report a successful remote save as failed.
+      try {
+        await _localService.cacheUserProfile(
+          userId: userId,
+          name: nameController.text.trim(),
+          email: _email ?? '',
+          phone: Validators.toStoredPhone(phoneController.text),
+          role: roleToSave,
+          avatarUrl: avatarUrl,
+        );
+        if (roleToSave == 'driver') {
+          await _localService.cacheDriverLicense(
+            userId: userId,
+            licenseNumber: licenseNumberController.text.trim(),
+            licenseUrl: _licensePath,
+          );
+        }
+      } catch (e) {
+        debugPrint('Profile saved to Supabase but failed to update local cache: $e');
+      }
+
       _pendingAvatarFileName = null;
+      // Captured before clearing avatarBytes below — the old-file
+      // cleanup a few lines down needs to know whether this save
+      // uploaded a new avatar, and avatarBytes itself won't say that
+      // anymore once it's null.
+      final didUploadAvatar = avatarBytes != null;
       // Committed — the DB row now points at the uploaded file(s), so
       // drop the in-memory copies. Without this, saving again in the
       // same screen session (e.g. after just editing the name) would
@@ -534,7 +551,7 @@ class ProfileViewModel extends ChangeNotifier {
       // to remove now. Done last, after commit, and best-effort: unlike
       // the rollback above, a failure here just leaves one harmless
       // unreferenced old file instead of risking new data.
-      if (avatarBytes != null) {
+      if (didUploadAvatar) {
         final oldAvatarPath = _storagePathFromPublicUrl(previousAvatarUrl, 'avatars');
         if (oldAvatarPath != null) {
           await _storageService.deleteUserFile(bucket: 'avatars', path: oldAvatarPath);

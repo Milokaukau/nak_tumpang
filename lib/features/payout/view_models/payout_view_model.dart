@@ -187,6 +187,11 @@ class PayoutViewModel extends ChangeNotifier {
 
   bool isLoading = true;
   String? errorMessage;
+  // Non-fatal notice shown as a banner above existing content (stale
+  // cache while offline, a failed refresh) — distinct from
+  // errorMessage, which means "nothing to show at all" and replaces
+  // the whole screen.
+  String? walletNotice;
 
   double totalEarnings = 0;
   double availableBalance = 0;
@@ -488,6 +493,7 @@ class PayoutViewModel extends ChangeNotifier {
 
     isLoading = true;
     errorMessage = null;
+    walletNotice = null;
     notifyListeners();
 
     try {
@@ -501,8 +507,12 @@ class PayoutViewModel extends ChangeNotifier {
         totalWithdrawn = (cached['total_withdrawn'] as num?)?.toDouble() ?? 0;
         final cachedFee = await _localService.getCachedBankTransferFee();
         if (cachedFee != null) bankTransferFee = cachedFee;
-        errorMessage = "Showing your last saved wallet — you're offline.";
+        // Cached data exists, so this is informational, not fatal — the
+        // wallet, toggle, and refresh all stay usable.
+        walletNotice = "Showing your last saved wallet — you're offline.";
       } else {
+        // Nothing to show at all — this is the one case that should
+        // replace the whole screen.
         errorMessage = 'Could not load wallet. Please try again.';
       }
     } finally {
@@ -520,8 +530,11 @@ class PayoutViewModel extends ChangeNotifier {
     if (userId == null) return;
     try {
       await _loadWalletData(userId);
+      walletNotice = null;
     } catch (e) {
-      errorMessage = 'Could not refresh wallet. Please try again.';
+      // The wallet is already populated from the previous successful
+      // load — a failed refresh is never fatal here, just a banner.
+      walletNotice = 'Could not refresh wallet. Please try again.';
     } finally {
       notifyListeners();
     }

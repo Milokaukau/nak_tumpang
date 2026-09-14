@@ -243,9 +243,27 @@ class RegisterViewModel extends ChangeNotifier {
           });
         }
 
-        // Seed the local cache with the account that was just created,
-        // so ProfileViewModel.loadProfile() has something to fall back
-        // to even before the very first successful load from Supabase.
+      } catch (e) {
+        // Neither remote write can be trusted to have committed — clean
+        // up the license file uploaded *in this attempt* so a failed
+        // submit doesn't leave an orphaned file in Storage that nothing
+        // in the DB ever ends up pointing to. A later retry (same
+        // screen instance) re-uploads under a fresh filename, so this
+        // is always safe to remove.
+        if (pendingLicensePath != null) {
+          await _storageService.deleteUserFile(bucket: 'driver-licenses', path: pendingLicensePath);
+          licenseStoragePath = null;
+        }
+        rethrow;
+      }
+
+      // The remote account/driver-profile rows have committed by this
+      // point — seed the local cache separately, outside the rollback
+      // scope above. A SQLite-only failure here must never delete the
+      // license file the remote write already committed to, or report
+      // a successful registration as failed; the app's next successful
+      // Supabase load will simply overwrite this cache entry anyway.
+      try {
         await _localService.cacheUserProfile(
           userId: newUserId,
           name: nameController.text.trim(),
@@ -261,17 +279,7 @@ class RegisterViewModel extends ChangeNotifier {
           );
         }
       } catch (e) {
-        // Neither write can be trusted to have committed — clean up the
-        // license file uploaded *in this attempt* so a failed submit
-        // doesn't leave an orphaned file in Storage that nothing in the
-        // DB ever ends up pointing to. A later retry (same screen
-        // instance) re-uploads under a fresh filename, so this is always
-        // safe to remove.
-        if (pendingLicensePath != null) {
-          await _storageService.deleteUserFile(bucket: 'driver-licenses', path: pendingLicensePath);
-          licenseStoragePath = null;
-        }
-        rethrow;
+        debugPrint('Registered on Supabase but failed to seed local cache: $e');
       }
 
       return true;

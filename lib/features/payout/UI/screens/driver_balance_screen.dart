@@ -36,6 +36,7 @@ class _DriverBalanceView extends StatelessWidget {
           : SafeArea(
         child: Column(
           children: [
+            if (vm.walletNotice != null) _WalletNoticeBanner(text: vm.walletNotice!),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
               child: _WalletHistoryToggle(vm: vm),
@@ -47,6 +48,36 @@ class _DriverBalanceView extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Informational banner for a non-fatal wallet notice (offline/stale
+/// cache, a failed refresh) — sits above the toggle so the wallet,
+/// history, and refresh stay usable underneath it.
+class _WalletNoticeBanner extends StatelessWidget {
+  final String text;
+  const _WalletNoticeBanner({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: AppColors.lightYellow,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.info_outline, size: 18, color: AppColors.greyText),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(text, style: const TextStyle(color: AppColors.greyText, fontSize: 12)),
+          ),
+        ],
       ),
     );
   }
