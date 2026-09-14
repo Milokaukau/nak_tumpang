@@ -129,7 +129,9 @@ class PaymentSupabaseService {
     final depositEndDate = startDate.add(const Duration(days: 59));
     if (depositEndDate.isAfter(endDate)) return;
 
-    final today = DateTime.now();
+    // FIX: Normalize 'today' to a pure calendar date so it doesn't trigger at 12:00 AM on the final day
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
     DateTime cycleStart = depositEndDate.add(const Duration(days: 1));
 
     while (!cycleStart.isAfter(endDate)) {

@@ -37,9 +37,8 @@ class _ProposeValueBottomSheetState extends State<ProposeValueBottomSheet> {
 
   static const int _minFee = 1; // RM1 floor — a fee can't be zero or negative
 
-  // Fee mode state (whole ringgit only, stepped by exactly 1 — like
-  // Grab/inDrive's fare-negotiation stepper, no manual decimal entry).
-  late int _feeValue;
+  // Fee mode state: Now a double to preserve incoming legacy fractional fees
+  late double _feeValue;
 
   // Non-fee fallback mode state.
   late TextEditingController _controller;
@@ -52,8 +51,9 @@ class _ProposeValueBottomSheetState extends State<ProposeValueBottomSheet> {
     super.initState();
     if (_isFee) {
       final parsed = double.tryParse(widget.currentValue);
-      _feeValue = (parsed ?? _minFee.toDouble()).round();
-      if (_feeValue < _minFee) _feeValue = _minFee;
+      // Preserve fractional values on load, do not use .round()
+      _feeValue = parsed ?? _minFee.toDouble();
+      if (_feeValue < _minFee) _feeValue = _minFee.toDouble();
     } else {
       _controller = TextEditingController(text: widget.currentValue);
     }
@@ -67,12 +67,26 @@ class _ProposeValueBottomSheetState extends State<ProposeValueBottomSheet> {
 
   void _incrementFee() {
     if (_isSubmitting) return;
-    setState(() => _feeValue += 1);
+    setState(() {
+      // Snaps to the next whole integer if fractional, or adds exactly 1.0
+      _feeValue = (_feeValue + 1.0).floorToDouble();
+    });
   }
 
   void _decrementFee() {
     if (_isSubmitting || _feeValue <= _minFee) return;
-    setState(() => _feeValue -= 1);
+    setState(() {
+      // Snaps down to the nearest whole integer, or subtracts exactly 1.0
+      _feeValue = (_feeValue - 1.0).ceilToDouble();
+      if (_feeValue < _minFee) _feeValue = _minFee.toDouble();
+    });
+  }
+
+  // Formats correctly based on whether the number is currently fractional or whole
+  String get _formattedFee {
+    return _feeValue == _feeValue.truncateToDouble()
+        ? _feeValue.toStringAsFixed(0)
+        : _feeValue.toStringAsFixed(2);
   }
 
   Future<void> _submit() async {
@@ -80,10 +94,7 @@ class _ProposeValueBottomSheetState extends State<ProposeValueBottomSheet> {
 
     final String value;
     if (_isFee) {
-      // Whole number, no decimal formatting — the stepper is the only way
-      // to change this value, so there's no free-text path that could
-      // reintroduce a fractional fee.
-      value = _feeValue.toString();
+      value = _formattedFee;
     } else {
       value = _controller.text.trim();
       if (value.isEmpty) {
@@ -146,7 +157,7 @@ class _ProposeValueBottomSheetState extends State<ProposeValueBottomSheet> {
                   child: Column(
                     children: [
                       Text(
-                        'RM $_feeValue',
+                        'RM $_formattedFee',
                         textAlign: TextAlign.center,
                         style: const TextStyle(fontSize: 34, fontWeight: FontWeight.bold, color: AppColors.black),
                       ),

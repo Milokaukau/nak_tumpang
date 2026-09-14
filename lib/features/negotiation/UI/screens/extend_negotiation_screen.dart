@@ -23,13 +23,11 @@ class ExtendNegotiationScreen extends StatefulWidget {
 }
 
 class _ExtendNegotiationScreenState extends State<ExtendNegotiationScreen> {
-  // Mirrors NegotiationScreen's own use of this service for
-  // fetchSubscriptionById — reusing the real, already-proven source of
-  // subscription data rather than a NegotiationViewModel stand-in.
   final SubscriptionSupabaseService _subscriptionService = SubscriptionSupabaseService();
 
   bool _isLoading = true;
   bool _isSubmitting = false;
+  String? _loadError; // Added to track load failures
 
   Map<String, dynamic>? _subscription;
 
@@ -61,16 +59,29 @@ class _ExtendNegotiationScreenState extends State<ExtendNegotiationScreen> {
   }
 
   Future<void> _loadSubscription() async {
-    final controller = context.read<NegotiationViewModel>();
-    final role = controller.currentUserRole == 'driver' ? 'driver' : 'passenger';
-    final sub = await _subscriptionService.fetchSubscriptionById(widget.subscriptionId, role);
-
-    if (!mounted) return;
-
     setState(() {
-      _subscription = sub;
+      _isLoading = true;
+      _loadError = null;
+    });
 
-      if (sub != null) {
+    try {
+      final controller = context.read<NegotiationViewModel>();
+      final role = controller.currentUserRole == 'driver' ? 'driver' : 'passenger';
+      final sub = await _subscriptionService.fetchSubscriptionById(widget.subscriptionId, role);
+
+      if (!mounted) return;
+
+      if (sub == null) {
+        setState(() {
+          _loadError = 'Subscription not found.';
+          _isLoading = false;
+        });
+        return;
+      }
+
+      setState(() {
+        _subscription = sub;
+
         _pickupName = sub['pickup_location']?.toString() ?? '';
         _pickupLat = double.tryParse(sub['pickup_lat']?.toString() ?? '') ?? 0.0;
         _pickupLng = double.tryParse(sub['pickup_lng']?.toString() ?? '') ?? 0.0;
@@ -90,28 +101,25 @@ class _ExtendNegotiationScreenState extends State<ExtendNegotiationScreen> {
         _originalFee = _fee;
 
         _oldEndDate = DateTime.tryParse(sub['subscription_end_date']?.toString() ?? '');
-      } else {
-        _pickupName = '';
-        _pickupLat = 0.0;
-        _pickupLng = 0.0;
-        _dropoffName = '';
-        _dropoffLat = 0.0;
-        _dropoffLng = 0.0;
-        _pickupTimeDb = '09:00:00';
-        _fee = 0.0;
-        _oldEndDate = null;
-      }
 
-      final now = DateTime.now();
-      final nowOnly = DateTime(now.year, now.month, now.day);
-      DateTime base = _oldEndDate ?? nowOnly;
-      if (base.isBefore(nowOnly)) {
-        base = nowOnly;
-      }
-      _newEndDate = DateRangeRules.minEndDate(base);
+        final now = DateTime.now();
+        final nowOnly = DateTime(now.year, now.month, now.day);
+        DateTime base = _oldEndDate ?? nowOnly;
+        if (base.isBefore(nowOnly)) {
+          base = nowOnly;
+        }
+        _newEndDate = DateRangeRules.minEndDate(base);
 
-      _isLoading = false;
-    });
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _loadError = 'Failed to load subscription details. Please check your connection and try again.';
+          _isLoading = false;
+        });
+      }
+    }
   }
 
   String _formatAmPm(String dbTime) {
@@ -319,98 +327,129 @@ class _ExtendNegotiationScreenState extends State<ExtendNegotiationScreen> {
         iconTheme: const IconThemeData(color: AppColors.black),
         centerTitle: true,
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.amber.shade50,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.amber.shade300),
+      body: _buildBody(),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_loadError != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                _loadError!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.red, fontSize: 16),
               ),
-              child: Row(
-                children: [
-                  Icon(Icons.autorenew, color: Colors.amber.shade900),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      _subscription != null
-                          ? 'This extends your existing subscription — anything you don\'t change below stays the same as your last agreement.'
-                          : 'Starting a fresh extension request — no previous subscription details were found to prefill.',
-                      style: TextStyle(color: Colors.amber.shade900, fontWeight: FontWeight.bold, fontSize: 13),
-                    ),
-                  ),
-                ],
+              const SizedBox(height: 20),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primaryYellow,
+                  foregroundColor: AppColors.black,
+                ),
+                onPressed: _loadSubscription,
+                child: const Text('Retry'),
               ),
-            ),
-            const SizedBox(height: 20),
-
-            NegotiationFieldRow(
-              title: 'Pickup Location',
-              value: _pickupName.isEmpty ? 'Not set' : _pickupName,
-              isAccepted: true,
-              isRequestedByMe: false,
-              topWidget: (_pickupLat != 0 || _pickupLng != 0)
-                  ? RouteMapHeader(label: _pickupName, lat: _pickupLat, lng: _pickupLng)
-                  : null,
-              onPropose: () => _openLocationPicker(isPickup: true),
-              onAccept: () {},
-            ),
-
-            NegotiationFieldRow(
-              title: 'Dropoff Location',
-              value: _dropoffName.isEmpty ? 'Not set' : _dropoffName,
-              isAccepted: true,
-              isRequestedByMe: false,
-              topWidget: (_dropoffLat != 0 || _dropoffLng != 0)
-                  ? RouteMapHeader(label: _dropoffName, lat: _dropoffLat, lng: _dropoffLng)
-                  : null,
-              onPropose: () => _openLocationPicker(isPickup: false),
-              onAccept: () {},
-            ),
-
-            NegotiationFieldRow(
-              title: 'Pickup Time',
-              value: _formatAmPm(_pickupTimeDb),
-              isAccepted: true,
-              isRequestedByMe: false,
-              onPropose: _openPickupTimeSheet,
-              onAccept: () {},
-            ),
-
-            NegotiationFieldRow(
-              title: 'Tumpang Fee',
-              value: 'RM ${_fee.toStringAsFixed(0)}/day',
-              isAccepted: true,
-              isRequestedByMe: false,
-              onPropose: _openFeeSheet,
-              onAccept: () {},
-            ),
-
-            NegotiationFieldRow(
-              title: 'New End Date',
-              value: _oldEndDate != null
-                  ? '${_formatDate(_oldEndDate!)} \u2192 ${_formatDate(_newEndDate)}'
-                  : _formatDate(_newEndDate),
-              isAccepted: true,
-              isRequestedByMe: false,
-              onPropose: _pickNewEndDate,
-              onAccept: () {},
-            ),
-
-            const SizedBox(height: 12),
-            BaseButton(
-              text: _isSubmitting ? 'Submitting...' : 'Submit Extension Request',
-              onPressed: _isSubmitting ? () {} : _submit,
-            ),
-            const SizedBox(height: 40),
-          ],
+            ],
+          ),
         ),
+      );
+    }
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 20.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.amber.shade50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.amber.shade300),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.autorenew, color: Colors.amber.shade900),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'This extends your existing subscription — anything you don\'t change below stays the same as your last agreement.',
+                    style: TextStyle(color: Colors.amber.shade900, fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          NegotiationFieldRow(
+            title: 'Pickup Location',
+            value: _pickupName.isEmpty ? 'Not set' : _pickupName,
+            isAccepted: true,
+            isRequestedByMe: false,
+            topWidget: (_pickupLat != 0 || _pickupLng != 0)
+                ? RouteMapHeader(label: _pickupName, lat: _pickupLat, lng: _pickupLng)
+                : null,
+            onPropose: () => _openLocationPicker(isPickup: true),
+            onAccept: () {},
+          ),
+
+          NegotiationFieldRow(
+            title: 'Dropoff Location',
+            value: _dropoffName.isEmpty ? 'Not set' : _dropoffName,
+            isAccepted: true,
+            isRequestedByMe: false,
+            topWidget: (_dropoffLat != 0 || _dropoffLng != 0)
+                ? RouteMapHeader(label: _dropoffName, lat: _dropoffLat, lng: _dropoffLng)
+                : null,
+            onPropose: () => _openLocationPicker(isPickup: false),
+            onAccept: () {},
+          ),
+
+          NegotiationFieldRow(
+            title: 'Pickup Time',
+            value: _formatAmPm(_pickupTimeDb),
+            isAccepted: true,
+            isRequestedByMe: false,
+            onPropose: _openPickupTimeSheet,
+            onAccept: () {},
+          ),
+
+          NegotiationFieldRow(
+            title: 'Tumpang Fee',
+            value: 'RM ${_fee.toStringAsFixed(0)}/day',
+            isAccepted: true,
+            isRequestedByMe: false,
+            onPropose: _openFeeSheet,
+            onAccept: () {},
+          ),
+
+          NegotiationFieldRow(
+            title: 'New End Date',
+            value: _oldEndDate != null
+                ? '${_formatDate(_oldEndDate!)} \u2192 ${_formatDate(_newEndDate)}'
+                : _formatDate(_newEndDate),
+            isAccepted: true,
+            isRequestedByMe: false,
+            onPropose: _pickNewEndDate,
+            onAccept: () {},
+          ),
+
+          const SizedBox(height: 12),
+          BaseButton(
+            text: _isSubmitting ? 'Submitting...' : 'Submit Extension Request',
+            onPressed: _isSubmitting ? () {} : _submit,
+          ),
+          const SizedBox(height: 40),
+        ],
       ),
     );
   }

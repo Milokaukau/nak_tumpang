@@ -212,7 +212,7 @@ class _InvoiceSheetState extends State<InvoiceSheet> {
                   border: Border.all(color: Colors.orange.shade200),
                 ),
                 child: Text(
-                  '$_loadError The Total Amount Due below is still accurate.',
+                  '$_loadError The ${isPaid ? 'Total Amount Paid' : 'Total Amount Due'} below is still accurate.',
                   style: const TextStyle(fontSize: 12, color: Colors.orange),
                 ),
               ),
@@ -268,7 +268,10 @@ class _InvoiceSheetState extends State<InvoiceSheet> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('Total Amount Due', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                    Text(
+                        isPaid ? 'Total Amount Paid' : 'Total Amount Due',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)
+                    ),
                     Text(
                       'RM ${totalDue.toStringAsFixed(2)}',
                       style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: AppColors.black),
@@ -296,20 +299,20 @@ class _InvoiceSheetState extends State<InvoiceSheet> {
 
   Widget _infoRow(String label, String value, {Color? valueColor}) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: 12),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: 100,
+            width: 100, // Fixed width keeps all the colons perfectly aligned
             child: Text(
               label,
-              style: const TextStyle(color: Colors.grey, fontSize: 13),
+              style: const TextStyle(color: Colors.grey, fontSize: 13, height: 1.5),
             ),
           ),
-          const Padding(
-            padding: EdgeInsets.only(right: 8.0),
-            child: Text(':', style: TextStyle(color: Colors.grey, fontSize: 13)),
+          const Text(
+            ':   ',
+            style: TextStyle(color: Colors.grey, fontSize: 13, height: 1.5),
           ),
           Expanded(
             child: Text(
@@ -318,7 +321,8 @@ class _InvoiceSheetState extends State<InvoiceSheet> {
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
                 color: valueColor ?? AppColors.black,
-                height: 1.4, // Adds subtle line spacing to multi-line addresses
+                height: 1.5, // Much cleaner line-height for wrapped addresses
+                letterSpacing: 0.2, // Subtle spacing for better readability
               ),
             ),
           ),

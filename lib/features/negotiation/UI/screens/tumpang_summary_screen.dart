@@ -193,7 +193,15 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
             depositEndDate,
             schedule,
           );
+
           final targetTotalDeposit = depositActiveDays * dailyFee;
+
+          // Calculate the actual shortfall to charge extensions correctly
+          final oldDeposit = snapshot.data!['oldDeposit'] as double? ?? 0.0;
+          final payableDeposit = request.isExtension
+              ? (targetTotalDeposit - oldDeposit).clamp(0.0, double.infinity)
+              : targetTotalDeposit;
+
           final totalActiveDays = NegotiationViewModel.countActiveDays(startDate, endDate, schedule);
 
           final invoicePeriods = NegotiationViewModel.calculateInvoicePeriods(
@@ -260,7 +268,7 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
 
                         _SummaryRow(
                           label: request.isExtension ? 'Required Deposit' : 'Deposit',
-                          value: 'RM ${targetTotalDeposit.toStringAsFixed(2)}',
+                          value: 'RM ${payableDeposit.toStringAsFixed(2)}',
                           isBold: true,
                         ),
 
@@ -287,7 +295,7 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
                                 ? null
                                 : () => _handlePayDeposit(
                               request: request,
-                              totalDeposit: targetTotalDeposit,
+                              totalDeposit: payableDeposit,
                             ),
                             child: _isProcessing
                                 ? const SizedBox(
@@ -296,7 +304,7 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
                               child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.black),
                             )
                                 : Text(
-                              'Pay RM ${targetTotalDeposit.toStringAsFixed(2)} to confirm',
+                              'Pay RM ${payableDeposit.toStringAsFixed(2)} to confirm',
                               style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
                               textAlign: TextAlign.center,
                             ),
