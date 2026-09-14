@@ -141,7 +141,7 @@ class PaymentSupabaseService {
 
       DateTime nextCycleStart = cycleEnd.add(const Duration(days: 1));
 
-      if (!cycleStart.isAfter(today)) {
+      if (today.isAfter(cycleEnd)) {
         final cycleStartStr = cycleStart.toIso8601String().split('T').first;
         final cycleEndStr = cycleEnd.toIso8601String().split('T').first;
 
