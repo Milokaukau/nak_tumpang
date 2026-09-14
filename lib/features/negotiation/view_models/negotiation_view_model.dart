@@ -566,10 +566,15 @@ class NegotiationViewModel extends ChangeNotifier {
   Future<void> finalizeExtensionRequest({
     required String extensionRequestId,
     required double additionalDeposit,
+    required String paymentIntentId,
   }) {
     if (isOffline) throw NegotiationException('You cannot finalize an extension while offline.');
     return runNegotiationAction(() async {
-      await _service.finalizeExtension(extensionRequestId, additionalDeposit: additionalDeposit);
+      await _service.finalizeExtension(
+        extensionRequestId,
+        additionalDeposit: additionalDeposit,
+        paymentIntentId: paymentIntentId,
+      );
       await refreshRequests();
     });
   }
@@ -620,28 +625,33 @@ class NegotiationViewModel extends ChangeNotifier {
   Future<void> createSubscriptionAfterDeposit({
     required TumpangRequest request,
     required double deposit,
+    required String paymentIntentId,
   }) async {
     if (deposit <= 0) throw NegotiationException('Deposit amount must be greater than RM 0.');
     if (isOffline) throw NegotiationException('You cannot complete a subscription while offline.');
 
     await runNegotiationAction(() async {
-      await _service.createSubscriptionAfterDeposit(request: request, deposit: deposit);
+      await _service.createSubscriptionAfterDeposit(
+        request: request,
+        deposit: deposit,
+        paymentIntentId: paymentIntentId,
+      );
       await refreshRequests();
     });
   }
 
   /// Counts scheduled ride days inclusively between [start] and [end].
   static int countActiveDays(
-    DateTime start,
-    DateTime end,
-    Map<String, dynamic> schedule,
-  ) {
+      DateTime start,
+      DateTime end,
+      Map<String, dynamic> schedule,
+      ) {
     if (end.isBefore(start)) return 0;
 
     var count = 0;
     for (var date = DateTime(start.year, start.month, start.day);
-        !date.isAfter(end);
-        date = date.add(const Duration(days: 1))) {
+    !date.isAfter(end);
+    date = date.add(const Duration(days: 1))) {
       if (isDayActive(date, schedule)) count++;
     }
     return count;

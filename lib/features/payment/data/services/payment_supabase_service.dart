@@ -23,10 +23,10 @@ class PaymentSupabaseService {
     final passengerTrip = passengerTripId == null
         ? null
         : await _supabase
-            .from('passenger_trips')
-            .select('trip_name, active_monday, active_tuesday, active_wednesday, active_thursday, active_friday, active_saturday, active_sunday')
-            .eq('id', passengerTripId)
-            .maybeSingle();
+        .from('passenger_trips')
+        .select('trip_name, active_monday, active_tuesday, active_wednesday, active_thursday, active_friday, active_saturday, active_sunday')
+        .eq('id', passengerTripId)
+        .maybeSingle();
     final driverTrip = driverTripId == null
         ? null
         : await _supabase.from('driver_trips').select('trip_name').eq('id', driverTripId).maybeSingle();
@@ -69,11 +69,11 @@ class PaymentSupabaseService {
   /// Passenger-initiated exceptions ("no need fetch") are NOT deducted -
   /// only the driver failing to provide the ride reduces what's billed.
   Future<int> _countDriverMissedDays(
-    String subscriptionId,
-    DateTime cycleStart,
-    DateTime cycleEnd,
-    Map<String, dynamic> schedule,
-  ) async {
+      String subscriptionId,
+      DateTime cycleStart,
+      DateTime cycleEnd,
+      Map<String, dynamic> schedule,
+      ) async {
     final cycleStartStr = cycleStart.toIso8601String().split('T').first;
     final cycleEndStr = cycleEnd.toIso8601String().split('T').first;
 
@@ -361,14 +361,13 @@ class PaymentSupabaseService {
   Future<Map<String, dynamic>> calculateCancellationFee(String subscriptionId) async {
     final sub = await _supabase
         .from('tumpang_subscription')
-        .select('fee, deposit')
+        .select('fee')
         .eq('id', subscriptionId)
         .maybeSingle();
 
     if (sub == null) throw Exception('Subscription not found');
 
     final dailyFee = double.tryParse(sub['fee']?.toString() ?? '') ?? 0.0;
-    final deposit = double.tryParse(sub['deposit']?.toString() ?? '') ?? 0.0;
 
     final logs = await _supabase
         .from('tumpang_trip_log')
@@ -385,7 +384,11 @@ class PaymentSupabaseService {
         .eq('tumpang_subscription_id', subscriptionId)
         .not('paid_at', 'is', null);
 
-    double totalPaidSoFar = deposit;
+    // The deposit is already recorded as its own row in `payments` (inserted
+    // by finalize_tumpang_payment), so it must NOT be re-added here — doing
+    // so double-counted it and inflated totalPaidSoFar, which understated
+    // (or negated) the refund owed on cancellation.
+    double totalPaidSoFar = 0.0;
     for (final row in (paidInvoices as List)) {
       totalPaidSoFar += double.tryParse(row['amount']?.toString() ?? '') ?? 0.0;
     }

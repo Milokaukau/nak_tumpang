@@ -48,6 +48,19 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
     return subscriptionDays <= 60 ? subscriptionDays : 60;
   }
 
+  /// Stripe's `flutter_stripe` payment sheet doesn't hand back the
+  /// PaymentIntent object after `presentPaymentSheet()` succeeds — but the
+  /// PaymentIntent id is always the prefix of the client secret, in the form
+  /// `pi_XXXXXXXX_secret_YYYYYYYY`. We use that to recover the id so it can
+  /// be passed server-side as the idempotency key.
+  String _extractPaymentIntentId(String clientSecret) {
+    final secretIndex = clientSecret.indexOf('_secret_');
+    if (secretIndex == -1) {
+      throw StateError('Unexpected PaymentIntent client secret format');
+    }
+    return clientSecret.substring(0, secretIndex);
+  }
+
   Future<void> _handlePayDeposit({
     required TumpangRequest request,
     required double totalDeposit,
@@ -60,6 +73,7 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
         amount: totalDeposit,
         requestId: request.id,
       );
+      final paymentIntentId = _extractPaymentIntentId(clientSecret);
 
       await Stripe.instance.initPaymentSheet(
         paymentSheetParameters: SetupPaymentSheetParameters(
@@ -83,15 +97,21 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
 
       if (!mounted) return;
 
+      // paymentIntentId is passed through so the server-side RPC can treat
+      // this call idempotently: if the app crashes or is retried after this
+      // point, the same PaymentIntent id will short-circuit to the already
+      // finalized subscription instead of writing duplicate rows.
       if (request.isExtension) {
         await controller.finalizeExtensionRequest(
           extensionRequestId: request.id,
           additionalDeposit: totalDeposit,
+          paymentIntentId: paymentIntentId,
         );
       } else {
         await controller.createSubscriptionAfterDeposit(
           request: request,
           deposit: totalDeposit,
+          paymentIntentId: paymentIntentId,
         );
       }
 
