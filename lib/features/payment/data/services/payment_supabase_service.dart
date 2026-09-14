@@ -6,6 +6,51 @@ class PaymentSupabaseService {
   final SupabaseClient _supabase = Supabase.instance.client;
   final String _table = 'payments';
 
+  Future<Map<String, dynamic>> fetchProformaInvoiceDetails({
+    required String subscriptionId,
+    DateTime? cycleStart,
+    DateTime? cycleEnd,
+  }) async {
+    final sub = await _supabase
+        .from('tumpang_subscription')
+        .select('fee, passenger_trip_id, driver_trip_id')
+        .eq('id', subscriptionId)
+        .maybeSingle();
+    if (sub == null) throw StateError('Subscription not found.');
+
+    final passengerTripId = sub['passenger_trip_id']?.toString();
+    final driverTripId = sub['driver_trip_id']?.toString();
+    final passengerTrip = passengerTripId == null
+        ? null
+        : await _supabase
+            .from('passenger_trips')
+            .select('trip_name, active_monday, active_tuesday, active_wednesday, active_thursday, active_friday, active_saturday, active_sunday')
+            .eq('id', passengerTripId)
+            .maybeSingle();
+    final driverTrip = driverTripId == null
+        ? null
+        : await _supabase.from('driver_trips').select('trip_name').eq('id', driverTripId).maybeSingle();
+
+    List<dynamic> exceptions = [];
+    if (cycleStart != null && cycleEnd != null) {
+      exceptions = await _supabase
+          .from('tumpang_exception')
+          .select('start_date, end_date, reason')
+          .eq('tumpang_subscription_id', subscriptionId)
+          .eq('initiated_by_role', 'driver')
+          .lte('start_date', cycleEnd.toIso8601String().split('T').first)
+          .gte('end_date', cycleStart.toIso8601String().split('T').first);
+    }
+
+    return {
+      'dailyFee': double.tryParse(sub['fee']?.toString() ?? '') ?? 0.0,
+      'passengerTripName': passengerTrip?['trip_name']?.toString(),
+      'driverTripName': driverTrip?['trip_name']?.toString(),
+      'schedule': passengerTrip ?? <String, dynamic>{},
+      'exceptions': exceptions,
+    };
+  }
+
   /// Returns whether [date] is one of the passenger's scheduled ride days.
   bool _isDayActive(DateTime date, Map<String, dynamic> schedule) {
     switch (date.weekday) {

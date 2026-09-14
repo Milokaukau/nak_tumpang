@@ -20,6 +20,73 @@ class NegotiationSupabaseService {
     return TumpangRequest.fromJson(response);
   }
 
+  Future<String> createDepositPaymentIntent({
+    required double amount,
+    required String requestId,
+  }) async {
+    final response = await _supabase.functions.invoke(
+      'create-payment-intent',
+      body: {
+        'amount': amount,
+        'currency': 'myr',
+        'description': 'Nak Tumpang deposit for request $requestId',
+      },
+    );
+    if (response.status != 200 || response.data == null) {
+      final error = response.data is Map ? response.data['error'] : null;
+      throw StateError(error?.toString() ?? 'Failed to create PaymentIntent');
+    }
+    final clientSecret = (response.data as Map)['client_secret']?.toString();
+    if (clientSecret == null || clientSecret.isEmpty) {
+      throw StateError('No client_secret returned from server');
+    }
+    return clientSecret;
+  }
+
+  Future<void> createSubscriptionAfterDeposit({
+    required TumpangRequest request,
+    required double deposit,
+  }) async {
+    final startDate = DateTime.parse(request.subscriptionStartDate.value);
+    final endDate = DateTime.tryParse(request.subscriptionEndDate.value) ?? startDate;
+    final subscriptionId = 'sub_${DateTime.now().millisecondsSinceEpoch}';
+
+    await _supabase.from('tumpang_subscription').insert({
+      'id': subscriptionId,
+      'passenger_trip_id': request.passengerTripId,
+      'driver_trip_id': request.driverTripId,
+      'pickup_lat': request.pickupLocation.lat,
+      'pickup_lng': request.pickupLocation.lng,
+      'pickup_location': request.pickupLocation.name,
+      'dropoff_lat': request.dropoffLocation.lat,
+      'dropoff_lng': request.dropoffLocation.lng,
+      'dropoff_location': request.dropoffLocation.name,
+      'pickup_time': request.pickupTime.value,
+      'fee': request.fee.value,
+      'deposit': deposit,
+      'deposit_refunded': false,
+      'subscription_start_date': startDate.toIso8601String().split('T').first,
+      'subscription_end_date': endDate.toIso8601String().split('T').first,
+      'status': 'active',
+    });
+
+    final paidAt = DateTime.now();
+    await _supabase.from('payments').insert({
+      'id': 'pay_${paidAt.millisecondsSinceEpoch}',
+      'tumpang_subscription_id': subscriptionId,
+      'month': paidAt.month,
+      'year': paidAt.year,
+      'due_date': paidAt.toIso8601String(),
+      'paid_at': paidAt.toIso8601String(),
+      'amount': deposit,
+    });
+
+    await _supabase
+        .from(_table)
+        .update({'status': 'completed', 'subscription_id': subscriptionId})
+        .eq('id', request.id);
+  }
+
   Future<void> updateNegotiationField({
     required String requestId,
     required String fieldPrefix,

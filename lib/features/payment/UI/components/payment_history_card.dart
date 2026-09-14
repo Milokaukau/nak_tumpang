@@ -10,7 +10,7 @@ class PaymentHistoryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final paidDateStr = payment.paidAt != null
-        ? payment.paidAt!.toIso8601String().split('T').first
+        ? '${payment.paidAt!.day.toString().padLeft(2, '0')}-${payment.paidAt!.month.toString().padLeft(2, '0')}-${payment.paidAt!.year}'
         : 'Completed';
 
     return Card(

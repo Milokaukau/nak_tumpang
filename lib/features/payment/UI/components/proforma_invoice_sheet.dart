@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/entities/payment.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
+import 'package:nak_tumpang/features/payment/view_models/payment_view_model.dart';
 
 class ProformaInvoiceSheet extends StatefulWidget {
   final Payment payment;
@@ -22,7 +23,6 @@ class ProformaInvoiceSheet extends StatefulWidget {
 }
 
 class _ProformaInvoiceSheetState extends State<ProformaInvoiceSheet> {
-  final SupabaseClient _supabase = Supabase.instance.client;
   bool _loading = true;
 
   double _dailyFee = 0.0;
@@ -62,62 +62,29 @@ class _ProformaInvoiceSheetState extends State<ProformaInvoiceSheet> {
 
   Future<void> _loadInvoiceDetails() async {
     try {
-      final sub = await _supabase
-          .from('tumpang_subscription')
-          .select('fee, passenger_trip_id, driver_trip_id')
-          .eq('id', widget.payment.subscriptionId)
-          .maybeSingle();
-
-      _dailyFee = double.tryParse(sub?['fee']?.toString() ?? '') ?? 0.0;
-
-      final passengerTripId = sub?['passenger_trip_id']?.toString();
-      final driverTripId = sub?['driver_trip_id']?.toString();
-
-      Map<String, dynamic> schedule = {};
-      if (passengerTripId != null) {
-        final pTrip = await _supabase
-            .from('passenger_trips')
-            .select('trip_name, active_monday, active_tuesday, active_wednesday, active_thursday, active_friday, active_saturday, active_sunday')
-            .eq('id', passengerTripId)
-            .maybeSingle();
-        _passengerTripName = pTrip?['trip_name']?.toString();
-        if (pTrip != null) schedule = pTrip;
-      }
-
-      if (driverTripId != null) {
-        final dTrip = await _supabase
-            .from('driver_trips')
-            .select('trip_name')
-            .eq('id', driverTripId)
-            .maybeSingle();
-        _driverTripName = dTrip?['trip_name']?.toString();
-      }
-
       final start = widget.payment.cycleStartDate;
       final end = widget.payment.cycleEndDate;
+      final details = await context.read<PaymentViewModel>().loadProformaInvoiceDetails(
+        subscriptionId: widget.payment.subscriptionId,
+        cycleStart: start,
+        cycleEnd: end,
+      );
+      if (details == null) {
+        _loadError = context.read<PaymentViewModel>().proformaErrorMessage;
+        return;
+      }
+
+      _dailyFee = details['dailyFee'] as double;
+      _passengerTripName = details['passengerTripName'] as String?;
+      _driverTripName = details['driverTripName'] as String?;
+      final schedule = details['schedule'] as Map<String, dynamic>;
       if (start != null && end != null) {
         for (var date = start; !date.isAfter(end); date = date.add(const Duration(days: 1))) {
           if (_isDayActive(date, schedule)) _activeCycleDays++;
         }
 
-        final startStr = start.toIso8601String().split('T').first;
-        final endStr = end.toIso8601String().split('T').first;
-
-        // Only DRIVER-initiated exceptions reduce the bill. A passenger
-        // saying "no need fetch" doesn't entitle them to a deduction -
-        // only the driver actually failing to provide the ride does.
-        // NOTE: this query is used ONLY to list which dates were missed,
-        // never to compute the day count/amount below - see comment there.
-        final exceptions = await _supabase
-            .from('tumpang_exception')
-            .select('start_date, end_date, reason')
-            .eq('tumpang_subscription_id', widget.payment.subscriptionId)
-            .eq('initiated_by_role', 'driver')
-            .lte('start_date', endStr)
-            .gte('end_date', startStr);
-
         final dates = <String>{};
-        for (final row in (exceptions as List)) {
+        for (final row in (details['exceptions'] as List)) {
           final s = DateTime.parse(row['start_date'].toString());
           final e = DateTime.parse(row['end_date'].toString());
           final overlapStart = s.isBefore(start) ? start : s;
@@ -149,7 +116,7 @@ class _ProformaInvoiceSheetState extends State<ProformaInvoiceSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final dueDateStr = widget.payment.dueDate.toIso8601String().split('T').first;
+    final dueDateStr = _formatDateDdMmYyyy(widget.payment.dueDate);
     final subtotal = _activeCycleDays * _dailyFee;
     final deduction = _missedDays * _dailyFee;
     // The actual amount due is ALWAYS subtotal minus the deduction we just

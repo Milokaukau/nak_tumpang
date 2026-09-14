@@ -125,7 +125,7 @@ class _ExtendNegotiationScreenState extends State<ExtendNegotiationScreen> {
   }
 
   String _formatDate(DateTime d) =>
-      "${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}";
+      "${d.day.toString().padLeft(2, '0')}-${d.month.toString().padLeft(2, '0')}-${d.year}";
 
   void _openLocationPicker({required bool isPickup}) {
     Navigator.push<Map<String, dynamic>>(

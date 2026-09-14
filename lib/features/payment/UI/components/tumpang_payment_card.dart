@@ -17,7 +17,7 @@ class TumpangPaymentCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final dueDateStr = payment.dueDate.toIso8601String().split('T').first;
+    final dueDateStr = '${payment.dueDate.day.toString().padLeft(2, '0')}-${payment.dueDate.month.toString().padLeft(2, '0')}-${payment.dueDate.year}';
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_stripe/flutter_stripe.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/entities/tumpang_request.dart';
@@ -22,7 +21,6 @@ class TumpangSummaryScreen extends StatefulWidget {
 }
 
 class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
-  final SupabaseClient _supabase = Supabase.instance.client;
   bool _isProcessing = false;
 
   String _formatAmPm(String dbTime) {
@@ -39,6 +37,12 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
     }
   }
 
+  String _formatDate(String value) {
+    final date = DateTime.tryParse(value);
+    if (date == null) return value;
+    return '${date.day.toString().padLeft(2, '0')}-${date.month.toString().padLeft(2, '0')}-${date.year}';
+  }
+
   int _calculateDepositDays(int subscriptionDays) {
     if (subscriptionDays <= 0) return 0;
     return subscriptionDays <= 60 ? subscriptionDays : 60;
@@ -51,25 +55,11 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
     setState(() => _isProcessing = true);
 
     try {
-      final response = await _supabase.functions.invoke(
-        'create-payment-intent',
-        body: {
-          'amount': totalDeposit,
-          'currency': 'myr',
-          'description': 'Nak Tumpang deposit for request ${request.id}',
-        },
+      final controller = context.read<NegotiationViewModel>();
+      final clientSecret = await controller.createDepositPaymentIntent(
+        amount: totalDeposit,
+        requestId: request.id,
       );
-
-      if (response.status != 200 || response.data == null) {
-        final err = response.data is Map ? response.data['error'] : null;
-        throw Exception(err ?? 'Failed to create PaymentIntent');
-      }
-
-      final paymentIntent = response.data as Map;
-      final clientSecret = paymentIntent['client_secret'];
-      if (clientSecret == null) {
-        throw Exception('No client_secret returned from server');
-      }
 
       await Stripe.instance.initPaymentSheet(
         paymentSheetParameters: SetupPaymentSheetParameters(
@@ -94,52 +84,15 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
       if (!mounted) return;
 
       if (request.isExtension) {
-        await Provider.of<NegotiationViewModel>(context, listen: false)
-            .finalizeExtensionRequest(
+        await controller.finalizeExtensionRequest(
           extensionRequestId: request.id,
           additionalDeposit: totalDeposit,
         );
       } else {
-        final startDate = DateTime.parse(request.subscriptionStartDate.value);
-        final endDate = DateTime.tryParse(request.subscriptionEndDate.value) ?? startDate;
-        final subId = 'sub_${DateTime.now().millisecondsSinceEpoch}';
-
-        await _supabase.from('tumpang_subscription').insert({
-          'id': subId,
-          'passenger_trip_id': request.passengerTripId,
-          'driver_trip_id': request.driverTripId,
-          'pickup_lat': request.pickupLocation.lat,
-          'pickup_lng': request.pickupLocation.lng,
-          'pickup_location': request.pickupLocation.name,
-          'dropoff_lat': request.dropoffLocation.lat,
-          'dropoff_lng': request.dropoffLocation.lng,
-          'dropoff_location': request.dropoffLocation.name,
-          'pickup_time': request.pickupTime.value,
-          'fee': request.fee.value,
-          'deposit': totalDeposit,
-          'deposit_refunded': false,
-          'subscription_start_date': startDate.toIso8601String().split('T').first,
-          'subscription_end_date': endDate.toIso8601String().split('T').first,
-          'status': 'active',
-        });
-
-        final paidAt = DateTime.now();
-        final paymentId = 'pay_${paidAt.millisecondsSinceEpoch}';
-
-        await _supabase.from('payments').insert({
-          'id': paymentId,
-          'tumpang_subscription_id': subId,
-          'month': paidAt.month,
-          'year': paidAt.year,
-          'due_date': paidAt.toIso8601String(),
-          'paid_at': paidAt.toIso8601String(),
-          'amount': totalDeposit,
-        });
-
-        await _supabase.from('tumpang_request').update({
-          'status': 'completed',
-          'subscription_id': subId,
-        }).eq('id', request.id);
+        await controller.createSubscriptionAfterDeposit(
+          request: request,
+          deposit: totalDeposit,
+        );
       }
 
       if (!mounted) return;
@@ -273,8 +226,8 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
                       children: [
                         _SummaryRow(label: 'Pickup Location', value: request.pickupLocation.name),
                         _SummaryRow(label: 'Dropoff Location', value: request.dropoffLocation.name),
-                        _SummaryRow(label: 'Tumpang Start', value: request.subscriptionStartDate.value),
-                        _SummaryRow(label: 'Tumpang End', value: request.subscriptionEndDate.value),
+                        _SummaryRow(label: 'Tumpang Start', value: _formatDate(request.subscriptionStartDate.value)),
+                        _SummaryRow(label: 'Tumpang End', value: _formatDate(request.subscriptionEndDate.value)),
                         _SummaryRow(label: 'Pickup Time', value: _formatAmPm(request.pickupTime.value)),
                         const SizedBox(height: 16),
                         _SummaryRow(

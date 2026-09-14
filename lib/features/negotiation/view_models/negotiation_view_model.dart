@@ -596,6 +596,40 @@ class NegotiationViewModel extends ChangeNotifier {
     }
   }
 
+  Future<String> createDepositPaymentIntent({
+    required double amount,
+    required String requestId,
+  }) async {
+    if (amount <= 0) throw NegotiationException('Deposit amount must be greater than RM 0.');
+    if (isOffline) throw NegotiationException('You cannot process a payment while offline.');
+
+    isLoading = true;
+    errorMessage = null;
+    notifyListeners();
+    try {
+      return await _service.createDepositPaymentIntent(amount: amount, requestId: requestId);
+    } catch (e) {
+      errorMessage = 'Unable to prepare the deposit payment.';
+      rethrow;
+    } finally {
+      isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> createSubscriptionAfterDeposit({
+    required TumpangRequest request,
+    required double deposit,
+  }) async {
+    if (deposit <= 0) throw NegotiationException('Deposit amount must be greater than RM 0.');
+    if (isOffline) throw NegotiationException('You cannot complete a subscription while offline.');
+
+    await runNegotiationAction(() async {
+      await _service.createSubscriptionAfterDeposit(request: request, deposit: deposit);
+      await refreshRequests();
+    });
+  }
+
   /// Counts scheduled ride days inclusively between [start] and [end].
   static int countActiveDays(
     DateTime start,
