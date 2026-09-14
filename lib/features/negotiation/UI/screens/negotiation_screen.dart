@@ -16,6 +16,7 @@ import 'package:nak_tumpang/features/negotiation/utils/negotiation_error.dart';
 import 'package:nak_tumpang/core/services/network_service.dart';
 import 'package:nak_tumpang/features/subscriptions/data/services/subscription_supabase_service.dart';
 import 'package:nak_tumpang/features/subscriptions/UI/screens/subscription_detail_screen.dart';
+import 'package:nak_tumpang/features/negotiation/UI/screens/extend_negotiation_screen.dart';
 
 class NegotiationScreen extends StatefulWidget {
   final String requestId;
@@ -219,6 +220,33 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
         const SnackBar(content: Text(kDefaultNegotiationErrorMessage), backgroundColor: Colors.red),
       );
     }
+  }
+
+  /// Opens the extend flow for an existing subscription. Both
+  /// NegotiationSummaryCard's "Continue Subscription" (onRenew) and
+  /// "Edit / Propose New Terms" (onRenegotiate) buttons route here —
+  /// there's no separate "instant renew" backend path: createExtensionRequest
+  /// always sets sub_end_is_accepted to false, so even an unedited
+  /// extension still needs the driver's acceptance. The screen itself
+  /// already lets the user leave every field untouched if they just want
+  /// to push the end date out, or edit anything if they want to
+  /// renegotiate — one screen genuinely covers both buttons.
+  void _openExtendScreen(BuildContext context, String? subscriptionId) {
+    if (subscriptionId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Couldn't find this subscription. Please try again from the subscription details."),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ExtendNegotiationScreen(subscriptionId: subscriptionId),
+      ),
+    );
   }
 
   Widget _buildSubscriptionLinkCard(String? subscriptionId, bool isDriver, String currentUserId) {
@@ -430,14 +458,14 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
 
                           NegotiationFieldRow(
                             title: 'Tumpang Fee',
-                            value: 'RM ${request.fee.value.toStringAsFixed(2)}',
+                            value: 'RM ${request.fee.value.toStringAsFixed(0)}',
                             isAccepted: request.fee.isAccepted,
                             isRequestedByMe: request.fee.requestedBy == controller.currentUserId,
                             isReadOnly: fieldsReadOnly,
                             topWidget: Column(
                               children: [
                                 Text(
-                                  'RM ${request.fee.value.toStringAsFixed(2)}/day  x  ${request.subscriptionDays} day${request.subscriptionDays == 1 ? '' : 's'}',
+                                  'RM ${request.fee.value.toStringAsFixed(0)}/day  x  ${request.subscriptionDays} day${request.subscriptionDays == 1 ? '' : 's'}',
                                   style: const TextStyle(fontSize: 13, color: AppColors.black),
                                 ),
                                 const SizedBox(height: 4),
@@ -447,7 +475,7 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                                 ),
                               ],
                             ),
-                            onPropose: () => _openProposalSheet(context, controller, 'Fee (per day)', request.fee.value.toStringAsFixed(2), 'fee'),
+                            onPropose: () => _openProposalSheet(context, controller, 'Fee (per day)', request.fee.value.toStringAsFixed(0), 'fee'),
                             onAccept: () => _runNegotiationAction(() => controller.acceptTerm(widget.requestId, 'fee')),
                           ),
 
@@ -461,6 +489,8 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                             onReject: () => _confirmReject(context, controller),
                             onCancelRequest: () => _confirmCancel(context, controller),
                             onCancelSubscription: () => _confirmCancel(context, controller),
+                            onRenew: () => _openExtendScreen(context, request.subscriptionId),
+                            onRenegotiate: () => _openExtendScreen(context, request.subscriptionId),
                             onProceedToSummary: () {
                               Navigator.push(
                                 context,

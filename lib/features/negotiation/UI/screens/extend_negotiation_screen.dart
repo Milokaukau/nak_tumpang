@@ -11,6 +11,7 @@ import 'package:nak_tumpang/features/negotiation/UI/components/propose_value_bot
 import 'package:nak_tumpang/features/negotiation/UI/components/time_proposal_bottom_sheet.dart';
 import 'package:nak_tumpang/features/negotiation/UI/screens/map_screen.dart';
 import 'package:nak_tumpang/features/negotiation/UI/screens/negotiation_screen.dart';
+import 'package:nak_tumpang/features/subscriptions/data/services/subscription_supabase_service.dart';
 
 class ExtendNegotiationScreen extends StatefulWidget {
   final String subscriptionId;
@@ -22,6 +23,11 @@ class ExtendNegotiationScreen extends StatefulWidget {
 }
 
 class _ExtendNegotiationScreenState extends State<ExtendNegotiationScreen> {
+  // Mirrors NegotiationScreen's own use of this service for
+  // fetchSubscriptionById — reusing the real, already-proven source of
+  // subscription data rather than a NegotiationViewModel stand-in.
+  final SubscriptionSupabaseService _subscriptionService = SubscriptionSupabaseService();
+
   bool _isLoading = true;
   bool _isSubmitting = false;
 
@@ -45,7 +51,6 @@ class _ExtendNegotiationScreenState extends State<ExtendNegotiationScreen> {
   String? _originalPickupTimeDb;
   double? _originalFee;
 
-  DateTime? _subscriptionStartDate;
   DateTime? _oldEndDate;
   late DateTime _newEndDate;
 
@@ -57,7 +62,8 @@ class _ExtendNegotiationScreenState extends State<ExtendNegotiationScreen> {
 
   Future<void> _loadSubscription() async {
     final controller = context.read<NegotiationViewModel>();
-    final sub = await controller.getSubscriptionById(widget.subscriptionId);
+    final role = controller.currentUserRole == 'driver' ? 'driver' : 'passenger';
+    final sub = await _subscriptionService.fetchSubscriptionById(widget.subscriptionId, role);
 
     if (!mounted) return;
 
@@ -83,7 +89,6 @@ class _ExtendNegotiationScreenState extends State<ExtendNegotiationScreen> {
         _originalPickupTimeDb = _pickupTimeDb;
         _originalFee = _fee;
 
-        _subscriptionStartDate = DateTime.tryParse(sub['subscription_start_date']?.toString() ?? '');
         _oldEndDate = DateTime.tryParse(sub['subscription_end_date']?.toString() ?? '');
       } else {
         _pickupName = '';
@@ -94,7 +99,6 @@ class _ExtendNegotiationScreenState extends State<ExtendNegotiationScreen> {
         _dropoffLng = 0.0;
         _pickupTimeDb = '09:00:00';
         _fee = 0.0;
-        _subscriptionStartDate = null;
         _oldEndDate = null;
       }
 
@@ -174,7 +178,7 @@ class _ExtendNegotiationScreenState extends State<ExtendNegotiationScreen> {
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (context) => ProposeValueBottomSheet(
         title: 'Fee (per day)',
-        currentValue: _fee.toStringAsFixed(2),
+        currentValue: _fee.toStringAsFixed(0),
         onSubmit: (value) async {
           final parsed = double.tryParse(value);
           if (parsed == null || !parsed.isFinite || parsed <= 0) {
@@ -381,20 +385,10 @@ class _ExtendNegotiationScreenState extends State<ExtendNegotiationScreen> {
 
             NegotiationFieldRow(
               title: 'Tumpang Fee',
-              value: 'RM ${_fee.toStringAsFixed(2)}/day',
+              value: 'RM ${_fee.toStringAsFixed(0)}/day',
               isAccepted: true,
               isRequestedByMe: false,
               onPropose: _openFeeSheet,
-              onAccept: () {},
-            ),
-
-            NegotiationFieldRow(
-              title: 'Subscription Start (unchanged)',
-              value: _subscriptionStartDate != null ? _formatDate(_subscriptionStartDate!) : 'Not available',
-              isAccepted: true,
-              isRequestedByMe: false,
-              isReadOnly: true,
-              onPropose: () {},
               onAccept: () {},
             ),
 
