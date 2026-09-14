@@ -2,16 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:nak_tumpang/core/components/base_button.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 
-/// Shown right after a passenger finishes registering. Returns 'add_trip'
-/// or 'later' depending on which button was tapped, so the caller can
-/// route each case separately. The real "Add trip" screen isn't built
-/// yet, so for now the caller sends 'add_trip' to the same placeholder
-/// home page as 'later' — but the two cases are already split apart so
-/// swapping 'add_trip' over to the real flow later is a one-line change.
+// after passenger finish creating profile
 class GetStartedDialog extends StatelessWidget {
   const GetStartedDialog({super.key});
 
-  /// Shows the dialog and returns 'add_trip' or 'later'.
+  /// shows the dialog and returns 'add_trip' or 'later'.
   static Future<String> show(BuildContext context) async {
     final choice = await showDialog<String>(
       context: context,

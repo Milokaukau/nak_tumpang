@@ -22,12 +22,15 @@ class SubscriptionSupabaseService {
     final driverId = driverUser?['id'] ?? driverTrip?['user_id'] ?? '';
     final driverName = driverUser?['name'] ?? 'Driver';
     final driverPhone = driverUser?['phone'] ?? '';
-    final driverImageUrl = driverUser?['profile_image_url'] ?? driverUser?['imageUrl'];
+    // 'avatar_url' is the actual users column (see ProfileViewModel) —
+    // 'profile_image_url'/'imageUrl' aren't real columns, so this always
+    // evaluated to null regardless of whether the user had a photo.
+    final driverImageUrl = driverUser?['avatar_url'] as String?;
 
     final passengerId = passengerUser?['id'] ?? passengerTrip?['user_id'] ?? '';
     final passengerName = passengerUser?['name'] ?? 'Passenger';
     final passengerPhone = passengerUser?['phone'] ?? '';
-    final passengerImageUrl = passengerUser?['profile_image_url'] ?? passengerUser?['imageUrl'];
+    final passengerImageUrl = passengerUser?['avatar_url'] as String?;
 
     final pickupLocation = sub['pickup_location'] ??
         passengerTrip?['pickup_location'] ??

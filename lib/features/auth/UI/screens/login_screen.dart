@@ -29,16 +29,41 @@ class _LoginViewState extends State<_LoginView> {
   bool _isHoveringRegister = false;
 
   Future<void> _submit(LoginViewModel vm) async {
-    final success = await vm.submit();
-    if (!mounted || !success) return;
+    final result = await vm.submit();
+    if (!mounted || result == null) return;
+
+    // A driver's account (and driver_profiles) always exists by login
+    // time now — nudge for a license re-upload if that was the one
+    // thing that had to be backfilled (see LoginViewModel.submit()).
+    if (vm.driverLicenseNeedsReupload) {
+      await showDialog<void>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('One more thing'),
+          content: const Text(
+            "We had to re-create your wallet profile — could you re-add "
+                'your driving license from your profile page? It looks '
+                "like it didn't save last time.",
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted) return;
+    }
+
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(builder: (_) => const HomeScreen()),
     );
   }
 
   void _startRegister() async {
-    final role = await RoleSelectionDialog.show(context);
-    if (!mounted) return;
+    final role = await RoleSelectionDialog.show(context, dismissible: true);
+    if (!mounted || role == null) return; // canceled — stay on login
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => RegisterScreen(initialRole: role)),
     );

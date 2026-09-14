@@ -7,24 +7,15 @@ import 'package:nak_tumpang/core/services/ors_service.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/utils/geo_bounds.dart';
 
-/// A text field that resolves whatever the user types into a real,
-/// selectable place with coordinates (via ORS geocoding), instead of
-/// just storing free text. Use this anywhere an address needs to become
-/// a lat/lng — [onSelected] only fires once the user actually taps a
-/// suggestion, and [onCleared] fires the moment they edit the text again
-/// so the caller knows any previously-picked place is no longer valid.
-///
-/// Also offers a "pick on map" icon (Grab/Google Maps style) that opens
-/// [LocationPickerScreen] — search or drop a pin — as an alternative to
-/// typing.
+// text = real place with coordinates  via ORS geocoding
+// shows real place name, not just coordinates
+// also allow pick on map option
 class LocationAutocompleteField extends StatefulWidget {
   final TextEditingController controller;
   final String hintText;
   final ValueChanged<GeocodedPlace> onSelected;
   final VoidCallback? onCleared;
 
-  /// Title shown on the full-screen map picker (defaults to [hintText]
-  /// if not set).
   final String? mapPickerTitle;
 
   const LocationAutocompleteField({
@@ -46,9 +37,7 @@ class _LocationAutocompleteFieldState extends State<LocationAutocompleteField> {
   List<GeocodedPlace> _suggestions = [];
   bool _isSearching = false;
 
-  // Set right after a suggestion is tapped, so programmatically filling
-  // the controller with the chosen label doesn't immediately re-trigger
-  // a search for itself.
+  // next search suppressed when a suggestion is selected
   bool _suppressNextSearch = false;
 
   @override
@@ -83,10 +72,8 @@ class _LocationAutocompleteFieldState extends State<LocationAutocompleteField> {
   }
 
   void _select(GeocodedPlace place) {
-    // Belt-and-braces: ORS already restricts text search to Malaysia via
-    // boundary.country=MYS and filters out sea/ocean results, but the map
-    // picker can also hand back a place (e.g. a GPS fix or a pin drop)
-    // that slips past those, so check again here.
+    // text search only find within malaysia and no ocean/sea results
+    // map picker can hand back a place
     if (!MalaysiaBounds.contains(place.latitude, place.longitude)) {
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
@@ -97,7 +84,7 @@ class _LocationAutocompleteFieldState extends State<LocationAutocompleteField> {
     if (place.isWater) {
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
-        ..showSnackBar(const SnackBar(content: Text('Please pick a location on land — sea and ocean locations aren\'t allowed.')));
+        ..showSnackBar(const SnackBar(content: Text("Please pick a location on land — sea and ocean locations aren't allowed.")));
       setState(() => _suggestions = []);
       return;
     }

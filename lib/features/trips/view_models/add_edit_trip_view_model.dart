@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'package:nak_tumpang/core/entities/geocoded_place.dart';
+import 'package:nak_tumpang/core/utils/matching_utils.dart';
 import 'package:nak_tumpang/features/trips/data/services/trip_supabase_service.dart';
 
 class AddEditTripViewModel extends ChangeNotifier {
@@ -37,6 +38,48 @@ class AddEditTripViewModel extends ChangeNotifier {
   }
 
   int _minutesOf(TimeOfDay t) => t.hour * 60 + t.minute;
+
+  // Same-location threshold, in meters. Not exact-equality: a location
+  // picked by tapping the map (see ORSService.reverseGeocode) keeps the
+  // raw tapped coordinates rather than snapping to a venue's official
+  // point, so two taps on the same real place almost never land on the
+  // exact same lat/lng — exact equality let genuinely-duplicate
+  // pickup/drop-off pairs through as long as they came from separate
+  // taps. Anything picked via search (ORSService.geocodeAutocomplete)
+  // returns the same official coordinates every time, so those still
+  // match at 0m and are caught either way.
+  static const double _sameLocationThresholdMeters = 50;
+
+  /// Shared by setFromPlace/setToPlace (live, as soon as both places are
+  /// picked) and _validate() (final check before submit) — one place
+  /// for this rule instead of two copies that could drift apart.
+  void _revalidateLocations() {
+    if (fromPlace == null || toPlace == null) return;
+    final distance = MatchingUtils.calculateDistance(
+      fromPlace!.latitude,
+      fromPlace!.longitude,
+      toPlace!.latitude,
+      toPlace!.longitude,
+    );
+    final samePlace = distance < _sameLocationThresholdMeters;
+    if (samePlace) {
+      toError = "Pickup and drop-off can't be the same location";
+    } else if (toError == "Pickup and drop-off can't be the same location") {
+      toError = null;
+    }
+  }
+
+  /// Shared by setDepartTime/setArriveTime (live) and _validate() (final
+  /// check) — arrival has to be chronologically after departure, not
+  /// just "not exactly equal" (the old check let e.g. an 8am arrival
+  /// with a 5pm departure through).
+  void _revalidateTime() {
+    if (_minutesOf(arriveTime) <= _minutesOf(departTime)) {
+      timeError = 'Arrival time must be after departure time';
+    } else {
+      timeError = null;
+    }
+  }
 
   void _initFromExistingTrip() {
     nameController.text = existingTrip!['trip_name'] ?? '';
@@ -105,24 +148,39 @@ class AddEditTripViewModel extends ChangeNotifier {
   void setFromPlace(GeocodedPlace place) {
     fromPlace = place;
     fromError = null;
+    _revalidateLocations();
     notifyListeners();
   }
 
   void clearFromPlace() {
     if (fromPlace == null) return;
     fromPlace = null;
+    // _revalidateLocations() early-returns once either place is null, so
+    // it can never clear this itself — the same-location conflict is
+    // moot with only one place picked, but any other toError (e.g. "pick
+    // a valid destination") is still real and stays.
+    if (toError == "Pickup and drop-off can't be the same location") {
+      toError = null;
+    }
     notifyListeners();
   }
 
   void setToPlace(GeocodedPlace place) {
     toPlace = place;
     toError = null;
+    _revalidateLocations();
     notifyListeners();
   }
 
   void clearToPlace() {
     if (toPlace == null) return;
     toPlace = null;
+    // Same reasoning as clearFromPlace — the same-location conflict no
+    // longer applies once toPlace is unset, but leave any other toError
+    // (e.g. "pick a valid destination") alone.
+    if (toError == "Pickup and drop-off can't be the same location") {
+      toError = null;
+    }
     notifyListeners();
   }
 
@@ -138,11 +196,13 @@ class AddEditTripViewModel extends ChangeNotifier {
 
   void setDepartTime(TimeOfDay time) {
     departTime = time;
+    _revalidateTime();
     notifyListeners();
   }
 
   void setArriveTime(TimeOfDay time) {
     arriveTime = time;
+    _revalidateTime();
     notifyListeners();
   }
 
@@ -168,10 +228,11 @@ class AddEditTripViewModel extends ChangeNotifier {
       isValid = false;
     }
 
-    if (_minutesOf(departTime) == _minutesOf(arriveTime)) {
-      timeError = 'Depart and arrival time cannot be exactly the same';
-      isValid = false;
-    }
+    _revalidateLocations();
+    if (toError != null) isValid = false;
+
+    _revalidateTime();
+    if (timeError != null) isValid = false;
 
     notifyListeners();
     return isValid;

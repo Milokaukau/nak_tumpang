@@ -1,0 +1,17 @@
+const List<String> kMalaysianBanks = [
+  'Maybank',
+  'CIMB Bank',
+  'Public Bank',
+  'RHB Bank',
+  'Hong Leong Bank',
+  'AmBank',
+  'Bank Islam',
+  'Bank Rakyat',
+  'Bank Muamalat',
+  'Alliance Bank',
+  'MBSB Bank',
+  'UOB Malaysia',
+  'OCBC Bank',
+  'HSBC Bank Malaysia',
+  'Standard Chartered Malaysia',
+];

@@ -19,7 +19,7 @@ class LocalDbService {
 
     return await openDatabase(
       path,
-      version: 2,
+      version: 8,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -58,6 +58,126 @@ class LocalDbService {
     ''');
 
       await db.execute('DROP TABLE points_ledger_old');
+    }
+
+    if (oldVersion < 3) {
+      await _createPostSignupDraftTable(db);
+    }
+
+    if (oldVersion < 4) {
+      // payout_history's local schema had drifted from what the app
+      // actually reads/writes: it required a `payout_at` column that
+      // nothing ever supplies (guaranteed NOT NULL failure on every
+      // insert), required `bank_acc_no` even though e-wallet payouts
+      // deliberately leave it null, and was missing `ewallet_phone`
+      // entirely. That mismatch made every local cache write throw —
+      // right after a successful request_payout() call, and right
+      // after a successful history fetch — which is what made claim
+      // payout look like it "failed" (the server-side payout had
+      // already gone through) and made payout history fail to load.
+      // Safe to just drop and recreate: this table is a pure read
+      // cache of Supabase's payout_history, never the source of truth,
+      // so it refills itself on the next successful fetch.
+      await db.execute('DROP TABLE IF EXISTS payout_history');
+      await db.execute('''
+        CREATE TABLE payout_history (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          amount REAL NOT NULL,
+          bank_name TEXT,
+          bank_acc_no TEXT,
+          ewallet_phone TEXT,
+          status TEXT NOT NULL CHECK (status IN ('pending', 'completed', 'failed')),
+          requested_at TEXT,
+          processed_at TEXT,
+          payment_method TEXT NOT NULL CHECK (payment_method IN ('bank_transfer', 'tng_ewallet')),
+          fee REAL NOT NULL DEFAULT 0,
+          FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        )
+      ''');
+    }
+
+    if (oldVersion < 5) {
+      await _createPendingPayoutReconciliationTable(db);
+    }
+
+    if (oldVersion < 6) {
+      // Re-apply the payout_history fix from the oldVersion < 4 block
+      // above, unconditionally. Devices that had already reached
+      // version 4 or 5 before that migration was added never ran it —
+      // onUpgrade only fires for oldVersion < the declared version, so
+      // their local payout_history table is still stuck with the
+      // dropped payout_at column / missing ewallet_phone. Bumping the
+      // version and redoing the drop-and-recreate here (safe: this
+      // table is a pure read cache of Supabase's payout_history) makes
+      // sure every device actually gets the corrected schema, not just
+      // ones upgrading from a version older than 4.
+      await db.execute('DROP TABLE IF EXISTS payout_history');
+      await db.execute('''
+        CREATE TABLE payout_history (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          amount REAL NOT NULL,
+          bank_name TEXT,
+          bank_acc_no TEXT,
+          ewallet_phone TEXT,
+          status TEXT NOT NULL CHECK (status IN ('pending', 'completed', 'failed')),
+          requested_at TEXT,
+          processed_at TEXT,
+          payment_method TEXT NOT NULL CHECK (payment_method IN ('bank_transfer', 'tng_ewallet')),
+          fee REAL NOT NULL DEFAULT 0,
+          FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        )
+      ''');
+    }
+
+    if (oldVersion < 7) {
+      // Correction to the oldVersion < 4/6 fix above, which *removed*
+      // payout_at from this table on the theory that nothing supplied
+      // it. That was wrong: Supabase's real payout_history table has
+      // payout_at as a genuine NOT NULL column, and
+      // PayoutService.fetchPayoutHistoryPage() does a bare .select(),
+      // so every row fetched from the server legitimately includes a
+      // payout_at key. PayoutLocalService.cachePayoutHistoryPage()
+      // passes that row straight to db.insert(), so with the column
+      // missing locally, EVERY successful online history fetch has been
+      // failing to cache ever since v4 — not just the local
+      // just-submitted-payout insert in PayoutViewModel.submitPayout()
+      // (which never sets payout_at itself, hence nullable here).
+      await db.execute('DROP TABLE IF EXISTS payout_history');
+      await db.execute('''
+        CREATE TABLE payout_history (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          amount REAL NOT NULL,
+          payout_at TEXT,
+          bank_name TEXT,
+          bank_acc_no TEXT,
+          ewallet_phone TEXT,
+          status TEXT NOT NULL CHECK (status IN ('pending', 'completed', 'failed')),
+          requested_at TEXT,
+          processed_at TEXT,
+          payment_method TEXT NOT NULL CHECK (payment_method IN ('bank_transfer', 'tng_ewallet')),
+          fee REAL NOT NULL DEFAULT 0,
+          FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        )
+      ''');
+    }
+
+    if (oldVersion < 8) {
+      // Preventive fix, same class of bug as the payout_history saga
+      // above: Supabase's real payments table has a payment_intent_id
+      // text column (nullable) that this local cache table never had.
+      // Nothing hits this today — PaymentViewModel.fetchAllPayments()
+      // only ever caches Payment.toJson(), a hand-picked field set that
+      // happens not to include payment_intent_id — but that's
+      // incidental, not guaranteed: the moment any code path caches a
+      // raw Supabase row for this table (a bare .select(), the same
+      // mistake payout_history's fetch path made), every write would
+      // throw "table payments has no column named payment_intent_id".
+      // Adding it now, nullable, closes that gap before it's needed
+      // rather than after.
+      await db.execute('ALTER TABLE payments ADD COLUMN payment_intent_id TEXT');
     }
   }
 
@@ -103,9 +223,10 @@ class LocalDbService {
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
         amount REAL NOT NULL,
-        payout_at TEXT NOT NULL,
+        payout_at TEXT,
         bank_name TEXT,
-        bank_acc_no TEXT NOT NULL,
+        bank_acc_no TEXT,
+        ewallet_phone TEXT,
         status TEXT NOT NULL CHECK (status IN ('pending', 'completed', 'failed')),
         requested_at TEXT,
         processed_at TEXT,
@@ -244,6 +365,7 @@ class LocalDbService {
         amount REAL NOT NULL DEFAULT 0.00,
         cycle_start_date TEXT,
         cycle_end_date TEXT,
+        payment_intent_id TEXT,
         FOREIGN KEY (tumpang_subscription_id) REFERENCES tumpang_subscription (id) ON DELETE CASCADE
       )
     ''');
@@ -338,6 +460,54 @@ class LocalDbService {
       CREATE TABLE payout_settings (
         id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
         bank_transfer_fee REAL NOT NULL DEFAULT 1.00
+      )
+    ''');
+
+    // 16. post_signup_draft
+    await _createPostSignupDraftTable(db);
+
+    // 17. pending_payout_reconciliation
+    await _createPendingPayoutReconciliationTable(db);
+  }
+
+  // A payout whose terminal status ('completed'/'failed') was decided
+  // locally (see PayoutViewModel.runPayoutStatusAnimation) but failed to
+  // persist to Supabase's payout_history even after one retry. Survives
+  // app restarts so the driver isn't stuck showing a status that never
+  // made it to the server — see PayoutLocalService.savePendingReconciliation.
+  Future<void> _createPendingPayoutReconciliationTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS pending_payout_reconciliation (
+        payout_id TEXT PRIMARY KEY,
+        status TEXT NOT NULL CHECK (status IN ('completed', 'failed')),
+        created_at TEXT NOT NULL
+      )
+    ''');
+  }
+
+  // No longer written to — the post-signup driver flow now reuses
+  // AddEditTripScreen (see add_edit_trip_screen.dart) instead of its
+  // own screen/draft-saving view model, so nothing populates this
+  // table anymore. Left in place rather than dropped so upgrading
+  // installs that still have an old cached draft row don't hit a
+  // "no such table" error before this comment is next revisited.
+  Future<void> _createPostSignupDraftTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS post_signup_draft (
+        user_id TEXT PRIMARY KEY,
+        from_label TEXT,
+        from_lat REAL,
+        from_lng REAL,
+        to_label TEXT,
+        to_lat REAL,
+        to_lng REAL,
+        from_day INTEGER,
+        to_day INTEGER,
+        depart_hour INTEGER,
+        depart_minute INTEGER,
+        arrive_hour INTEGER,
+        arrive_minute INTEGER,
+        updated_at TEXT NOT NULL
       )
     ''');
   }

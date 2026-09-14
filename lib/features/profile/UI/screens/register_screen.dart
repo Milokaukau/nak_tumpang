@@ -4,13 +4,12 @@ import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/features/home/UI/screens/home_screen.dart';
 import 'package:nak_tumpang/features/profile/UI/components/get_started_dialog.dart';
-import 'package:nak_tumpang/features/profile/UI/screens/post_signup_driver_screen.dart';
 import 'package:nak_tumpang/features/profile/UI/screens/profile_screen.dart' show UpperCaseTextFormatter;
+import 'package:nak_tumpang/features/trips/UI/add_edit_trip_screen.dart';
 import 'package:nak_tumpang/features/profile/view_models/register_view_model.dart';
 
 class RegisterScreen extends StatelessWidget {
-  /// Set from the role-selection popup shown before this screen — the
-  /// driver/passenger toggle here can still change it before submitting.
+  // role can still be changed before submitting
   final String initialRole;
 
   const RegisterScreen({super.key, this.initialRole = 'passenger'});
@@ -33,39 +32,37 @@ class _RegisterView extends StatefulWidget {
 
 class _RegisterViewState extends State<_RegisterView> {
   Future<void> _register(RegisterViewModel vm) async {
-    final result = await vm.submit();
-    if (!mounted || result == null) return;
+    final success = await vm.submit();
+    if (!mounted || !success) return;
 
-    if (result == RegisterResult.driverNext) {
-      // A plain push (not pushReplacement) so this screen stays on the
-      // stack — the driver is required to pick their route/days/time
-      // before reaching the home page, but if they back out of that step
-      // they should land back here, not skip past it to the home page.
+    // Account exists at this point — show the "Let's get started!"
+    // popup so they can optionally add a trip now.
+    final choice = await GetStartedDialog.show(context);
+    if (!mounted) return;
+
+    if (choice == 'add_trip') {
+      // Land on Home first (replacing RegisterScreen, whose only path
+      // back is LoginScreen — confusing to land on once already
+      // registered and signed in), then push the same add-trip screen
+      // used from the sidebar on top of it. That way the back stack is
+      // [Home, AddEditTrip], so backing out lands on Home instead of
+      // Login. role is passed explicitly (rather than left to
+      // AddEditTripScreen's MyTripsViewModel fallback) — see
+      // AddEditTripScreen's doc comment for why it can't just read
+      // MyTripsViewModel.currentUserRole here.
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const HomeScreen()),
+      );
       Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const PostSignupDriverScreen()),
+        MaterialPageRoute(builder: (_) => AddEditTripScreen(role: vm.role)),
       );
       return;
     }
 
-    // Passenger: show the "Let's get started!" popup and route on their choice.
-    final choice = await GetStartedDialog.show(context);
-    if (!mounted) return;
-
-    switch (choice) {
-      case 'add_trip':
-      // TODO: once the real add-trip screen exists, push into that flow
-      // instead of the home page placeholder.
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const HomeScreen()),
-        );
-        break;
-      case 'later':
-      default:
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const HomeScreen()),
-        );
-        break;
-    }
+    // 'later' — just go to Home.
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => const HomeScreen()),
+    );
   }
 
   @override
@@ -100,6 +97,19 @@ class _RegisterViewState extends State<_RegisterView> {
                       label: 'Passenger',
                       selected: vm.role == 'passenger',
                       onTap: () => vm.setRole('passenger'),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Icon(Icons.info_outline, size: 14, color: AppColors.greyText),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      "You can't change this after your account is created.",
+                      style: TextStyle(color: AppColors.greyText, fontSize: 11.5),
                     ),
                   ),
                 ],
@@ -207,7 +217,7 @@ class _RegisterViewState extends State<_RegisterView> {
               Padding(
                 padding: const EdgeInsets.only(top: 2),
                 child: Text(
-                  'At least 6 characters, with a letter and a number',
+                  'At least 6 characters, with a lowercase letter, an uppercase letter, a number and a special character (e.g. ! @ # \$ % & *)',
                   style: TextStyle(color: AppColors.greyText, fontSize: 11),
                 ),
               ),
@@ -263,25 +273,30 @@ class _RegisterViewState extends State<_RegisterView> {
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(color: AppColors.greyBorder),
                     ),
-                    child: vm.isUploadingLicense
-                        ? const Center(child: CircularProgressIndicator())
-                        : vm.licenseBytes != null
-                        ? ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.memory(vm.licenseBytes!, fit: BoxFit.cover, width: double.infinity),
-                    )
-                        : Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.upload_file, color: AppColors.greyText),
-                          const SizedBox(height: 6),
-                          Text(
-                            'Tap to upload your driving license',
-                            style: TextStyle(color: AppColors.greyText, fontSize: 12),
+                    child: Stack(
+                      children: [
+                        if (vm.isUploadingLicense)
+                          const Center(child: CircularProgressIndicator())
+                        else if (vm.licenseBytes != null)
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.memory(vm.licenseBytes!, fit: BoxFit.cover, width: double.infinity, height: double.infinity),
+                          )
+                        else
+                          Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.upload_file, color: AppColors.greyText),
+                                const SizedBox(height: 6),
+                                Text(
+                                  'Tap to upload your driving license',
+                                  style: TextStyle(color: AppColors.greyText, fontSize: 12),
+                                ),
+                              ],
+                            ),
                           ),
-                        ],
-                      ),
+                      ],
                     ),
                   ),
                 ),
@@ -308,8 +323,8 @@ class _RegisterViewState extends State<_RegisterView> {
                     width: 20,
                     child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                   )
-                      : Text(
-                    vm.role == 'driver' ? 'Next' : 'Complete',
+                      : const Text(
+                    'Complete',
                     style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
                   ),
                 ),

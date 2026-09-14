@@ -356,6 +356,7 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                   builder: (context, userSnapshot) {
                     final userData = userSnapshot.data;
                     final displayName = userData?['name'] ?? userData?['full_name'] ?? 'User';
+                    final avatarUrl = userData?['avatar_url'] as String?;
 
                     // Fetch trip name synchronously here!
                     final myTripId = isDriver ? request.driverTripId : request.passengerTripId;
@@ -380,7 +381,18 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                               borderRadius: BorderRadius.circular(12),
                               border: Border.all(color: AppColors.greyBorder, width: 1),
                             ),
-                            child: const Icon(Icons.person, size: 50, color: Colors.grey),
+                            child: avatarUrl != null && avatarUrl.isNotEmpty
+                                ? ClipRRect(
+                              borderRadius: BorderRadius.circular(11), // 12 - the 1px border
+                              child: Image.network(
+                                avatarUrl,
+                                width: 78,
+                                height: 78,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => const Icon(Icons.person, size: 50, color: Colors.grey),
+                              ),
+                            )
+                                : const Icon(Icons.person, size: 50, color: Colors.grey),
                           ),
                           const SizedBox(height: 8),
                           Text(displayName, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),

@@ -4,13 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nak_tumpang/core/utils/validators.dart';
+import 'package:nak_tumpang/features/profile/data/services/profile_local_service.dart';
 import 'package:nak_tumpang/features/profile/data/services/profile_storage_service.dart';
 
 /// What the screen should do after [ProfileViewModel.save] returns.
 enum ProfileSaveResult {
-  /// First-time setup is done — move on into the app.
-  firstTimeSetupComplete,
-
   /// Saved; [ProfileViewModel.successMessage] has the message to show.
   success,
 
@@ -23,20 +21,18 @@ enum ProfileSaveResult {
 /// screen only reads state from here and calls into it — Supabase calls,
 /// validation, and file uploads all live here instead of the widget.
 ///
-/// Dialogs and navigation (the first-time role picker, routing after
-/// save/logout) stay in the screen since they need a BuildContext.
+/// Navigation after logout stays in the screen since it needs a
+/// BuildContext.
 class ProfileViewModel extends ChangeNotifier {
-  final bool isFirstTimeSetup;
-
-  ProfileViewModel({required this.isFirstTimeSetup});
+  ProfileViewModel();
 
   final supabase = Supabase.instance.client;
   final _storageService = ProfileStorageService();
+  final _localService = ProfileLocalService();
 
   final nameController = TextEditingController();
   final phoneController = TextEditingController();
   final licenseNumberController = TextEditingController();
-  final emailController = TextEditingController();
   final currentPasswordController = TextEditingController();
   final newPasswordController = TextEditingController();
   final confirmPasswordController = TextEditingController();
@@ -51,16 +47,17 @@ class ProfileViewModel extends ChangeNotifier {
   /// look like it's always demanding a password change.
   bool showChangePassword = false;
 
-  // Driving license numbers don't follow one official public format the
-  // way the IC does, so this is a light sanity check rather than a strict
-  // pattern: letters, digits, spaces and dashes only, no emoji/junk paste.
-  final _licenseNumberRegex = RegExp(r'^[A-Z0-9](?:[A-Z0-9\s-]*[A-Z0-9])?$');
-
   String _role = 'passenger';
   String? _originalRole; // role as loaded from the DB; used to lock edits
   String? _email;
 
   String get role => _role;
+
+  /// The account's verified email. Read-only here — changing it isn't
+  /// supported from the profile screen (Supabase's email-change
+  /// confirmation flow needs its own dedicated screen), so it's just
+  /// displayed as text under the avatar instead of an editable field.
+  String? get email => _email;
 
   Uint8List? avatarBytes;
   String? avatarUrl;
@@ -71,21 +68,19 @@ class ProfileViewModel extends ChangeNotifier {
   String? _licensePath;    // raw "<userId>/<fileName>" path — this is what gets saved
   bool isUploadingLicense = false;
 
+  // Filename of an avatar upload that's in flight for the current save()
+  // call, tracked so a failed DB write can roll back exactly that file —
+  // see save().
+  String? _pendingAvatarFileName;
+
   bool isLoading = true;
   bool isSaving = false;
   String? errorMessage;
   String? successMessage;
 
-  // Profile/Route tab (drivers only) — 'profile' or 'route'.
-  String activeTab = 'profile';
-  List<Map<String, dynamic>> driverTrips = [];
-  bool isLoadingRoutes = false;
-  bool _routesLoaded = false;
-
   bool _autoValidate = false;
   String? nameError;
   String? phoneError;
-  String? emailError;
   String? licenseNumberError;
   String? currentPasswordError;
   String? newPasswordError;
@@ -97,7 +92,6 @@ class ProfileViewModel extends ChangeNotifier {
     phoneController.dispose();
     phoneFocusNode.dispose();
     licenseNumberController.dispose();
-    emailController.dispose();
     currentPasswordController.dispose();
     newPasswordController.dispose();
     confirmPasswordController.dispose();
@@ -132,7 +126,19 @@ class ProfileViewModel extends ChangeNotifier {
         avatarUrl = data['avatar_url'] as String?;
       }
       _email = data?['email'] as String? ?? supabase.auth.currentUser?.email;
-      emailController.text = _email ?? '';
+
+      // Cache what we just fetched so a later loadProfile() can fall
+      // back to this if Supabase is unreachable — see the catch below.
+      if (data != null) {
+        await _localService.cacheUserProfile(
+          userId: userId,
+          name: data['name'] as String? ?? '',
+          email: _email ?? '',
+          phone: data['phone'] as String? ?? '',
+          role: _role,
+          avatarUrl: avatarUrl,
+        );
+      }
 
       // License number/photo live on driver_profiles, not users — only
       // drivers have a row there, so only look it up for drivers.
@@ -150,44 +156,41 @@ class ProfileViewModel extends ChangeNotifier {
             path: _licensePath!,
           );
         }
+        await _localService.cacheDriverLicense(
+          userId: userId,
+          licenseNumber: licenseNumberController.text,
+          licenseUrl: _licensePath,
+        );
+      }
+    } catch (e) {
+      // Supabase unreachable (offline, DNS failure, etc.) — fall back to
+      // whatever was cached from the last successful load, so the
+      // screen shows the driver's last-known profile instead of a blank
+      // or crashed one.
+      debugPrint('loadProfile failed, falling back to local cache: $e');
+      final cached = await _localService.getCachedUserProfile(userId);
+      if (cached != null) {
+        nameController.text = cached['name'] as String? ?? '';
+        phoneController.text = Validators.localDigitsFromStored(cached['phone'] as String?);
+        _role = cached['role'] as String? ?? 'passenger';
+        _originalRole = _role;
+        avatarUrl = cached['avatar_url'] as String?;
+        _email = cached['email'] as String?;
+
+        if (_role == 'driver') {
+          final cachedLicense = await _localService.getCachedDriverLicense(userId);
+          licenseNumberController.text = cachedLicense?['license_number'] as String? ?? '';
+          _licensePath = cachedLicense?['license_url'] as String?;
+          // Signed URLs are short-lived and Storage isn't reachable
+          // right now anyway, so there's no photo to show offline —
+          // the license number still displays.
+        }
+        errorMessage = "Showing your last saved profile — you're offline.";
+      } else {
+        errorMessage = 'Could not load your profile. Please check your connection.';
       }
     } finally {
       isLoading = false;
-      notifyListeners();
-    }
-  }
-
-  void setRole(String role) {
-    _role = role;
-    notifyListeners();
-  }
-
-  /// Switches between the 'profile' and 'route' tabs (drivers only).
-  /// Lazily loads the driver's saved routes the first time 'route' is
-  /// opened, so passengers/first-load never pay for a query they won't
-  /// use.
-  Future<void> setTab(String tab) async {
-    activeTab = tab;
-    notifyListeners();
-    if (tab == 'route' && !_routesLoaded) {
-      await loadDriverRoutes();
-    }
-  }
-
-  Future<void> loadDriverRoutes() async {
-    final userId = supabase.auth.currentUser?.id;
-    if (userId == null) return;
-
-    isLoadingRoutes = true;
-    notifyListeners();
-    try {
-      final rows = await supabase.from('driver_trips').select().eq('user_id', userId);
-      driverTrips = List<Map<String, dynamic>>.from(rows);
-      _routesLoaded = true;
-    } catch (e) {
-      debugPrint('Failed to load driver routes: $e');
-    } finally {
-      isLoadingRoutes = false;
       notifyListeners();
     }
   }
@@ -222,20 +225,26 @@ class ProfileViewModel extends ChangeNotifier {
 
   String? _validateLicenseNumber(String? v) {
     if (_role != 'driver') return null;
-    final trimmed = v?.trim() ?? '';
-    if (trimmed.isEmpty) return 'Driving license number is required';
-    if (trimmed.length < 4) return 'Please enter a valid driver license number';
-    if (!_licenseNumberRegex.hasMatch(trimmed)) {
-      return 'Letters, numbers, spaces and dashes only';
-    }
-    return null;
+    return Validators.licenseNumber(v);
   }
+
+  /// Whether the driver is actually attempting a password change — any
+  /// of the three password fields having content counts, not just "New
+  /// Password". Using only newPasswordController here was the bug: a
+  /// driver who typed something into "Confirm New Password" but left
+  /// "New Password" blank saw no error on either field (newPasswordError
+  /// is optional, and confirmPassword's own optional check only looks at
+  /// whether *new* password is empty) and the button appeared to save
+  /// successfully — but wantsPasswordChange being keyed on the same
+  /// empty field meant no password update was ever actually sent.
+  bool get _touchingPasswordChange =>
+      currentPasswordController.text.isNotEmpty ||
+          newPasswordController.text.isNotEmpty ||
+          confirmPasswordController.text.isNotEmpty;
 
   String? _validateCurrentPassword() {
     if (!showChangePassword) return null;
-    if (newPasswordController.text.isEmpty && confirmPasswordController.text.isEmpty) {
-      return null;
-    }
+    if (!_touchingPasswordChange) return null;
     if (currentPasswordController.text.isEmpty) return 'Enter your current password';
     return null;
   }
@@ -243,15 +252,22 @@ class ProfileViewModel extends ChangeNotifier {
   void _runValidation() {
     nameError = Validators.name(nameController.text);
     phoneError = Validators.phoneLocal(phoneController.text);
-    emailError = Validators.email(emailController.text);
     licenseNumberError = _validateLicenseNumber(licenseNumberController.text);
     currentPasswordError = _validateCurrentPassword();
-    newPasswordError = Validators.password(newPasswordController.text, optional: true);
-    confirmPasswordError = Validators.confirmPassword(
-      confirmPasswordController.text,
-      newPasswordController.text,
-      optional: true,
-    );
+
+    if (!showChangePassword || !_touchingPasswordChange) {
+      newPasswordError = null;
+      confirmPasswordError = null;
+    } else {
+      newPasswordError = Validators.password(newPasswordController.text);
+      // Only check the match once New Password itself is valid — surfacing
+      // "Passwords do not match" or "Please confirm your password" on top
+      // of an already-flagged, empty/invalid New Password field is just a
+      // second, confusing error pointing at the same missing field.
+      confirmPasswordError = newPasswordError != null
+          ? null
+          : Validators.confirmPassword(confirmPasswordController.text, newPasswordController.text);
+    }
   }
 
   void revalidateIfNeeded() {
@@ -274,10 +290,20 @@ class ProfileViewModel extends ChangeNotifier {
 
   Future<void> pickLicense() async {
     final bytes = await _storageService.pickImage(source: ImageSource.gallery);
-    if (bytes != null) {
-      licenseBytes = bytes;
+    if (bytes == null) return;
+
+    // Client-side check first — cheap, instant, and catches the "wrong
+    // file"/corrupted cases before spending any time uploading.
+    final imageCheck = await _storageService.validateImage(bytes);
+    if (!imageCheck.isValid) {
+      errorMessage = imageCheck.error;
       notifyListeners();
+      return;
     }
+
+    licenseBytes = bytes;
+    errorMessage = null;
+    notifyListeners();
   }
 
   String get initials {
@@ -288,14 +314,31 @@ class ProfileViewModel extends ChangeNotifier {
     return (parts[0][0] + parts[1][0]).toUpperCase();
   }
 
+  /// avatar_url is stored as a full public Storage URL (see
+  /// ProfileStorageService.uploadUserFile), but deleting a file needs
+  /// the bare "<userId>/<fileName>" path — pulls that back out of the
+  /// URL so the old avatar can be cleaned up after a successful save.
+  String? _storagePathFromPublicUrl(String? publicUrl, String bucket) {
+    if (publicUrl == null) return null;
+    final marker = '/$bucket/';
+    final idx = publicUrl.indexOf(marker);
+    if (idx == -1) return null;
+    return publicUrl.substring(idx + marker.length);
+  }
+
   Future<ProfileSaveResult> save() async {
+    // Guards against a second call landing while one is already in
+    // flight (e.g. a double-tap before the UI rebuilds with isSaving
+    // disabling the button) — this can upload files and touch two
+    // tables, so don't rely on the button's disabled state alone.
+    if (isSaving) return ProfileSaveResult.failure;
+
     _autoValidate = true;
     _runValidation();
     notifyListeners();
 
     if (nameError != null ||
         phoneError != null ||
-        emailError != null ||
         licenseNumberError != null ||
         currentPasswordError != null ||
         newPasswordError != null ||
@@ -303,14 +346,17 @@ class ProfileViewModel extends ChangeNotifier {
       return ProfileSaveResult.failure;
     }
 
-    // Role is only settable during first-time setup (via the dialog/
-    // dropdown). On every later save, ignore whatever is in `_role` and
-    // use the role already on file, so it can never be switched later.
-    final roleToSave = isFirstTimeSetup ? _role : (_originalRole ?? _role);
+    // Role is only ever set at registration. Ignore whatever is in
+    // `_role` here and use the role already on file, so it can never be
+    // switched later from this screen.
+    final roleToSave = _originalRole ?? _role;
 
     // Driver must have a license photo on file (either already uploaded,
-    // or picked just now) before they can continue.
-    if (roleToSave == 'driver' && licenseUrl == null && licenseBytes == null) {
+    // or picked just now) before they can continue. Check _licensePath,
+    // not licenseUrl — licenseUrl is just the signed display URL, which
+    // is null whenever it was loaded from the offline cache (no
+    // network to sign it), even though a license is genuinely on file.
+    if (roleToSave == 'driver' && _licensePath == null && licenseBytes == null) {
       errorMessage = 'Please upload your driving license.';
       notifyListeners();
       return ProfileSaveResult.failure;
@@ -324,7 +370,20 @@ class ProfileViewModel extends ChangeNotifier {
     successMessage = null;
     notifyListeners();
 
-    final wantsPasswordChange = newPasswordController.text.isNotEmpty;
+    // Explicit and self-contained rather than relying on the validation
+    // pass above having already guaranteed this: a password change only
+    // ever proceeds when New Password AND Confirm New Password are both
+    // filled in and match exactly. (This used to key off New Password
+    // alone, which meant — depending on validation order — a change
+    // could go through with only one of the two fields actually filled
+    // in. Checking both directly here removes that dependency.)
+    final newPassword = newPasswordController.text;
+    final confirmPassword = confirmPasswordController.text;
+    final wantsPasswordChange =
+        newPassword.isNotEmpty && confirmPassword.isNotEmpty && newPassword == confirmPassword;
+    final previousAvatarUrl = avatarUrl;
+    final previousLicenseUrl = licenseUrl;
+    final previousLicensePath = _licensePath;
 
     try {
       // Supabase has no separate "verify this password" call, so a
@@ -333,51 +392,65 @@ class ProfileViewModel extends ChangeNotifier {
       if (wantsPasswordChange) {
         try {
           await supabase.auth.signInWithPassword(
-            email: _email ?? emailController.text.trim(),
+            email: _email ?? supabase.auth.currentUser?.email ?? '',
             password: currentPasswordController.text,
           );
-        } on AuthException {
-          errorMessage = 'Current password is incorrect.';
+        } on AuthException catch (e) {
+          // Only report "incorrect password" for the specific error
+          // Supabase returns for a wrong password. Rate limiting, a
+          // temporary outage, etc. throw AuthException too, but telling
+          // the driver their password is wrong when it might not be is
+          // misleading — give those their own message instead.
+          errorMessage = e.message.contains('Invalid login credentials')
+              ? 'Current password is incorrect.'
+              : 'Could not verify your current password right now. Please try again.';
+          return ProfileSaveResult.failure;
+        } catch (_) {
+          // Non-auth failures here (no network, DNS, etc.) shouldn't be
+          // reported as a wrong password either.
+          errorMessage = 'Network error while verifying your password. Please check your connection and try again.';
           return ProfileSaveResult.failure;
         }
       }
 
-      // Email/password live on the auth user, not the `users` table, so
-      // they're updated via Supabase Auth first. A changed email triggers
-      // Supabase's own confirmation flow (a link sent to the new address);
-      // the change only takes effect once that's clicked.
-      final newEmail = emailController.text.trim();
-      final emailChanged = newEmail.isNotEmpty && newEmail != (_email ?? '');
-      if (emailChanged) {
-        await supabase.auth.updateUser(UserAttributes(email: newEmail));
-      }
+      // Email is read-only here — it's shown as plain text, not an
+      // editable field. Changing the account's verified email needs its
+      // own confirmation-aware flow, so that's intentionally not wired
+      // up from this screen.
 
       if (wantsPasswordChange) {
-        await supabase.auth.updateUser(UserAttributes(password: newPasswordController.text));
+        await supabase.auth.updateUser(UserAttributes(password: newPassword));
       }
 
       if (avatarBytes != null) {
         isUploadingAvatar = true;
         notifyListeners();
+        // Unique filename per upload (rather than a fixed 'avatar.jpg')
+        // so a rollback below can remove *this* upload specifically if
+        // the DB write fails, without ever touching the file the
+        // previous avatar_url still points at.
+        _pendingAvatarFileName = 'avatar_${DateTime.now().millisecondsSinceEpoch}.jpg';
         avatarUrl = await _storageService.uploadUserFile(
           bytes: avatarBytes!,
           bucket: 'avatars',
           userId: userId,
-          fileName: 'avatar.jpg',
+          fileName: _pendingAvatarFileName!,
         );
         isUploadingAvatar = false;
       }
 
+      String? pendingLicensePath;
       if (roleToSave == 'driver' && licenseBytes != null) {
         isUploadingLicense = true;
         notifyListeners();
-        _licensePath = await _storageService.uploadUserFile(
+        pendingLicensePath = await _storageService.uploadUserFile(
           bytes: licenseBytes!,
           bucket: 'driver-licenses',
           userId: userId,
-          fileName: 'license.jpg',
+          fileName: 'license_${DateTime.now().millisecondsSinceEpoch}.jpg',
           public: false,
         );
+        _licensePath = pendingLicensePath;
         // Also refresh the signed URL so it displays immediately after save,
         // without needing another round trip to loadProfile().
         licenseUrl = await _storageService.getSignedUrl(
@@ -387,26 +460,107 @@ class ProfileViewModel extends ChangeNotifier {
         isUploadingLicense = false;
       }
 
-      await supabase.from('users').upsert({
-        'id': userId,
-        'name': nameController.text.trim(),
-        'phone': Validators.toStoredPhone(phoneController.text),
-        'role': roleToSave,
-        'avatar_url': avatarUrl,
-        'email': _email ?? newEmail,
-        'updated_at': DateTime.now().toIso8601String(),
-      });
-
-      // License number/photo live on driver_profiles now. Only touch
-      // those two columns here — never total_earnings/available_balance/
-      // total_withdrawn, since this upsert must not reset a driver's
-      // wallet back to zero on an unrelated profile edit.
-      if (roleToSave == 'driver') {
-        await supabase.from('driver_profiles').upsert({
-          'user_id': userId,
-          'license_number': licenseNumberController.text.trim(),
-          'license_url': _licensePath,
+      try {
+        await supabase.from('users').upsert({
+          'id': userId,
+          'name': nameController.text.trim(),
+          'phone': Validators.toStoredPhone(phoneController.text),
+          'role': roleToSave,
+          'avatar_url': avatarUrl,
+          'email': _email,
+          'updated_at': DateTime.now().toIso8601String(),
         });
+
+        // License number/photo live on driver_profiles now. Only touch
+        // those two columns here — never total_earnings/available_balance/
+        // total_withdrawn, since this upsert must not reset a driver's
+        // wallet back to zero on an unrelated profile edit.
+        if (roleToSave == 'driver') {
+          await supabase.from('driver_profiles').upsert({
+            'user_id': userId,
+            'license_number': licenseNumberController.text.trim(),
+            'license_url': _licensePath,
+          });
+        }
+
+      } catch (e) {
+        // Neither DB write can be trusted to have committed (upsert
+        // isn't itself transactional across the two calls), so roll
+        // back any file uploaded *in this attempt* — the previous
+        // avatar/license, if any, was never touched and is still what
+        // the (unsaved) DB row points to.
+        if (_pendingAvatarFileName != null) {
+          await _storageService.deleteUserFile(
+            bucket: 'avatars',
+            path: '$userId/$_pendingAvatarFileName',
+          );
+          _pendingAvatarFileName = null;
+          avatarUrl = previousAvatarUrl;
+        }
+        if (pendingLicensePath != null) {
+          await _storageService.deleteUserFile(bucket: 'driver-licenses', path: pendingLicensePath);
+          _licensePath = previousLicensePath;
+          licenseUrl = previousLicenseUrl;
+        }
+        rethrow;
+      }
+
+      // Both Supabase writes have committed by this point — mirror them
+      // into the local cache so an offline loadProfile() afterward
+      // reflects this save. This is deliberately its own try/catch,
+      // outside the rollback scope above: a SQLite-only failure here
+      // must never delete the avatar/license Supabase already committed
+      // to, or report a successful remote save as failed.
+      try {
+        await _localService.cacheUserProfile(
+          userId: userId,
+          name: nameController.text.trim(),
+          email: _email ?? '',
+          phone: Validators.toStoredPhone(phoneController.text),
+          role: roleToSave,
+          avatarUrl: avatarUrl,
+        );
+        if (roleToSave == 'driver') {
+          await _localService.cacheDriverLicense(
+            userId: userId,
+            licenseNumber: licenseNumberController.text.trim(),
+            licenseUrl: _licensePath,
+          );
+        }
+      } catch (e) {
+        debugPrint('Profile saved to Supabase but failed to update local cache: $e');
+      }
+
+      _pendingAvatarFileName = null;
+      // Captured before clearing avatarBytes below — the old-file
+      // cleanup a few lines down needs to know whether this save
+      // uploaded a new avatar, and avatarBytes itself won't say that
+      // anymore once it's null.
+      final didUploadAvatar = avatarBytes != null;
+      // Committed — the DB row now points at the uploaded file(s), so
+      // drop the in-memory copies. Without this, saving again in the
+      // same screen session (e.g. after just editing the name) would
+      // re-upload the same avatar/license under a new filename and
+      // delete the file this save just committed, for no reason.
+      avatarBytes = null;
+      licenseBytes = null;
+
+      // The new file(s) are now safely referenced by the DB row that
+      // just committed — the previous avatar/license (if this save
+      // replaced one) is no longer pointed at by anything, so it's safe
+      // to remove now. Done last, after commit, and best-effort: unlike
+      // the rollback above, a failure here just leaves one harmless
+      // unreferenced old file instead of risking new data.
+      if (didUploadAvatar) {
+        final oldAvatarPath = _storagePathFromPublicUrl(previousAvatarUrl, 'avatars');
+        if (oldAvatarPath != null) {
+          await _storageService.deleteUserFile(bucket: 'avatars', path: oldAvatarPath);
+        }
+      }
+      if (pendingLicensePath != null &&
+          previousLicensePath != null &&
+          previousLicensePath != pendingLicensePath) {
+        await _storageService.deleteUserFile(bucket: 'driver-licenses', path: previousLicensePath);
       }
 
       // Password fields are never pre-filled from stored data, so clear
@@ -417,19 +571,7 @@ class ProfileViewModel extends ChangeNotifier {
       confirmPasswordController.clear();
       showChangePassword = false;
 
-      if (isFirstTimeSetup) {
-        return ProfileSaveResult.firstTimeSetupComplete;
-      }
-
-      if (wantsPasswordChange && emailChanged) {
-        successMessage = 'Password changed. Check your new email to confirm the change.';
-      } else if (wantsPasswordChange) {
-        successMessage = 'Password changed.';
-      } else if (emailChanged) {
-        successMessage = 'Profile updated. Check your new email to confirm the change.';
-      } else {
-        successMessage = 'Profile updated.';
-      }
+      successMessage = wantsPasswordChange ? 'Password changed.' : 'Profile updated.';
       return ProfileSaveResult.success;
     } on AuthException catch (e) {
       errorMessage = e.message;

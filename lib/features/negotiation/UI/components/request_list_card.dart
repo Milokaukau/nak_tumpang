@@ -76,6 +76,7 @@ class RequestListCard extends StatelessWidget {
         final userData = snapshot.data;
         final displayName = userData?['name'] ?? userData?['full_name'] ?? 'User';
         final displayPhone = userData?['phone'] ?? userData?['phone_number'] ?? 'No phone provided';
+        final avatarUrl = userData?['avatar_url'] as String?;
 
         return Card(
           margin: const EdgeInsets.only(bottom: 16.0),
@@ -110,7 +111,18 @@ class RequestListCard extends StatelessWidget {
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(color: AppColors.greyBorder, width: 1),
                       ),
-                      child: const Icon(Icons.person, size: 40, color: Colors.grey),
+                      child: avatarUrl != null && avatarUrl.isNotEmpty
+                          ? ClipRRect(
+                        borderRadius: BorderRadius.circular(7), // 8 - the 1px border
+                        child: Image.network(
+                          avatarUrl,
+                          width: 68,
+                          height: 68,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => const Icon(Icons.person, size: 40, color: Colors.grey),
+                        ),
+                      )
+                          : const Icon(Icons.person, size: 40, color: Colors.grey),
                     ),
                     const SizedBox(width: 16),
                     Expanded(

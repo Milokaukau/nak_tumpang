@@ -9,6 +9,28 @@ class ExceptionConflictError implements Exception {
 class HomeSupabaseService {
   final _supabase = Supabase.instance.client;
 
+  /// Real signed-in user's profile (id/name/role), read from the current
+  /// Supabase auth session — not a hardcoded mock ID. Returns null if
+  /// nobody is signed in, or their `users` row doesn't exist yet.
+  Future<Map<String, dynamic>?> fetchCurrentUserProfile() async {
+    final authUser = _supabase.auth.currentUser;
+    if (authUser == null) return null;
+
+    try {
+      final row = await _supabase
+          .from('users')
+          .select('name, role')
+          .eq('id', authUser.id)
+          .maybeSingle();
+
+      if (row == null) return null;
+      return {'id': authUser.id, ...row};
+    } catch (e) {
+      print('⚠️ Error fetching current user profile: $e');
+      return null;
+    }
+  }
+
   Future<List<Map<String, dynamic>>> fetchPassengerTrips(String userId) async {
     try {
       final response = await _supabase
@@ -190,6 +212,16 @@ class HomeSupabaseService {
     }
   }
 
+  // Postgres error code for a GiST exclusion constraint violation — see
+  // tumpang_exception_overlap_constraint.sql. Raised when this insert
+  // loses a race against a concurrent insert for the same
+  // (tumpang_subscription_id, initiated_by) with an overlapping date
+  // range: both requests can pass the SELECT-based check below before
+  // either INSERT lands, so that check alone can't close the race — the
+  // database constraint is the actual guarantee, this is just mapping
+  // its rejection to the same error type the pre-check throws.
+  static const _exclusionViolationCode = '23P01';
+
   Future<bool> createException({
     required String tumpangSubscriptionId,
     required String initiatedBy,
@@ -202,9 +234,9 @@ class HomeSupabaseService {
     final endStr = _formatDate(endDate);
 
     try {
-      // Block overlapping active exceptions from the SAME initiator on the
-      // SAME subscription — surface a clear message instead of silently
-      // creating a duplicate/conflicting request.
+      // Fast path: catches the common case (no race) with a specific,
+      // friendly message naming the conflicting dates. Not sufficient on
+      // its own — see the exclusion constraint catch below for why.
       final overlapping = await _supabase
           .from('tumpang_exception')
           .select('id, start_date, end_date')
@@ -234,6 +266,21 @@ class HomeSupabaseService {
       return true;
     } on ExceptionConflictError {
       rethrow;
+    } on PostgrestException catch (e) {
+      // The race the fast-path check above can't close: a concurrent
+      // insert landed between our SELECT and our INSERT. The database
+      // constraint rejected us, so we lost the race — same user-facing
+      // outcome as the fast-path conflict, just without the specific
+      // dates (finding them would mean another read, and by the time it
+      // returns the answer could be stale again).
+      if (e.code == _exclusionViolationCode) {
+        throw ExceptionConflictError(
+          'You already have an active request that overlaps these dates. '
+              'Please edit that request instead of creating a new one.',
+        );
+      }
+      print("Error in createException: $e");
+      return false;
     } catch (e) {
       print("Error in createException: $e");
       return false;

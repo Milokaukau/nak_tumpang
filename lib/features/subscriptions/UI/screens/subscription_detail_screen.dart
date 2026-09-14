@@ -399,7 +399,9 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
 
     final myTripKey = widget.role == 'passenger' ? 'passenger_trips' : 'driver_trips';
     final myTrip = widget.subscription[myTripKey] as Map<String, dynamic>?;
-    final tripName = myTrip?['trip_name'] ?? widget.subscription['trip_name'] ?? 'Tumpang Journey';    final otherUserName = widget.subscription['name'] ?? 'User';
+    final tripName = myTrip?['trip_name'] ?? widget.subscription['trip_name'] ?? 'Tumpang Journey';
+    final otherUserName = widget.subscription['name'] ?? 'User';
+    final otherImageUrl = widget.subscription['imageUrl'] as String?;
     final pickupName = widget.subscription['pickup_location'] ?? 'Unknown';
     final dropoffName = widget.subscription['dropoff_location'] ?? 'Unknown';
     final startDate = widget.subscription['subscription_start_date'] ?? '';
@@ -469,7 +471,18 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
               border: Border.all(color: AppColors.greyBorder, width: 1),
               boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, 2))],
             ),
-            child: const Icon(Icons.person, size: 44, color: Colors.grey),
+            child: otherImageUrl != null && otherImageUrl.isNotEmpty
+                ? ClipRRect(
+              borderRadius: BorderRadius.circular(15), // 16 - the 1px border
+              child: Image.network(
+                otherImageUrl,
+                width: 78,
+                height: 78,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => const Icon(Icons.person, size: 44, color: Colors.grey),
+              ),
+            )
+                : const Icon(Icons.person, size: 44, color: Colors.grey),
           ),
           const SizedBox(height: 10),
           Text(otherUserName, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),

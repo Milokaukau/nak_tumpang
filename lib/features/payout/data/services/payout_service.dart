@@ -1,30 +1,47 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-/// Data access for the driver wallet / payout flow. Talks to
-/// driver_profiles, tumpang_request, and payout_history — no business
-/// logic here, that lives in PayoutViewModel.
+// data access to wallet
 class PayoutService {
   final _supabase = Supabase.instance.client;
 
-  /// Row from driver_profiles: total_earnings, available_balance,
-  /// total_withdrawn, bank_name, bank_acc_no. Null if the driver has no
-  /// profile row yet (e.g. brand-new driver, nothing earned/withdrawn).
+
   Future<Map<String, dynamic>?> fetchDriverProfile(String userId) {
     return _supabase.from('driver_profiles').select().eq('user_id', userId).maybeSingle();
   }
 
-  /// ALL completed trips for this driver, most recent first — not just
-  /// the ones shown on screen. The view model slices this for the
-  /// "Recent trips" list but also needs the full set to count total
-  /// trips completed and sum up this month's points.
-  ///
-  /// NOTE: double-check `sub_start_date` is the right column to sort/
-  /// filter by once you can see the full tumpang_request schema — this
-  /// assumes it's the trip date shown in the UI.
-  Future<List<Map<String, dynamic>>> fetchCompletedTrips(String userId) async {
+  // reads the fee value in payout_settings
+  // falls back to 1rm if that row is missing
+  Future<double> fetchBankTransferFee() async {
+    final row = await _supabase.from('payout_settings').select('bank_transfer_fee').maybeSingle();
+    return (row?['bank_transfer_fee'] as num?)?.toDouble() ?? 1.00;
+  }
+
+  // filtered server-side by date range (not full)
+  Future<List<Map<String, dynamic>>> fetchCompletedTripsInRange(
+      String userId, {
+        required DateTime start,
+        required DateTime end,
+      }) async {
+    final response = await _supabase
+        .from('tumpang_request')
+        .select('id, fee, sub_start_date, driver_trips!inner(user_id)')
+        .eq('driver_trips.user_id', userId)
+        .eq('status', 'completed')
+        .gte('sub_start_date', start.toIso8601String())
+        .lt('sub_start_date', end.toIso8601String());
+
+    return List<Map<String, dynamic>>.from(response);
+  }
+
+  // capped server-side with .limit() rather than fetching whole history and only using the first 10 client-side
+  Future<List<Map<String, dynamic>>> fetchRecentCompletedTrips(
+      String userId, {
+        int limit = 10,
+      }) async {
     final response = await _supabase
         .from('tumpang_request')
         .select('''
+          id,
           fee,
           pickup_name,
           dropoff_name,
@@ -34,40 +51,88 @@ class PayoutService {
         ''')
         .eq('driver_trips.user_id', userId)
         .eq('status', 'completed')
-        .order('sub_start_date', ascending: false);
+        .order('sub_start_date', ascending: false)
+        .limit(limit);
 
     return List<Map<String, dynamic>>.from(response);
   }
 
-  /// Deducts [amount] from available_balance and logs a pending payout
-  /// row in payout_history. Not run inside a DB transaction (Supabase's
-  /// client API doesn't expose one directly) — if this matters for your
-  /// grading criteria, the safer version is a Postgres function called
-  /// via `.rpc()` that does both writes atomically.
-  Future<void> requestPayout({
-    required String userId,
-    required double amount,
-    required double newBalance,
-    required String bankName,
-    required String bankAccNo,
-  }) async {
-    await _supabase
-        .from('driver_profiles')
-        .update({
-      'available_balance': newBalance,
-      'updated_at': DateTime.now().toIso8601String(),
-    })
-        .eq('user_id', userId);
+  // e-wallet payment method will have null bank name/bank_acc_no;
+  // bank_transfer will have null ewallet_phone. request_payout()
+  // enforces this pairing server-side too, so the two never end up
+  // populated for the same row regardless of what the client sends
 
-    await _supabase.from('payout_history').insert({
-      'id': 'PO${DateTime.now().millisecondsSinceEpoch}',
-      'user_id': userId,
-      'amount': amount,
-      'payout_at': DateTime.now().toIso8601String(),
-      'bank_name': bankName,
-      'bank_acc_no': bankAccNo,
-      'status': 'pending',
-      'requested_at': DateTime.now().toIso8601String(),
+  // Runs as one atomic call via the `request_payout` Postgres function
+  // (see request_payout.sql) — the balance deduction and the
+  // payout_history insert happen in a single transaction on the server,
+  // so an interruption between them can't leave the two out of sync the
+  // way two separate client calls could.
+  Future<Map<String, dynamic>> requestPayout({
+    required double amount,
+    required String paymentMethod,
+    String? bankName,
+    String? bankAccNo,
+    String? ewalletPhone,
+  }) async {
+    final result = await _supabase.rpc('request_payout', params: {
+      'p_amount': amount,
+      'p_payment_method': paymentMethod,
+      'p_bank_name': bankName,
+      'p_bank_acc_no': bankAccNo,
+      'p_ewallet_phone': ewalletPhone,
+    });
+
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+// payout history
+  // every requested_at timestamp for this driver
+  // compute which years and month payout in them for the filter chips in History tab
+
+  Future<List<DateTime>> fetchPayoutHistoryDates(String userId) async {
+    final response = await _supabase
+        .from('payout_history')
+        .select('requested_at')
+        .eq('user_id', userId)
+        .not('requested_at', 'is', null);
+
+    return List<Map<String, dynamic>>.from(response)
+        .map((row) => DateTime.parse(row['requested_at'] as String))
+        .toList();
+  }
+
+  // one page of all payout rows, sorted by newest
+  // can be scoped to specific year and month
+  // filtering happens here so selecting year don't require driver's whole memory being loaded in memory
+  Future<List<Map<String, dynamic>>> fetchPayoutHistoryPage(
+      String userId, {
+        required int limit,
+        required int offset,
+        int? year,
+        int? month, // 1-12; only meaningful together with `year`
+      }) async {
+    var query = _supabase.from('payout_history').select().eq('user_id', userId);
+
+    if (year != null) {
+      final startMonth = month ?? 1;
+      final endMonth = month ?? 12;
+      final start = DateTime(year, startMonth, 1);
+      final end = DateTime(endMonth == 12 ? year + 1 : year, endMonth == 12 ? 1 : endMonth + 1, 1);
+      query = query.gte('requested_at', start.toIso8601String()).lt('requested_at', end.toIso8601String());
+    }
+
+    final response = await query.order('requested_at', ascending: false).range(offset, offset + limit - 1);
+    return List<Map<String, dynamic>>.from(response);
+  }
+
+
+  // check if the payout belongs to caller
+  // set payout status to needed status currently
+  // mock status
+  Future<void> updatePayoutStatus(String payoutId, String status) async {
+    await _supabase.rpc('set_payout_status', params: {
+      'p_payout_id': payoutId,
+      'p_status': status,
     });
   }
 }
