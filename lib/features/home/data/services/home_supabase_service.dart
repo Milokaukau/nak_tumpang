@@ -1,6 +1,11 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:math';
 
+class ExceptionConflictError implements Exception {
+  final String message;
+  ExceptionConflictError(this.message);
+}
+
 class HomeSupabaseService {
   final _supabase = Supabase.instance.client;
 
@@ -215,17 +220,42 @@ class HomeSupabaseService {
     required DateTime endDate,
     required String reason,
   }) async {
+    final startStr = _formatDate(startDate);
+    final endStr = _formatDate(endDate);
+
     try {
+      // Block overlapping active exceptions from the SAME initiator on the
+      // SAME subscription — surface a clear message instead of silently
+      // creating a duplicate/conflicting request.
+      final overlapping = await _supabase
+          .from('tumpang_exception')
+          .select('id, start_date, end_date')
+          .eq('tumpang_subscription_id', tumpangSubscriptionId)
+          .eq('initiated_by', initiatedBy)
+          .eq('status', 'active')
+          .lte('start_date', endStr)
+          .gte('end_date', startStr);
+
+      if ((overlapping as List).isNotEmpty) {
+        final existing = overlapping.first;
+        throw ExceptionConflictError(
+          'You already have an active request for ${existing['start_date']} to ${existing['end_date']}. '
+              'Please edit that request instead of creating a new one.',
+        );
+      }
+
       await _supabase.from('tumpang_exception').insert({
         'tumpang_subscription_id': tumpangSubscriptionId,
         'initiated_by': initiatedBy,
         'initiated_by_role': initiatedByRole,
-        'start_date': _formatDate(startDate),
-        'end_date': _formatDate(endDate),
+        'start_date': startStr,
+        'end_date': endStr,
         'reason': reason,
-        'status': 'active', // Safe to insert as lowercase
+        'status': 'active',
       });
       return true;
+    } on ExceptionConflictError {
+      rethrow;
     } catch (e) {
       print("Error in createException: $e");
       return false;
@@ -334,6 +364,29 @@ class HomeSupabaseService {
       return true;
     } catch (e) {
       print('⚠️ Error in completeTrip: $e');
+      return false;
+    }
+  }
+
+  Future<bool> sendExceptionNotification({
+    required String targetUserId,
+    required String title,
+    required String message,
+    required String subscriptionId,
+  }) async {
+    try {
+      await _supabase.from('tumpang_notifications').insert({
+        'id': 'NOTIF-${DateTime.now().millisecondsSinceEpoch}',
+        'target_user_id': targetUserId,
+        'title': title,
+        'message': message,
+        'type': 'exception',
+        'is_read': false,
+        'subscription_id': subscriptionId,
+      });
+      return true;
+    } catch (e) {
+      print('Error sending exception notification: $e');
       return false;
     }
   }

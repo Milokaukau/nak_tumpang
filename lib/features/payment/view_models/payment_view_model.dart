@@ -18,9 +18,11 @@ class PaymentViewModel extends ChangeNotifier {
   Set<String> selectedPaymentIds = {};
 
   bool isLoading = false;
+  bool isLoadingProforma = false;
   bool isProcessingPayment = false;
   String? errorMessage;
   String? paymentErrorMessage;
+  String? proformaErrorMessage;
 
   String? _currentUserId;
 
@@ -136,6 +138,29 @@ class PaymentViewModel extends ChangeNotifier {
       errorMessage = 'Failed to load payments: $e';
     } finally {
       isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<Map<String, dynamic>?> loadProformaInvoiceDetails({
+    required String subscriptionId,
+    DateTime? cycleStart,
+    DateTime? cycleEnd,
+  }) async {
+    isLoadingProforma = true;
+    proformaErrorMessage = null;
+    notifyListeners();
+    try {
+      return await _service.fetchProformaInvoiceDetails(
+        subscriptionId: subscriptionId,
+        cycleStart: cycleStart,
+        cycleEnd: cycleEnd,
+      );
+    } catch (e) {
+      proformaErrorMessage = 'Some invoice details could not be loaded.';
+      return null;
+    } finally {
+      isLoadingProforma = false;
       notifyListeners();
     }
   }

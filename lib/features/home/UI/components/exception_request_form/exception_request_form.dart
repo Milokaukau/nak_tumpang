@@ -21,6 +21,8 @@ class ExceptionRequestForm extends StatelessWidget {
   final bool isSubmitting;
   final DateTime? minDate;
   final DateTime? maxDate;
+  final ValueChanged<String> onDateError;
+  final String? errorText;
 
   const ExceptionRequestForm({
     super.key,
@@ -39,18 +41,45 @@ class ExceptionRequestForm extends StatelessWidget {
     required this.confirmLabel,
     required this.onCancel,
     required this.onConfirm,
+    required this.onDateError,
+    this.errorText,
     this.isSubmitting = false,
     this.minDate,
     this.maxDate,
   });
 
   Future<void> _pickDate(BuildContext context, bool isStart) async {
-    // Open picker without strict bounds
+    final today = DateTime.now();
+    final todayDateOnly = DateTime(today.year, today.month, today.day);
+
+    final effectiveFirstDate = (minDate != null && minDate!.isAfter(todayDateOnly))
+        ? minDate!
+        : todayDateOnly;
+
+    final effectiveLastDate = maxDate ?? DateTime(2100);
+
+    // Guard: if the valid range is empty (e.g. subscription already ended,
+    // or maxDate is somehow before effectiveFirstDate), there's nothing
+    // pickable — don't open the picker at all.
+    if (effectiveLastDate.isBefore(effectiveFirstDate)) {
+      onDateError('No valid dates are available to select.');
+      return;
+    }
+
+    // Clamp the initial date into range, since a previously-saved value
+    // (e.g. editing an existing exception) may fall outside today's
+    // selectable window.
+    final rawInitial = (isStart ? startDate : endDate) ?? effectiveFirstDate;
+    DateTime initial = rawInitial;
+    if (initial.isBefore(effectiveFirstDate)) initial = effectiveFirstDate;
+    if (initial.isAfter(effectiveLastDate)) initial = effectiveLastDate;
+
     final picked = await showDatePicker(
       context: context,
-      initialDate: (isStart ? startDate : endDate) ?? (minDate ?? DateTime.now()),
-      firstDate: DateTime(2000),
-      lastDate: DateTime(2100),
+      initialDate: initial,
+      firstDate: effectiveFirstDate,
+      lastDate: effectiveLastDate,
+      locale: const Locale('en', 'GB'),
     );
 
     if (picked != null) {
@@ -62,30 +91,16 @@ class ExceptionRequestForm extends StatelessWidget {
         final pureMax = DateTime(maxDate!.year, maxDate!.month, maxDate!.day);
 
         if (purePicked.isBefore(pureMin) || purePicked.isAfter(pureMax)) {
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Not allowed: Date must be within the subscription period.'),
-                backgroundColor: Colors.red,
-              ),
-            );
-          }
+          onDateError('Date must be within the subscription period (${_formatDate(minDate)} - ${_formatDate(maxDate)}).');
           return;
         }
       }
 
-      // validation:end date can't be before the chosen start date
+      // validation: end date can't be before the chosen start date
       if (!isStart && startDate != null) {
         final pureStart = DateTime(startDate!.year, startDate!.month, startDate!.day);
         if (purePicked.isBefore(pureStart)) {
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Not allowed: End date cannot be before the start date.'),
-                backgroundColor: Colors.red,
-              ),
-            );
-          }
+          onDateError('End date cannot be before the start date.');
           return;
         }
       }
@@ -95,8 +110,8 @@ class ExceptionRequestForm extends StatelessWidget {
   }
 
   String _formatDate(DateTime? date) {
-    if (date == null) return 'mm/dd/yyyy';
-    return '${date.month.toString().padLeft(2, '0')}/${date.day.toString().padLeft(2, '0')}/${date.year}';
+    if (date == null) return 'dd/mm/yyyy';
+    return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
   }
 
   @override
@@ -157,6 +172,22 @@ class ExceptionRequestForm extends StatelessWidget {
           decoration: BoxDecoration(color: infoBoxColor, borderRadius: BorderRadius.circular(8)),
           child: Text(infoBoxText, style: TextStyle(color: infoBoxTextColor)),
         ),
+        if (errorText != null) ...[
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.red.shade50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.red.shade200),
+            ),
+            child: Text(
+              errorText!,
+              style: TextStyle(color: Colors.red.shade700, fontSize: 12, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
         const SizedBox(height: 24),
         Row(
           children: [

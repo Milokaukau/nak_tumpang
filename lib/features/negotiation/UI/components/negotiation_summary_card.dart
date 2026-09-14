@@ -34,6 +34,12 @@ class NegotiationSummaryCard extends StatelessWidget {
     this.onCancelSubscription,
   });
 
+  String _formatDate(String value) {
+    final date = DateTime.tryParse(value);
+    if (date == null) return value;
+    return '${date.day.toString().padLeft(2, '0')}-${date.month.toString().padLeft(2, '0')}-${date.year}';
+  }
+
   @override
   Widget build(BuildContext context) {
     final endDate = DateTime.tryParse(request.subscriptionEndDate.value) ?? DateTime.now();
@@ -105,7 +111,7 @@ class NegotiationSummaryCard extends StatelessWidget {
                         border: Border.all(color: Colors.amber.shade300),
                       ),
                       child: Text(
-                        'This subscription ended on ${request.subscriptionEndDate.value}. '
+                        'This subscription ended on ${_formatDate(request.subscriptionEndDate.value)}. '
                             'You can extend it within 7 days of ending (${7 - daysSinceExpiry} day${(7 - daysSinceExpiry) == 1 ? '' : 's'} left).',
                         style: TextStyle(color: Colors.amber.shade900, fontWeight: FontWeight.bold, fontSize: 13),
                         textAlign: TextAlign.center,

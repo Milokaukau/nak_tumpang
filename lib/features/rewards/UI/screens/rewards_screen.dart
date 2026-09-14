@@ -69,6 +69,7 @@ class _RewardsScreenState extends State<RewardsScreen> {
                   usedPoints: vm.summary['used_points'] ?? 0,
                   voucherCount: vm.summary['voucher_count'] ?? 0,
                   nearestExpiry: vm.summary['nearest_expiry'],
+                  expiredPoints: vm.summary['expired_points'] ?? 0,
                 ),
                 const SizedBox(height: 20),
                 IntrinsicHeight(

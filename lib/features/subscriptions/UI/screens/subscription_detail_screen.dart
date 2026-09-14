@@ -9,7 +9,6 @@ import 'package:nak_tumpang/features/home/UI/components/no_need_fetch_panel.dart
 import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
 import 'package:nak_tumpang/features/negotiation/UI/components/route_map_header.dart';
 import 'package:nak_tumpang/features/subscriptions/UI/components/edit_exception_sheet.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nak_tumpang/core/services/network_service.dart';
 import 'package:nak_tumpang/features/subscriptions/data/services/subscription_local_service.dart';
 
@@ -74,13 +73,8 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
     }
 
     try {
-      final response = await Supabase.instance.client
-          .from('tumpang_exception')
-          .select('*')
-          .eq('tumpang_subscription_id', subscriptionId)
-          .order('start_date', ascending: false);
-
-      final fetched = List<Map<String, dynamic>>.from(response);
+      final vm = context.read<SubscriptionViewModel>();
+      final fetched = await vm.fetchAllExceptions(subscriptionId);
 
       // Populate the local cache so this still shows if we go offline
       // later. A caching failure shouldn't block showing the (successfully
@@ -296,23 +290,12 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
                     onSubmitted: () async {
                       Navigator.of(context).pop();
                       _refreshExceptions();
-                      // Notify other side
-                      final otherUserId = passengerId;
-                      if (otherUserId != null && otherUserId.toString().isNotEmpty) {
-                        try {
-                          await Supabase.instance.client.from('tumpang_notifications').insert({
-                            'id': 'NOTIF-${DateTime.now().millisecondsSinceEpoch}',
-                            'target_user_id': otherUserId,
-                            'title': 'New Schedule Exception Request',
-                            'message': 'Driver submitted a schedule exception request.',
-                            'type': 'exception',
-                            'is_read': false,
-                            'subscription_id': widget.subscription['id'],
-                          });
-                        } catch (e) {
-                          debugPrint('Error notifying exception: $e');
-                        }
-                      }
+                      await context.read<HomeViewModel>().sendExceptionNotification(
+                        targetUserId: passengerId ?? '',
+                        title: 'New Schedule Exception Request',
+                        message: 'Driver submitted a schedule exception request.',
+                        subscriptionId: widget.subscription['id'],
+                      );
                     },
                   )
                 else
@@ -330,23 +313,12 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
                     onSubmitted: () async {
                       Navigator.of(context).pop();
                       _refreshExceptions();
-                      // Notify other side
-                      final otherUserId = driverId;
-                      if (otherUserId != null && otherUserId.toString().isNotEmpty) {
-                        try {
-                          await Supabase.instance.client.from('tumpang_notifications').insert({
-                            'id': 'NOTIF-${DateTime.now().millisecondsSinceEpoch}',
-                            'target_user_id': otherUserId,
-                            'title': 'New Schedule Exception Request',
-                            'message': 'Passenger submitted a schedule exception request.',
-                            'type': 'exception',
-                            'is_read': false,
-                            'subscription_id': widget.subscription['id'],
-                          });
-                        } catch (e) {
-                          debugPrint('Error notifying exception: $e');
-                        }
-                      }
+                      await context.read<HomeViewModel>().sendExceptionNotification(
+                        targetUserId: driverId ?? '',
+                        title: 'New Schedule Exception Request',
+                        message: 'Passenger submitted a schedule exception request.',
+                        subscriptionId: widget.subscription['id'],
+                      );
                     },
                   ),
               ],
@@ -692,6 +664,8 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
     }
 
     final dailyFee = double.tryParse(widget.subscription['fee']?.toString() ?? '') ?? 0.0;
+    final today = DateTime.now();
+    final todayDateOnly = DateTime(today.year, today.month, today.day);
 
     return ListView.builder(
       padding: const EdgeInsets.all(16),
@@ -708,15 +682,26 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
             ? '$startDate → $endDate'
             : startDate;
 
-        Color statusColor = Colors.orange;
-        if (status == 'approved' || status == 'accepted' || status == 'active') statusColor = Colors.green;
-        if (status == 'rejected') statusColor = Colors.red;
+        // Treat a past end_date as "PAST" regardless of what the DB status
+        // column says — this is purely a display-time check, no schema change.
+        final parsedEndDate = DateTime.tryParse(endDate);
+        final isPast = parsedEndDate != null && parsedEndDate.isBefore(todayDateOnly);
 
-        // Refund calc: exception_days × daily_fee, only for driver-initiated
-        // "can't fetch" exceptions, only while the exception is still active.
+        Color statusColor;
+        String displayStatus;
+        if (isPast) {
+          statusColor = Colors.grey;
+          displayStatus = 'PAST';
+        } else {
+          statusColor = Colors.orange;
+          if (status == 'approved' || status == 'accepted' || status == 'active') statusColor = Colors.green;
+          if (status == 'rejected') statusColor = Colors.red;
+          displayStatus = status.toUpperCase();
+        }
+
         double? refundAmount;
         int? exceptionDays;
-        if (initiatedByRole == 'driver' && status == 'active') {
+        if (initiatedByRole == 'driver' && status == 'active' && !isPast) {
           final start = DateTime.tryParse(startDate);
           final end = DateTime.tryParse(endDate);
           if (start != null && end != null) {
@@ -741,10 +726,7 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Expanded(
-                    child: Text(
-                      'Date: $dateText',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                    ),
+                    child: Text('Date: $dateText', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                   ),
                   const SizedBox(width: 8),
                   Container(
@@ -754,7 +736,7 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(
-                      status.toUpperCase(),
+                      displayStatus,
                       style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 11),
                     ),
                   ),
@@ -792,17 +774,16 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
                 ),
               ],
 
-              if (isMyChanges && status == 'active' && isActive) ...[
+              // Edit is now hidden once the exception is in the past, in
+              // addition to the existing checks.
+              if (isMyChanges && status == 'active' && isActive && !isPast) ...[
                 const SizedBox(height: 16),
                 Row(
                   children: [
                     Expanded(
                       child: SizedBox(
                         height: 40,
-                        child: BaseButton(
-                          text: 'Edit',
-                          onPressed: () => _openEditException(item),
-                        ),
+                        child: BaseButton(text: 'Edit', onPressed: () => _openEditException(item)),
                       ),
                     ),
                   ],

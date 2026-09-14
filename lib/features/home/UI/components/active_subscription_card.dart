@@ -236,15 +236,14 @@ class ActiveSubscriptionCard extends StatelessWidget {
               foregroundColor: AppColors.white,
               textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
             ),
-          const SizedBox(height: 6),
           if (leg.onCompleteTripPressed != null || leg.isCompletedToday) ...[
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             BaseButton(
               text: leg.isCompletedToday ? 'Trip Today Completed' : 'Complete Trip Today',
               onPressed: leg.isCompletedToday ? null : leg.onCompleteTripPressed,
               isOutlined: true,
-              height: 44,
-              textStyle: const TextStyle(fontWeight: FontWeight.normal, fontSize: 14),
+              height: 32,
+              textStyle: const TextStyle(fontWeight: FontWeight.normal, fontSize: 13),
             ),
             const SizedBox(height: 12),
           ],

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_stripe/flutter_stripe.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/entities/tumpang_request.dart';
@@ -22,7 +21,6 @@ class TumpangSummaryScreen extends StatefulWidget {
 }
 
 class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
-  final SupabaseClient _supabase = Supabase.instance.client;
   bool _isProcessing = false;
 
   String _formatAmPm(String dbTime) {
@@ -39,9 +37,28 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
     }
   }
 
+  String _formatDate(String value) {
+    final date = DateTime.tryParse(value);
+    if (date == null) return value;
+    return '${date.day.toString().padLeft(2, '0')}-${date.month.toString().padLeft(2, '0')}-${date.year}';
+  }
+
   int _calculateDepositDays(int subscriptionDays) {
     if (subscriptionDays <= 0) return 0;
     return subscriptionDays <= 60 ? subscriptionDays : 60;
+  }
+
+  /// Stripe's `flutter_stripe` payment sheet doesn't hand back the
+  /// PaymentIntent object after `presentPaymentSheet()` succeeds — but the
+  /// PaymentIntent id is always the prefix of the client secret, in the form
+  /// `pi_XXXXXXXX_secret_YYYYYYYY`. We use that to recover the id so it can
+  /// be passed server-side as the idempotency key.
+  String _extractPaymentIntentId(String clientSecret) {
+    final secretIndex = clientSecret.indexOf('_secret_');
+    if (secretIndex == -1) {
+      throw StateError('Unexpected PaymentIntent client secret format');
+    }
+    return clientSecret.substring(0, secretIndex);
   }
 
   Future<void> _handlePayDeposit({
@@ -51,25 +68,12 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
     setState(() => _isProcessing = true);
 
     try {
-      final response = await _supabase.functions.invoke(
-        'create-payment-intent',
-        body: {
-          'amount': totalDeposit,
-          'currency': 'myr',
-          'description': 'Nak Tumpang deposit for request ${request.id}',
-        },
+      final controller = context.read<NegotiationViewModel>();
+      final clientSecret = await controller.createDepositPaymentIntent(
+        amount: totalDeposit,
+        requestId: request.id,
       );
-
-      if (response.status != 200 || response.data == null) {
-        final err = response.data is Map ? response.data['error'] : null;
-        throw Exception(err ?? 'Failed to create PaymentIntent');
-      }
-
-      final paymentIntent = response.data as Map;
-      final clientSecret = paymentIntent['client_secret'];
-      if (clientSecret == null) {
-        throw Exception('No client_secret returned from server');
-      }
+      final paymentIntentId = _extractPaymentIntentId(clientSecret);
 
       await Stripe.instance.initPaymentSheet(
         paymentSheetParameters: SetupPaymentSheetParameters(
@@ -93,53 +97,22 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
 
       if (!mounted) return;
 
+      // paymentIntentId is passed through so the server-side RPC can treat
+      // this call idempotently: if the app crashes or is retried after this
+      // point, the same PaymentIntent id will short-circuit to the already
+      // finalized subscription instead of writing duplicate rows.
       if (request.isExtension) {
-        await Provider.of<NegotiationViewModel>(context, listen: false)
-            .finalizeExtensionRequest(
+        await controller.finalizeExtensionRequest(
           extensionRequestId: request.id,
           additionalDeposit: totalDeposit,
+          paymentIntentId: paymentIntentId,
         );
       } else {
-        final startDate = DateTime.parse(request.subscriptionStartDate.value);
-        final endDate = DateTime.tryParse(request.subscriptionEndDate.value) ?? startDate;
-        final subId = 'sub_${DateTime.now().millisecondsSinceEpoch}';
-
-        await _supabase.from('tumpang_subscription').insert({
-          'id': subId,
-          'passenger_trip_id': request.passengerTripId,
-          'driver_trip_id': request.driverTripId,
-          'pickup_lat': request.pickupLocation.lat,
-          'pickup_lng': request.pickupLocation.lng,
-          'pickup_location': request.pickupLocation.name,
-          'dropoff_lat': request.dropoffLocation.lat,
-          'dropoff_lng': request.dropoffLocation.lng,
-          'dropoff_location': request.dropoffLocation.name,
-          'pickup_time': request.pickupTime.value,
-          'fee': request.fee.value,
-          'deposit': totalDeposit,
-          'deposit_refunded': false,
-          'subscription_start_date': startDate.toIso8601String().split('T').first,
-          'subscription_end_date': endDate.toIso8601String().split('T').first,
-          'status': 'active',
-        });
-
-        final paidAt = DateTime.now();
-        final paymentId = 'pay_${paidAt.millisecondsSinceEpoch}';
-
-        await _supabase.from('payments').insert({
-          'id': paymentId,
-          'tumpang_subscription_id': subId,
-          'month': paidAt.month,
-          'year': paidAt.year,
-          'due_date': paidAt.toIso8601String(),
-          'paid_at': paidAt.toIso8601String(),
-          'amount': totalDeposit,
-        });
-
-        await _supabase.from('tumpang_request').update({
-          'status': 'completed',
-          'subscription_id': subId,
-        }).eq('id', request.id);
+        await controller.createSubscriptionAfterDeposit(
+          request: request,
+          deposit: totalDeposit,
+          paymentIntentId: paymentIntentId,
+        );
       }
 
       if (!mounted) return;
@@ -199,14 +172,36 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
           }
 
           final request = snapshot.data!['request'] as TumpangRequest;
+          final schedule = snapshot.data!['schedule'] as Map<String, dynamic>?;
+          if (schedule == null) {
+            return const Center(child: Text('Error loading schedule details.'));
+          }
           final dailyFee = request.fee.value;
           final depositDays = _calculateDepositDays(request.subscriptionDays);
-          final targetTotalDeposit = depositDays * dailyFee;
+          final startDate = DateTime.tryParse(request.subscriptionStartDate.value);
+          final endDate = DateTime.tryParse(request.subscriptionEndDate.value);
+          if (startDate == null || endDate == null) {
+            return const Center(child: Text('Invalid subscription dates.'));
+          }
+          final depositEndDate = startDate
+              .add(const Duration(days: 59))
+              .isAfter(endDate)
+              ? endDate
+              : startDate.add(const Duration(days: 59));
+          final depositActiveDays = NegotiationViewModel.countActiveDays(
+            startDate,
+            depositEndDate,
+            schedule,
+          );
+          final targetTotalDeposit = depositActiveDays * dailyFee;
           final bool depositCapped = request.subscriptionDays > 60;
+          final totalActiveDays = NegotiationViewModel.countActiveDays(startDate, endDate, schedule);
 
           final invoicePeriods = NegotiationViewModel.calculateInvoicePeriods(
-            subscriptionDays: request.subscriptionDays,
+            startDate: startDate,
+            endDate: endDate,
             dailyFee: dailyFee,
+            schedule: schedule,
             depositDays: depositDays,
           );
           final int remainingDays = invoicePeriods.fold<int>(0, (sum, p) => sum + (p['days'] as int));
@@ -254,14 +249,14 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
                       children: [
                         _SummaryRow(label: 'Pickup Location', value: request.pickupLocation.name),
                         _SummaryRow(label: 'Dropoff Location', value: request.dropoffLocation.name),
-                        _SummaryRow(label: 'Tumpang Start', value: request.subscriptionStartDate.value),
-                        _SummaryRow(label: 'Tumpang End', value: request.subscriptionEndDate.value),
+                        _SummaryRow(label: 'Tumpang Start', value: _formatDate(request.subscriptionStartDate.value)),
+                        _SummaryRow(label: 'Tumpang End', value: _formatDate(request.subscriptionEndDate.value)),
                         _SummaryRow(label: 'Pickup Time', value: _formatAmPm(request.pickupTime.value)),
                         const SizedBox(height: 16),
                         _SummaryRow(
                           label: 'Tumpang Fee',
                           value: 'RM ${dailyFee.toStringAsFixed(2)}/day\n'
-                              'RM ${request.totalFee.toStringAsFixed(2)} for ${request.subscriptionDays} day${request.subscriptionDays == 1 ? '' : 's'}',
+                              'RM ${(dailyFee * totalActiveDays).toStringAsFixed(2)} for $totalActiveDays scheduled day${totalActiveDays == 1 ? '' : 's'}',
                           isBold: true,
                         ),
                         const SizedBox(height: 8),
@@ -269,8 +264,8 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
                         _SummaryRow(
                           label: request.isExtension ? 'Required Deposit' : 'Deposit',
                           value: 'RM ${targetTotalDeposit.toStringAsFixed(2)} '
-                              '($depositDays day${depositDays == 1 ? '' : 's'}'
-                              '${depositCapped ? ' deposit, capped at 60 days' : ' deposit'})',
+                              '($depositActiveDays scheduled day${depositActiveDays == 1 ? '' : 's'} charged'
+                              '${depositCapped ? ' in the first 60 calendar days' : ''})',
                           isBold: true,
                         ),
 
@@ -278,9 +273,9 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
                           const SizedBox(height: 8),
                           _SummaryRow(
                             label: 'Remaining Balance',
-                            value: 'RM ${remainingAmount.toStringAsFixed(2)} for $remainingDays day${remainingDays == 1 ? '' : 's'} total'
+                            value: 'RM ${remainingAmount.toStringAsFixed(2)} for $remainingDays scheduled day${remainingDays == 1 ? '' : 's'} total'
                                 ' (billed as ${invoicePeriods.length} invoice${invoicePeriods.length == 1 ? '' : 's'} after the deposit period)\n'
-                                '${invoicePeriods.map((p) => 'Day ${(p['startDay'] as int) + 1}\u2013${p['endDay']}: RM ${(p['amount'] as double).toStringAsFixed(2)} (${p['days']} day${p['days'] == 1 ? '' : 's'})').join('\n')}',
+                                '${invoicePeriods.map((p) => 'Calendar days ${p['startDay']}\u2013${p['endDay']}: RM ${(p['amount'] as double).toStringAsFixed(2)} (${p['days']} scheduled day${p['days'] == 1 ? '' : 's'})').join('\n')}',
                             isBold: true,
                           ),
                         ],
