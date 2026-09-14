@@ -109,4 +109,8 @@ class SubscriptionViewModel extends ChangeNotifier {
       subscriptionId: subscriptionId, // NEW
     );
   }
+
+  Future<List<Map<String, dynamic>>> fetchAllExceptions(String subscriptionId) {
+    return _service.fetchAllExceptionsForSubscription(subscriptionId);
+  }
 }

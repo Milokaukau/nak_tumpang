@@ -29,6 +29,7 @@ class _EditExceptionSheetState extends State<EditExceptionSheet> {
   DateTime? startDate;
   DateTime? endDate;
   String? reason;
+  String? _validationError;
   final TextEditingController customReasonController = TextEditingController();
   bool isSubmitting = false;
 
@@ -138,11 +139,17 @@ class _EditExceptionSheetState extends State<EditExceptionSheet> {
                 dateRangeLabel: isDriverInitiated ? 'Unavailable from' : 'Not needed from',
                 startDate: startDate,
                 endDate: endDate,
+                errorText: _validationError,
+                onDateError: (msg) => setState(() => _validationError = msg),
                 onStartDateChanged: (d) => setState(() {
+                  _validationError = null;
                   startDate = d;
                   if (endDate != null && endDate!.isBefore(d)) endDate = null;
                 }),
-                onEndDateChanged: (d) => setState(() => endDate = d),
+                onEndDateChanged: (d) => setState(() {
+                  _validationError = null;
+                  endDate = d;
+                }),
                 reasonOptions: reasonOptions,
                 selectedReason: reason,
                 onReasonChanged: (r) => setState(() => reason = r),
