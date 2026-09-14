@@ -22,7 +22,6 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final MapController _mapController = MapController();
-  final SubscriptionSupabaseService _subscriptionService = SubscriptionSupabaseService();
 
   String? _lastRouteSignature;
 
@@ -41,19 +40,19 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _initializeNotifications() async {
-    final userId = Supabase.instance.client.auth.currentUser?.id;
+    final userId = context.read<HomeViewModel>().currentUserId;
     if (userId != null) {
       await _checkCrossSideNotifications(userId);
     }
   }
 
   Future<void> _checkCrossSideNotifications(String userId) async {
-    final notifications = await _subscriptionService.fetchUnreadNotifications(userId);
+    final viewModel = context.read<HomeViewModel>();
+    final notifications = await viewModel.fetchUnreadNotifications(userId);
 
     if (notifications.isEmpty || !mounted) return;
 
     List<String> idsToMarkRead = [];
-    final viewModel = context.read<HomeViewModel>();
     final userRole = viewModel.currentUserRole == 'driver' ? 'driver' : 'passenger';
 
     for (var notif in notifications) {
@@ -66,7 +65,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     if (idsToMarkRead.isNotEmpty) {
-      await _subscriptionService.markNotificationsAsRead(idsToMarkRead);
+      await viewModel.markNotificationsAsRead(idsToMarkRead);
     }
   }
 
@@ -129,7 +128,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 return;
               }
 
-              final currentUserId = Supabase.instance.client.auth.currentUser?.id ?? '';
+              final currentUserId = context.read<HomeViewModel>().currentUserId ?? '';
               final initialTab = (notif['type'] == 'exception') ? 1 : 0;
 
               if (mounted) {
@@ -189,7 +188,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
     overlay.insert(entry!);
 
-    Future.delayed(const Duration(seconds: 20), () {
+    Future.delayed(const Duration(seconds: 15), () {
       if (entry?.mounted ?? false) {
         entry?.remove();
       }
