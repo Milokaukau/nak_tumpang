@@ -122,6 +122,35 @@ class PayoutLocalService {
     );
   }
 
+  // ---------------- pending_payout_reconciliation ----------------
+  // Payouts whose terminal status was decided locally but failed to
+  // persist to payout_history even after one retry — see
+  // PayoutViewModel.runPayoutStatusAnimation. Kept here (not just an
+  // in-memory Set) so a reconciliation still applies after the app
+  // restarts, and consumed by PayoutViewModel before it trusts a
+  // freshly-fetched server status for the same payout.
+
+  Future<void> savePendingReconciliation(String payoutId, String status) async {
+    final db = await _dbService.database;
+    await _upsert(db, 'pending_payout_reconciliation', 'payout_id', {
+      'payout_id': payoutId,
+      'status': status,
+      'created_at': DateTime.now().toIso8601String(),
+    });
+  }
+
+  Future<void> removePendingReconciliation(String payoutId) async {
+    final db = await _dbService.database;
+    await db.delete('pending_payout_reconciliation', where: 'payout_id = ?', whereArgs: [payoutId]);
+  }
+
+  // payoutId -> intended terminal status
+  Future<Map<String, String>> getPendingReconciliations() async {
+    final db = await _dbService.database;
+    final rows = await db.query('pending_payout_reconciliation');
+    return {for (final row in rows) row['payout_id'] as String: row['status'] as String};
+  }
+
   // ---------------- payout_settings (single row) ----------------
 
   Future<void> cacheBankTransferFee(double fee) async {

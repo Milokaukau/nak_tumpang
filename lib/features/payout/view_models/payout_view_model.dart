@@ -236,12 +236,16 @@ class PayoutViewModel extends ChangeNotifier {
   String? lastPayoutId;
   String payoutStatus = 'pending';
 
-  // payoutIds whose terminal status ('completed'/'failed') was decided
-  // locally but failed to persist to payout_history — .g.see
-  //   // runPayoutStatusAnimation(). Surfaced so a caller (e the History
-  // screen, on next load) can retry the write instead of the DB silently
-  // staying on 'pending' forever after the driver already saw "Paid".
-  final Set<String> pendingReconciliation = {};
+  // payoutId -> intended terminal status ('completed'/'failed'), for
+  // payouts whose status was decided locally but failed to persist to
+  // payout_history — see runPayoutStatusAnimation(). Backed by
+  // PayoutLocalService's pending_payout_reconciliation table so a
+  // pending record survives an app restart, not just this instance.
+  // Consumed by _applyPendingReconciliations(), which loadHistory() and
+  // refreshHistory() both call before trusting a freshly-fetched server
+  // status for the same payout — otherwise a stale server 'pending' row
+  // could silently overwrite the terminal status the driver already saw.
+  Map<String, String> pendingReconciliation = {};
 
   bool _disposed = false;
 
@@ -279,6 +283,7 @@ class PayoutViewModel extends ChangeNotifier {
     notifyListeners();
 
     try {
+      await _applyPendingReconciliations();
       if (!_historyDatesLoaded) {
         _historyDates = await _service.fetchPayoutHistoryDates(userId);
         _historyDatesLoaded = true;
@@ -327,6 +332,7 @@ class PayoutViewModel extends ChangeNotifier {
     notifyListeners();
 
     try {
+      await _applyPendingReconciliations();
       await _fetchHistoryPage(userId, reset: true);
     } catch (e) {
       debugPrint('_reloadHistoryForCurrentScope failed, falling back to local cache: $e');
@@ -384,9 +390,60 @@ class PayoutViewModel extends ChangeNotifier {
     );
     await _localService.cachePayoutHistoryPage(rows);
     final page = rows.map(PayoutHistoryDisplay.fromRow).toList();
-    payoutHistory = reset ? page : [...payoutHistory, ...page];
+    // A row here reflects whatever Supabase currently has for it. If
+    // that payout still has an unresolved local reconciliation (the
+    // write that would've updated it on the server hasn't gone through
+    // yet), the server's copy is stale — keep showing the terminal
+    // status the driver already saw locally instead of regressing it
+    // back to 'pending'.
+    final reconciled = [
+      for (final row in page)
+        if (pendingReconciliation.containsKey(row.id))
+          PayoutHistoryDisplay(
+            id: row.id,
+            amount: row.amount,
+            status: pendingReconciliation[row.id]!,
+            paymentMethod: row.paymentMethod,
+            bankName: row.bankName,
+            bankAccNo: row.bankAccNo,
+            ewalletPhone: row.ewalletPhone,
+            requestedAt: row.requestedAt,
+            fee: row.fee,
+          )
+        else
+          row,
+    ];
+    payoutHistory = reset ? reconciled : [...payoutHistory, ...reconciled];
     _historyOffset += page.length;
     hasMoreHistory = page.length == _historyPageSize;
+  }
+
+  // Retries any payout statuses that were decided locally but never made
+  // it into payout_history (see runPayoutStatusAnimation). Runs before
+  // loadHistory()/refreshHistory() trust a freshly-fetched server status,
+  // so a payout the driver already saw as "Paid"/"Failed" doesn't get
+  // silently shown as "Pending" again just because the write that would've
+  // confirmed it on the server hadn't landed yet.
+  Future<void> _applyPendingReconciliations() async {
+    final persisted = await _localService.getPendingReconciliations();
+    pendingReconciliation = {...persisted, ...pendingReconciliation};
+    if (pendingReconciliation.isEmpty) return;
+
+    for (final entry in Map<String, String>.from(pendingReconciliation).entries) {
+      final payoutId = entry.key;
+      final status = entry.value;
+      try {
+        await _service.updatePayoutStatus(payoutId, status);
+        await _localService.updateCachedPayoutStatus(payoutId, status, processedAt: DateTime.now());
+        await _localService.removePendingReconciliation(payoutId);
+        pendingReconciliation.remove(payoutId);
+      } catch (e) {
+        // Still unresolved — keep it queued (both in memory and in the
+        // local table) for the next attempt, and _fetchHistoryPage will
+        // keep overriding this payout's row with `status` until then.
+        debugPrint('_applyPendingReconciliations: still failing to persist $payoutId: $e');
+      }
+    }
   }
 
   Future<void> load() async {
@@ -653,10 +710,18 @@ class PayoutViewModel extends ChangeNotifier {
         // retrying and being deducted twice for a payout that already
         // went through, so refresh from the server instead of guessing.
         debugPrint('PayoutViewModel.submitPayout: unexpected request_payout result shape: $result');
-        errorMessage = "Your payout may have gone through, but we couldn't confirm it here — "
-            'pull to refresh before trying again.';
         await refreshWallet();
         await refreshHistory();
+        // refreshWallet() clears walletNotice on success, so this has to
+        // be set after both refreshes — otherwise a successful refresh
+        // would wipe it before the driver ever sees it. Kept out of
+        // errorMessage on purpose: driver_balance_screen.dart replaces
+        // the whole wallet/history view with errorMessage, and the
+        // payout very likely went through, so the tabs (and their
+        // refresh controls) need to stay visible.
+        walletNotice = "Your payout may have gone through, but we couldn't confirm it here — "
+            'pull to refresh before trying again.';
+        notifyListeners();
         return false;
       }
 
@@ -668,6 +733,13 @@ class PayoutViewModel extends ChangeNotifier {
       // entry can't ever disagree with what actually got written to
       // payout_history.
       final fee = (result['fee'] as num?)?.toDouble();
+      // payout_history.fee is REAL NOT NULL DEFAULT 0, and
+      // PayoutHistoryDisplay.resolvedFee falls back to
+      // kFallbackBankTransferFee for bank transfers when fee is null.
+      // Write that same fallback to the cache rather than a bare 0, so
+      // an offline reload doesn't compute a different (too-high)
+      // netAmount than what the driver saw live.
+      final cachedFee = fee ?? (selectedMethod == PayoutMethod.bankTransfer ? kFallbackBankTransferFee : 0);
       lastPayoutId = payoutId;
       payoutStatus = 'pending';
       final now = DateTime.now();
@@ -689,7 +761,7 @@ class PayoutViewModel extends ChangeNotifier {
         'requested_at': now.toIso8601String(),
         'processed_at': null,
         'payment_method': selectedMethod.dbValue,
-        'fee': fee ?? 0,
+        'fee': cachedFee,
       });
 
       // Only splice the new entry directly into the currently-loaded page
@@ -791,14 +863,21 @@ class PayoutViewModel extends ChangeNotifier {
           // failed write silently leave payout_history disagreeing with
           // what the driver saw. Flag it for reconciliation and retry
           // once, rather than losing the failure entirely.
-          pendingReconciliation.add(payoutId);
+          pendingReconciliation[payoutId] = status;
+          await _localService.savePendingReconciliation(payoutId, status);
           debugPrint('Failed to persist payout status for $payoutId: $e');
           await Future.delayed(const Duration(seconds: 3));
           try {
             await _service.updatePayoutStatus(payoutId, status);
             await _localService.updateCachedPayoutStatus(payoutId, status, processedAt: DateTime.now());
+            await _localService.removePendingReconciliation(payoutId);
             pendingReconciliation.remove(payoutId);
           } catch (e2) {
+            // Still unresolved after the immediate retry — it stays
+            // recorded in pending_payout_reconciliation and will be
+            // retried again the next time history loads or refreshes
+            // (see _applyPendingReconciliations), including across app
+            // restarts.
             debugPrint('Retry also failed to persist payout status for $payoutId: $e2');
           }
         }

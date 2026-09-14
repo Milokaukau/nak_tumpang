@@ -19,7 +19,7 @@ class LocalDbService {
 
     return await openDatabase(
       path,
-      version: 4,
+      version: 5,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -95,6 +95,10 @@ class LocalDbService {
           FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
         )
       ''');
+    }
+
+    if (oldVersion < 5) {
+      await _createPendingPayoutReconciliationTable(db);
     }
   }
 
@@ -380,6 +384,24 @@ class LocalDbService {
 
     // 16. post_signup_draft
     await _createPostSignupDraftTable(db);
+
+    // 17. pending_payout_reconciliation
+    await _createPendingPayoutReconciliationTable(db);
+  }
+
+  // A payout whose terminal status ('completed'/'failed') was decided
+  // locally (see PayoutViewModel.runPayoutStatusAnimation) but failed to
+  // persist to Supabase's payout_history even after one retry. Survives
+  // app restarts so the driver isn't stuck showing a status that never
+  // made it to the server — see PayoutLocalService.savePendingReconciliation.
+  Future<void> _createPendingPayoutReconciliationTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS pending_payout_reconciliation (
+        payout_id TEXT PRIMARY KEY,
+        status TEXT NOT NULL CHECK (status IN ('completed', 'failed')),
+        created_at TEXT NOT NULL
+      )
+    ''');
   }
 
   // No longer written to — the post-signup driver flow now reuses
