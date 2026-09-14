@@ -123,20 +123,24 @@ class PaymentSupabaseService {
           final billableDays = (activeCycleDays - missedDays).clamp(0, activeCycleDays);
           final amount = dailyFee * billableDays;
 
-          final dueDate = DateTime(cycleEnd.year, cycleEnd.month + 1, 1);
-          final paymentId = 'pay_${DateTime.now().millisecondsSinceEpoch}_${cycleStartStr.replaceAll('-', '')}';
+          // A cycle with no scheduled rides, or one fully covered by
+          // driver exceptions, is not billable and must not create an invoice.
+          if (amount > 0) {
+            final dueDate = DateTime(cycleEnd.year, cycleEnd.month + 1, 1);
+            final paymentId = 'pay_${DateTime.now().millisecondsSinceEpoch}_${cycleStartStr.replaceAll('-', '')}';
 
-          await _supabase.from(_table).insert({
-            'id': paymentId,
-            'tumpang_subscription_id': subscriptionId,
-            'cycle_start_date': cycleStartStr,
-            'cycle_end_date': cycleEndStr,
-            'month': cycleEnd.month,
-            'year': cycleEnd.year,
-            'due_date': dueDate.toIso8601String(),
-            'paid_at': null,
-            'amount': amount,
-          });
+            await _supabase.from(_table).insert({
+              'id': paymentId,
+              'tumpang_subscription_id': subscriptionId,
+              'cycle_start_date': cycleStartStr,
+              'cycle_end_date': cycleEndStr,
+              'month': cycleEnd.month,
+              'year': cycleEnd.year,
+              'due_date': dueDate.toIso8601String(),
+              'paid_at': null,
+              'amount': amount,
+            });
+          }
         }
       }
       cycleStart = nextCycleStart;
@@ -180,6 +184,11 @@ class PaymentSupabaseService {
         final missedDays = await _countDriverMissedDays(subscriptionId, cycleStart, cycleEnd, schedule);
         final billableDays = (activeCycleDays - missedDays).clamp(0, activeCycleDays);
         final correctAmount = dailyFee * billableDays;
+
+        if (correctAmount <= 0) {
+          await _supabase.from(_table).delete().eq('id', paymentId);
+          continue;
+        }
 
         final currentAmount = double.tryParse(row['amount']?.toString() ?? '') ?? 0.0;
         if ((correctAmount - currentAmount).abs() > 0.005) {
@@ -243,12 +252,16 @@ class PaymentSupabaseService {
           .select('*, tumpang_subscription(pickup_location, dropoff_location)')
           .inFilter('tumpang_subscription_id', subIds)
           .isFilter('paid_at', null)
+          .gt('amount', 0)
           .order('due_date', ascending: true);
 
       final rows = (response as List).cast<Map<String, dynamic>>();
       await recalculateUnpaidInvoices(rows);
 
-      return rows.map((json) => Payment.fromJson(json)).toList();
+      return rows
+          .where((row) => (double.tryParse(row['amount']?.toString() ?? '') ?? 0.0) > 0)
+          .map(Payment.fromJson)
+          .toList();
     } catch (e, stack) {
       debugPrint('Error fetching pending payments: $e\n$stack');
       rethrow;
