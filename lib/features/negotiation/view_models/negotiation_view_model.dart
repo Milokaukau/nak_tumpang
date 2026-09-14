@@ -536,7 +536,7 @@ class NegotiationViewModel extends ChangeNotifier {
     final req = await getSingleRequest(requestId);
     if (req == null) return null;
 
-    Map<String, dynamic> schedule = {};
+    Map<String, dynamic>? schedule;
     if (!isOffline) {
       try {
         final trip = await _supabase

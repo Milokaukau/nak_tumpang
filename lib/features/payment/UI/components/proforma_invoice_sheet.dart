@@ -96,7 +96,17 @@ class _ProformaInvoiceSheetState extends State<ProformaInvoiceSheet> {
           }
         }
         _missedDateList = dates.toList()..sort();
-        _missedDays = dates.length;
+        // The stored invoice amount is the backend's source of truth. Derive
+        // its deduction from the scheduled-day subtotal so this preview cannot
+        // drift from the amount the passenger will actually be charged.
+        if (_dailyFee > 0) {
+          final subtotal = _activeCycleDays * _dailyFee;
+          _missedDays = ((subtotal - widget.payment.amount) / _dailyFee)
+              .round()
+              .clamp(0, _activeCycleDays);
+        } else {
+          _missedDays = dates.length;
+        }
       } else {
         if (_dailyFee > 0) {
           _activeCycleDays = (widget.payment.amount / _dailyFee).round();
@@ -119,12 +129,9 @@ class _ProformaInvoiceSheetState extends State<ProformaInvoiceSheet> {
     final dueDateStr = _formatDateDdMmYyyy(widget.payment.dueDate);
     final subtotal = _activeCycleDays * _dailyFee;
     final deduction = _missedDays * _dailyFee;
-    // The actual amount due is ALWAYS subtotal minus the deduction we just
-    // computed - never the possibly-stale stored value. This is what
-    // actually gets charged, since paySelectedWithStripe() sums each
-    // Payment's .amount - if the two ever disagreed the preview would be
-    // lying about what the passenger is about to pay.
-    final totalDue = (subtotal - deduction).clamp(0, double.infinity);
+    final totalDue = _loadError != null
+        ? widget.payment.amount
+        : (subtotal - deduction).clamp(0, double.infinity);
 
     final isOverdue = DateTime.now().isAfter(widget.payment.dueDate);
 

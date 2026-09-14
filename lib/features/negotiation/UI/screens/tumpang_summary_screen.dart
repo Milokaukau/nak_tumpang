@@ -152,7 +152,10 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
           }
 
           final request = snapshot.data!['request'] as TumpangRequest;
-          final schedule = (snapshot.data!['schedule'] as Map<String, dynamic>?) ?? {};
+          final schedule = snapshot.data!['schedule'] as Map<String, dynamic>?;
+          if (schedule == null) {
+            return const Center(child: Text('Error loading schedule details.'));
+          }
           final dailyFee = request.fee.value;
           final depositDays = _calculateDepositDays(request.subscriptionDays);
           final startDate = DateTime.tryParse(request.subscriptionStartDate.value);

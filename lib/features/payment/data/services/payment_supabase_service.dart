@@ -199,7 +199,7 @@ class PaymentSupabaseService {
         final subscriptionId = row['tumpang_subscription_id']?.toString();
         final cycleStartStr = row['cycle_start_date']?.toString();
         final cycleEndStr = row['cycle_end_date']?.toString();
-        if (paymentId == null || subscriptionId == null || cycleStartStr == null || cycleEndStr == null) {
+        if (paymentId == null || paymentId.endsWith('_cancel') || subscriptionId == null || cycleStartStr == null || cycleEndStr == null) {
           continue;
         }
 
@@ -231,13 +231,14 @@ class PaymentSupabaseService {
         final correctAmount = dailyFee * billableDays;
 
         if (correctAmount <= 0) {
-          await _supabase.from(_table).delete().eq('id', paymentId);
+          await _supabase.from(_table).delete().eq('id', paymentId).isFilter('paid_at', null);
+          row['amount'] = 0.0;
           continue;
         }
 
         final currentAmount = double.tryParse(row['amount']?.toString() ?? '') ?? 0.0;
         if ((correctAmount - currentAmount).abs() > 0.005) {
-          await _supabase.from(_table).update({'amount': correctAmount}).eq('id', paymentId);
+          await _supabase.from(_table).update({'amount': correctAmount}).eq('id', paymentId).isFilter('paid_at', null);
           row['amount'] = correctAmount;
         }
       } catch (e) {
