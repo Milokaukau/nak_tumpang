@@ -19,7 +19,7 @@ class LocalDbService {
 
     return await openDatabase(
       path,
-      version: 7,
+      version: 8,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -162,6 +162,22 @@ class LocalDbService {
           FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
         )
       ''');
+    }
+
+    if (oldVersion < 8) {
+      // Preventive fix, same class of bug as the payout_history saga
+      // above: Supabase's real payments table has a payment_intent_id
+      // text column (nullable) that this local cache table never had.
+      // Nothing hits this today — PaymentViewModel.fetchAllPayments()
+      // only ever caches Payment.toJson(), a hand-picked field set that
+      // happens not to include payment_intent_id — but that's
+      // incidental, not guaranteed: the moment any code path caches a
+      // raw Supabase row for this table (a bare .select(), the same
+      // mistake payout_history's fetch path made), every write would
+      // throw "table payments has no column named payment_intent_id".
+      // Adding it now, nullable, closes that gap before it's needed
+      // rather than after.
+      await db.execute('ALTER TABLE payments ADD COLUMN payment_intent_id TEXT');
     }
   }
 
@@ -349,6 +365,7 @@ class LocalDbService {
         amount REAL NOT NULL DEFAULT 0.00,
         cycle_start_date TEXT,
         cycle_end_date TEXT,
+        payment_intent_id TEXT,
         FOREIGN KEY (tumpang_subscription_id) REFERENCES tumpang_subscription (id) ON DELETE CASCADE
       )
     ''');
