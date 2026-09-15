@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:nak_tumpang/core/entities/payment.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
-import 'package:nak_tumpang/features/payment/UI/components/proforma_invoice_sheet.dart';
+import 'package:nak_tumpang/features/payment/UI/components/invoice_sheet.dart';
 
 class TumpangPaymentCard extends StatelessWidget {
   final Payment payment;
@@ -63,7 +63,7 @@ class TumpangPaymentCard extends StatelessWidget {
                     const SizedBox(height: 6),
                     InkWell(
                       // Stop the tap from bubbling up and checking/unchecking the box
-                      onTap: () => ProformaInvoiceSheet.show(context, payment),
+                      onTap: () => InvoiceSheet.show(context, payment),
                       child: const Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [

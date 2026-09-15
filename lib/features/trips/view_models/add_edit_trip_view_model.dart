@@ -21,14 +21,12 @@ class AddEditTripViewModel extends ChangeNotifier {
   int toDay = 5;
 
   TimeOfDay departTime = const TimeOfDay(hour: 8, minute: 0);
-  TimeOfDay arriveTime = const TimeOfDay(hour: 9, minute: 0);
 
   bool isSubmitting = false;
   String? errorMessage;
   String? nameError;
   String? fromError;
   String? toError;
-  String? timeError;
   String? dayError;
 
   AddEditTripViewModel(this.role, {this.existingTrip}) {
@@ -39,20 +37,21 @@ class AddEditTripViewModel extends ChangeNotifier {
 
   int _minutesOf(TimeOfDay t) => t.hour * 60 + t.minute;
 
-  // Same-location threshold, in meters. Not exact-equality: a location
-  // picked by tapping the map (see ORSService.reverseGeocode) keeps the
-  // raw tapped coordinates rather than snapping to a venue's official
-  // point, so two taps on the same real place almost never land on the
-  // exact same lat/lng — exact equality let genuinely-duplicate
-  // pickup/drop-off pairs through as long as they came from separate
-  // taps. Anything picked via search (ORSService.geocodeAutocomplete)
-  // returns the same official coordinates every time, so those still
-  // match at 0m and are caught either way.
+  TimeOfDay _addMinutes(TimeOfDay t, int minutes) {
+    final total = (_minutesOf(t) + minutes) % (24 * 60);
+    return TimeOfDay(hour: total ~/ 60, minute: total % 60);
+  }
+
   static const double _sameLocationThresholdMeters = 50;
 
-  /// Shared by setFromPlace/setToPlace (live, as soon as both places are
-  /// picked) and _validate() (final check before submit) — one place
-  /// for this rule instead of two copies that could drift apart.
+  // Passengers no longer enter a desired dropoff time; the DB column is
+  // NOT NULL, so we derive it from their pickup time instead.
+  static const int _dropoffBufferMinutes = 30;
+
+  // Same story for drivers: arrival_time is NOT NULL but no longer has an
+  // input field, so it's derived from departure time instead.
+  static const int _arrivalBufferMinutes = 30;
+
   void _revalidateLocations() {
     if (fromPlace == null || toPlace == null) return;
     final distance = MatchingUtils.calculateDistance(
@@ -69,25 +68,11 @@ class AddEditTripViewModel extends ChangeNotifier {
     }
   }
 
-  /// Shared by setDepartTime/setArriveTime (live) and _validate() (final
-  /// check) — arrival has to be chronologically after departure, not
-  /// just "not exactly equal" (the old check let e.g. an 8am arrival
-  /// with a 5pm departure through).
-  void _revalidateTime() {
-    if (_minutesOf(arriveTime) <= _minutesOf(departTime)) {
-      timeError = 'Arrival time must be after departure time';
-    } else {
-      timeError = null;
-    }
-  }
-
   void _initFromExistingTrip() {
     nameController.text = existingTrip!['trip_name'] ?? '';
 
     final rawDepart = role == 'driver' ? existingTrip!['depart_time'] : existingTrip!['desired_pickup_time'];
-    final rawArrive = role == 'driver' ? existingTrip!['arrival_time'] : existingTrip!['desired_dropoff_time'];
     if (rawDepart != null) departTime = _parseTime(rawDepart);
-    if (rawArrive != null) arriveTime = _parseTime(rawArrive);
 
     fromDay = _findFirstActiveDay(existingTrip!);
     toDay = _findLastActiveDay(existingTrip!);
@@ -155,10 +140,6 @@ class AddEditTripViewModel extends ChangeNotifier {
   void clearFromPlace() {
     if (fromPlace == null) return;
     fromPlace = null;
-    // _revalidateLocations() early-returns once either place is null, so
-    // it can never clear this itself — the same-location conflict is
-    // moot with only one place picked, but any other toError (e.g. "pick
-    // a valid destination") is still real and stays.
     if (toError == "Pickup and drop-off can't be the same location") {
       toError = null;
     }
@@ -175,9 +156,6 @@ class AddEditTripViewModel extends ChangeNotifier {
   void clearToPlace() {
     if (toPlace == null) return;
     toPlace = null;
-    // Same reasoning as clearFromPlace — the same-location conflict no
-    // longer applies once toPlace is unset, but leave any other toError
-    // (e.g. "pick a valid destination") alone.
     if (toError == "Pickup and drop-off can't be the same location") {
       toError = null;
     }
@@ -196,13 +174,6 @@ class AddEditTripViewModel extends ChangeNotifier {
 
   void setDepartTime(TimeOfDay time) {
     departTime = time;
-    _revalidateTime();
-    notifyListeners();
-  }
-
-  void setArriveTime(TimeOfDay time) {
-    arriveTime = time;
-    _revalidateTime();
     notifyListeners();
   }
 
@@ -211,7 +182,6 @@ class AddEditTripViewModel extends ChangeNotifier {
     nameError = null;
     fromError = null;
     toError = null;
-    timeError = null;
 
     if (nameController.text.trim().isEmpty) {
       nameError = 'Trip name is required';
@@ -231,14 +201,10 @@ class AddEditTripViewModel extends ChangeNotifier {
     _revalidateLocations();
     if (toError != null) isValid = false;
 
-    _revalidateTime();
-    if (timeError != null) isValid = false;
-
     notifyListeners();
     return isValid;
   }
 
-  // --- RETURN PAYLOAD INSTEAD OF BOOL ---
   Future<Map<String, dynamic>?> submit() async {
     if (!_validate()) return null;
 
@@ -257,7 +223,6 @@ class AddEditTripViewModel extends ChangeNotifier {
       }
 
       final departStr = formatTime(departTime);
-      final arriveStr = formatTime(arriveTime);
 
       final days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
       final activeDaysMap = { for (var d in days) 'active_$d': false };
@@ -276,14 +241,13 @@ class AddEditTripViewModel extends ChangeNotifier {
         ...activeDaysMap,
       };
 
-      // Only attach Primary Key directly for NEW inserts
       if (!isEditing) {
         payload['id'] = tripId;
       }
 
       if (role == 'driver') {
         payload['depart_time'] = departStr;
-        payload['arrival_time'] = arriveStr;
+        payload['arrival_time'] = formatTime(_addMinutes(departTime, _arrivalBufferMinutes));
         payload['depart_name'] = fromPlace!.label;
         payload['arrival_name'] = toPlace!.label;
         payload['depart_lat'] = fromPlace!.latitude;
@@ -292,7 +256,7 @@ class AddEditTripViewModel extends ChangeNotifier {
         payload['arrival_lng'] = toPlace!.longitude;
       } else {
         payload['desired_pickup_time'] = departStr;
-        payload['desired_dropoff_time'] = arriveStr;
+        payload['desired_dropoff_time'] = formatTime(_addMinutes(departTime, _dropoffBufferMinutes));
         payload['pickup_name'] = fromPlace!.label;
         payload['dropoff_name'] = toPlace!.label;
         payload['pickup_lat'] = fromPlace!.latitude;
@@ -303,14 +267,14 @@ class AddEditTripViewModel extends ChangeNotifier {
 
       if (isEditing) {
         await _tripService.updateTrip(tripId, payload, role);
-        payload['id'] = tripId; // <--- Re-inject the ID so the local state tracker can find it!
+        payload['id'] = tripId;
       } else {
         await _tripService.insertTrip(payload, role);
       }
 
       isSubmitting = false;
       notifyListeners();
-      return payload; // Return the saved payload!
+      return payload;
 
     } on PostgrestException catch (e) {
       isSubmitting = false;

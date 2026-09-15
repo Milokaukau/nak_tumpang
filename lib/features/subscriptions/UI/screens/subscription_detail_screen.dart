@@ -567,7 +567,7 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
             SizedBox(
               width: double.infinity,
               child: BaseButton(
-                text: 'Extend Your Journey?',
+                text: 'Extend Your Subscription?',
                 onPressed: () => _handleExtend(context),
               ),
             ),

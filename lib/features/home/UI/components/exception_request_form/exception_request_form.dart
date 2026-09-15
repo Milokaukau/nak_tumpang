@@ -24,6 +24,10 @@ class ExceptionRequestForm extends StatelessWidget {
   final ValueChanged<String> onDateError;
   final String? errorText;
 
+  /// Reasons that allow requesting an exception starting TODAY. Any
+  /// reason not in this list requires at least 1 day of lead time.
+  final List<String> emergencyReasons;
+
   const ExceptionRequestForm({
     super.key,
     required this.dateRangeLabel,
@@ -46,29 +50,31 @@ class ExceptionRequestForm extends StatelessWidget {
     this.isSubmitting = false,
     this.minDate,
     this.maxDate,
+    this.emergencyReasons = const [],
   });
 
-  Future<void> _pickDate(BuildContext context, bool isStart) async {
+  bool get _isEmergency => selectedReason != null && emergencyReasons.contains(selectedReason);
+
+  DateTime _minLeadDate() {
     final today = DateTime.now();
     final todayDateOnly = DateTime(today.year, today.month, today.day);
+    return _isEmergency ? todayDateOnly : todayDateOnly.add(const Duration(days: 1));
+  }
 
-    final effectiveFirstDate = (minDate != null && minDate!.isAfter(todayDateOnly))
+  Future<void> _pickDate(BuildContext context, bool isStart) async {
+    final minLeadDate = _minLeadDate();
+
+    final effectiveFirstDate = (minDate != null && minDate!.isAfter(minLeadDate))
         ? minDate!
-        : todayDateOnly;
+        : minLeadDate;
 
     final effectiveLastDate = maxDate ?? DateTime(2100);
 
-    // Guard: if the valid range is empty (e.g. subscription already ended,
-    // or maxDate is somehow before effectiveFirstDate), there's nothing
-    // pickable — don't open the picker at all.
     if (effectiveLastDate.isBefore(effectiveFirstDate)) {
       onDateError('No valid dates are available to select.');
       return;
     }
 
-    // Clamp the initial date into range, since a previously-saved value
-    // (e.g. editing an existing exception) may fall outside today's
-    // selectable window.
     final rawInitial = (isStart ? startDate : endDate) ?? effectiveFirstDate;
     DateTime initial = rawInitial;
     if (initial.isBefore(effectiveFirstDate)) initial = effectiveFirstDate;
@@ -85,7 +91,6 @@ class ExceptionRequestForm extends StatelessWidget {
     if (picked != null) {
       final purePicked = DateTime(picked.year, picked.month, picked.day);
 
-      // validation: subscription period bounds check
       if (minDate != null && maxDate != null) {
         final pureMin = DateTime(minDate!.year, minDate!.month, minDate!.day);
         final pureMax = DateTime(maxDate!.year, maxDate!.month, maxDate!.day);
@@ -96,7 +101,6 @@ class ExceptionRequestForm extends StatelessWidget {
         }
       }
 
-      // validation: end date can't be before the chosen start date
       if (!isStart && startDate != null) {
         final pureStart = DateTime(startDate!.year, startDate!.month, startDate!.day);
         if (purePicked.isBefore(pureStart)) {
@@ -107,6 +111,25 @@ class ExceptionRequestForm extends StatelessWidget {
 
       isStart ? onStartDateChanged(picked) : onEndDateChanged(picked);
     }
+  }
+
+  /// Final gate at submission time — catches the case where a date was
+  /// picked while an emergency reason was selected, then the reason was
+  /// changed afterward to a non-emergency one without re-touching the date.
+  void _handleConfirm() {
+    if (startDate != null) {
+      final pureStart = DateTime(startDate!.year, startDate!.month, startDate!.day);
+      final minLeadDate = _minLeadDate();
+
+      if (pureStart.isBefore(minLeadDate)) {
+        onDateError(_isEmergency
+            ? 'Start date cannot be before today.'
+            : 'Exceptions must be requested at least 1 day in advance. '
+            'Select an emergency reason if you need to request for today.');
+        return;
+      }
+    }
+    onConfirm();
   }
 
   String _formatDate(DateTime? date) {
@@ -148,6 +171,13 @@ class ExceptionRequestForm extends StatelessWidget {
             ),
           ),
         ),
+        if (emergencyReasons.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Text(
+            'Same-day requests are only allowed for: ${emergencyReasons.join(', ')}.',
+            style: const TextStyle(fontSize: 11, color: AppColors.greyText, fontStyle: FontStyle.italic),
+          ),
+        ],
         if (selectedReason == 'Others') ...[
           const SizedBox(height: 12),
           TextField(
@@ -206,7 +236,7 @@ class ExceptionRequestForm extends StatelessWidget {
             Expanded(
               child: BaseButton(
                 text: isSubmitting ? 'Submitting...' : confirmLabel,
-                onPressed: isSubmitting ? () {} : onConfirm,
+                onPressed: isSubmitting ? () {} : _handleConfirm,
               ),
             ),
           ],

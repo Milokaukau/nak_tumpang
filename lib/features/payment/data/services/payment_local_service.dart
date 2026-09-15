@@ -51,6 +51,20 @@ class PaymentLocalService {
     );
   }
 
+  // DELETE specific rows by id — used to purge "zombie" invoices (premature
+  // or zeroed-out bills) that PaymentSupabaseService.recalculateUnpaidInvoices
+  // just deleted remotely, so they don't resurface from the offline cache
+  // the next time the app is opened without a network connection.
+  Future<void> deletePaymentsByIds(List<String> ids) async {
+    if (ids.isEmpty) return;
+    final db = await _dbService.database;
+    final batch = db.batch();
+    for (final id in ids) {
+      batch.delete('payments', where: 'id = ?', whereArgs: [id]);
+    }
+    await batch.commit(noResult: true);
+  }
+
   // DELETE to clear cache upon logout
   Future<void> clearPaymentsCache() async {
     final db = await _dbService.database;

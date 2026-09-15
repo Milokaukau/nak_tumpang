@@ -119,6 +119,7 @@ class NoNeedFetchPanel extends StatelessWidget {
           reasonOptions: HomeViewModel.passengerReasons,
           selectedReason: vm.exceptionReason,
           onReasonChanged: vm.setExceptionReason,
+          emergencyReasons: const ['Personal emergency'],
           customReasonController: vm.exceptionCustomReasonController,
           infoBoxColor: AppColors.successGreenBg,
           infoBoxTextColor: AppColors.successGreenText,
