@@ -17,41 +17,71 @@ class PayoutService {
   }
 
   // filtered server-side by date range (not full)
+  // Points now come from actually-settled payments (driver_net_amount,
+  // already RM1 platform fee deducted by settle_payments()), not from
+  // tumpang_request.status — that field tracks whether a negotiation was
+  // finalized, not whether the passenger paid.
+  // payment_type = 'monthly' excludes the subscription deposit row and any
+  // cancellation/refund adjustment rows — only actually-billed cycles should
+  // count toward this month's points.
   Future<List<Map<String, dynamic>>> fetchCompletedTripsInRange(
       String userId, {
         required DateTime start,
         required DateTime end,
       }) async {
     final response = await _supabase
-        .from('tumpang_request')
-        .select('id, fee, sub_start_date, driver_trips!inner(user_id)')
-        .eq('driver_trips.user_id', userId)
-        .eq('status', 'completed')
-        .gte('sub_start_date', start.toIso8601String())
-        .lt('sub_start_date', end.toIso8601String());
+        .from('payments')
+        .select('id, driver_net_amount, paid_at, tumpang_subscription!inner(driver_trips!inner(user_id))')
+        .eq('tumpang_subscription.driver_trips.user_id', userId)
+        .eq('payment_type', 'monthly')
+        .gte('paid_at', start.toIso8601String())
+        .lt('paid_at', end.toIso8601String())
+    // paid_at alone isn't enough to call a row "settled" — it can be
+    // set without credited_to_driver_at/driver_net_amount also being
+    // populated on rows predating settle_payments(), which would
+    // otherwise count as a zero-value trip here.
+        .not('credited_to_driver_at', 'is', null)
+        .not('driver_net_amount', 'is', null);
 
     return List<Map<String, dynamic>>.from(response);
   }
 
   // capped server-side with .limit() rather than fetching whole history and only using the first 10 client-side
+  // Each row is a settled payment (an actual paid invoice), joined through
+  // to the subscription for pickup/dropoff and the passenger's name — this
+  // is "the actual completed [and paid] trip" backing each recent-trip entry.
+  // payment_type = 'monthly' — same reasoning as fetchCompletedTripsInRange:
+  // deposits and cancellation/refund rows aren't trips and shouldn't show here.
   Future<List<Map<String, dynamic>>> fetchRecentCompletedTrips(
       String userId, {
         int limit = 10,
       }) async {
     final response = await _supabase
-        .from('tumpang_request')
+        .from('payments')
         .select('''
           id,
-          fee,
-          pickup_name,
-          dropoff_name,
-          sub_start_date,
-          driver_trips!inner(user_id),
-          passenger_trips(user_id, users(name))
+          amount,
+          platform_fee,
+          driver_net_amount,
+          cycle_start_date,
+          cycle_end_date,
+          paid_at,
+          tumpang_subscription!inner(
+            pickup_location,
+            dropoff_location,
+            fee,
+            driver_trips!inner(user_id, trip_name),
+            passenger_trips(user_id, users(name))
+          )
         ''')
-        .eq('driver_trips.user_id', userId)
-        .eq('status', 'completed')
-        .order('sub_start_date', ascending: false)
+        .eq('tumpang_subscription.driver_trips.user_id', userId)
+        .eq('payment_type', 'monthly')
+    // Same settlement-field reasoning as fetchCompletedTripsInRange
+    // above — paid_at alone doesn't guarantee this row was actually
+    // processed by settle_payments().
+        .not('credited_to_driver_at', 'is', null)
+        .not('driver_net_amount', 'is', null)
+        .order('paid_at', ascending: false)
         .limit(limit);
 
     return List<Map<String, dynamic>>.from(response);

@@ -222,6 +222,7 @@ class PaymentSupabaseService {
               'due_date': dueDate.toIso8601String(),
               'paid_at': null,
               'amount': amount,
+              'payment_type': 'monthly',
             });
           }
         }
@@ -489,12 +490,12 @@ class PaymentSupabaseService {
     }
   }
 
+  // Was a raw `update paid_at`. Now routed through settle_payments() so
+  // that marking a payment paid and crediting the responsible driver's
+  // payout balance (net of the platform fee) happen atomically — see
+  // supabase/migrations/settle_payments.sql.
   Future<void> completePaymentBatch(List<String> paymentIds) async {
-    final nowIso = DateTime.now().toIso8601String();
-    await _supabase
-        .from(_table)
-        .update({'paid_at': nowIso})
-        .inFilter('id', paymentIds);
+    await _supabase.rpc('settle_payments', params: {'p_payment_ids': paymentIds});
   }
 
   // =========================================================================
@@ -570,6 +571,7 @@ class PaymentSupabaseService {
         'amount': payableAmount,
         'cycle_start_date': todayStr,
         'cycle_end_date': todayStr,
+        'payment_type': 'cancellation',
       });
     } else if (payableAmount < 0) {
       final refundId = 'pay_${now.millisecondsSinceEpoch}_refund';
@@ -583,6 +585,7 @@ class PaymentSupabaseService {
         'amount': payableAmount,
         'cycle_start_date': todayStr,
         'cycle_end_date': todayStr,
+        'payment_type': 'refund',
       });
       await _supabase.from('tumpang_subscription')
           .update({'deposit_refunded': true})

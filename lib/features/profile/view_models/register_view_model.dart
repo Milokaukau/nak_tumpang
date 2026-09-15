@@ -257,12 +257,9 @@ class RegisterViewModel extends ChangeNotifier {
         rethrow;
       }
 
-      // The remote account/driver-profile rows have committed by this
-      // point — seed the local cache separately, outside the rollback
-      // scope above. A SQLite-only failure here must never delete the
-      // license file the remote write already committed to, or report
-      // a successful registration as failed; the app's next successful
-      // Supabase load will simply overwrite this cache entry anyway.
+      // remote account committed by this point, local cache seeded separately
+      // sqlite failure cannot delete license file the remote write already committed to
+      // supabase will overwrite this cache entry
       try {
         await _localService.cacheUserProfile(
           userId: newUserId,

@@ -177,7 +177,7 @@ class _WalletTab extends StatelessWidget {
                 const SizedBox(width: 12),
                 Expanded(
                   child: _StatBox(
-                    label: 'Trips this month',
+                    label: 'Payments this month',
                     value: '${vm.tripsCompletedCount}',
                   ),
                 ),
@@ -185,14 +185,14 @@ class _WalletTab extends StatelessWidget {
             ),
             const SizedBox(height: 24),
             const Text(
-              'Recent trips',
+              'Recent transactions',
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
             ),
             const SizedBox(height: 8),
             if (vm.recentTrips.isEmpty)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 16),
-                child: Text('No completed trips yet.', style: TextStyle(color: AppColors.greyText)),
+                child: Text('No transactions yet.', style: TextStyle(color: AppColors.greyText)),
               )
             else
               ...vm.recentTrips.map((trip) => _RecentTripTile(

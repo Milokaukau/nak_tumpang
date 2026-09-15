@@ -1,5 +1,6 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:math';
+import 'package:flutter/foundation.dart';
 
 class RewardsSupabaseService {
   final _supabase = Supabase.instance.client;
@@ -149,11 +150,12 @@ class RewardsSupabaseService {
     required Map<String, dynamic> voucher,
   }) async {
     final requiredPoints = (voucher['req_points'] as num).toInt();
+    final voucherId = voucher['id'];
 
     try {
       // Block re-redemption of the same voucher by the same user via points
-// (a Goyang win of the same voucher doesn't count — that's free, not
-// paid for with points, so it shouldn't block a real redemption).
+      // (a Goyang win of the same voucher doesn't count — that's free, not
+      // paid for with points, so it shouldn't block a real redemption).
       final existing = await _supabase
           .from('user_vouchers')
           .select('id, code')
@@ -164,6 +166,21 @@ class RewardsSupabaseService {
           .any((r) => !(r['code']?.toString().startsWith('GOYANG-') ?? false));
       if (alreadyPointRedeemed) {
         print('User already redeemed this voucher via points.');
+        return false;
+      }
+
+      // NEW: re-check current stock right before committing, in case it
+      // changed since the voucher list was last fetched. stock_quantity of
+      // null means unlimited stock — only enforce the check when it's set.
+      final freshVoucher = await _supabase
+          .from('vouchers')
+          .select('stock_quantity')
+          .eq('id', voucherId)
+          .maybeSingle();
+
+      final currentStock = freshVoucher?['stock_quantity'];
+      if (currentStock != null && (currentStock as num).toInt() <= 0) {
+        print('Voucher $voucherId is out of stock.');
         return false;
       }
 
@@ -199,8 +216,18 @@ class RewardsSupabaseService {
         remaining -= deduct;
       }
 
+      // NEW: decrement stock now that points have been successfully deducted.
+      if (currentStock != null) {
+        final updateResult = await _supabase
+            .from('vouchers')
+            .update({'stock_quantity': (currentStock as num).toInt() - 1})
+            .eq('id', voucherId)
+            .select();
+
+        debugPrint('🔍 Stock update result: $updateResult, currentStock was: $currentStock, voucherId: $voucherId');
+      }
+
       // Create the voucher redemption record
-      final voucherId = voucher['id'];
       final validityDays = (voucher['validity_days'] as num).toInt();
       final now = DateTime.now();
       final expiredAt = now.add(Duration(days: validityDays));
