@@ -126,12 +126,15 @@ class _InvoiceSheetState extends State<InvoiceSheet> {
     final dueDateStr = _formatDateDdMmYyyy(widget.payment.dueDate);
     final subtotal = _activeCycleDays * _dailyFee;
     final deduction = _missedDays * _dailyFee;
-    final totalDue = _loadError != null
-        ? widget.payment.amount
-        : (subtotal - deduction).clamp(0, double.infinity);
 
     final isPaid = widget.payment.paidAt != null;
     final isOverdue = !isPaid && DateTime.now().isAfter(widget.payment.dueDate);
+
+    final totalDue = isPaid
+        ? widget.payment.amount
+        : (_loadError != null
+        ? widget.payment.amount
+        : (subtotal - deduction).clamp(0, double.infinity));
 
     String billingPeriodText = widget.payment.dateRange;
     if (widget.payment.cycleStartDate != null && widget.payment.cycleEndDate != null) {
@@ -304,7 +307,7 @@ class _InvoiceSheetState extends State<InvoiceSheet> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: 100, // Fixed width keeps all the colons perfectly aligned
+            width: 100,
             child: Text(
               label,
               style: const TextStyle(color: Colors.grey, fontSize: 13, height: 1.5),
@@ -321,8 +324,8 @@ class _InvoiceSheetState extends State<InvoiceSheet> {
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
                 color: valueColor ?? AppColors.black,
-                height: 1.5, // Much cleaner line-height for wrapped addresses
-                letterSpacing: 0.2, // Subtle spacing for better readability
+                height: 1.5,
+                letterSpacing: 0.2,
               ),
             ),
           ),
