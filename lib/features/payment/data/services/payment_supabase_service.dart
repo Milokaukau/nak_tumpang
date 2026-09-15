@@ -6,6 +6,10 @@ class PaymentSupabaseService {
   final SupabaseClient _supabase = Supabase.instance.client;
   final String _table = 'payments';
 
+  // Helper to safely advance the calendar date to midnight, avoiding 24-hour DST traps
+  DateTime _nextCalendarDate(DateTime date) =>
+      DateTime(date.year, date.month, date.day + 1);
+
   Future<Map<String, dynamic>> fetchProformaInvoiceDetails({
     required String subscriptionId,
     DateTime? cycleStart,
@@ -139,7 +143,7 @@ class PaymentSupabaseService {
       DateTime nextCycleStart = cycleEnd.add(const Duration(days: 1));
 
       // Billing date is ALWAYS cycle end date + 1 day
-      final billingDate = cycleEnd.add(const Duration(days: 1));
+      final billingDate = _nextCalendarDate(cycleEnd);
 
       // ONLY generate the invoice if today has reached the billing date
       if (!today.isBefore(billingDate)) {
@@ -218,7 +222,7 @@ class PaymentSupabaseService {
 
         // 1. CLEANUP PREMATURE BILLS SAFELY
         if (cycleEnd != null) {
-          final billingDate = cycleEnd.add(const Duration(days: 1));
+          final billingDate = _nextCalendarDate(cycleEnd);
 
           if (today.isBefore(billingDate)) {
             // Await DB deletion FIRST. Only modify UI map if it succeeds.
@@ -234,7 +238,7 @@ class PaymentSupabaseService {
         int expectedYear;
 
         if (cycleEnd != null) {
-          final billingDate = cycleEnd.add(const Duration(days: 1));
+          final billingDate = _nextCalendarDate(cycleEnd);
           expectedDueDate = DateTime(billingDate.year, billingDate.month + 1, 1);
           expectedMonth = billingDate.month;
           expectedYear = billingDate.year;
@@ -373,8 +377,10 @@ class PaymentSupabaseService {
           .gt('amount', 0)
           .order('due_date', ascending: true);
 
+      // Map copy so Dart allows local edits when hiding bills
       final rows = (response as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
 
+      // Cleans data & enforces strict UI corrections first
       await recalculateUnpaidInvoices(rows);
 
       return rows
