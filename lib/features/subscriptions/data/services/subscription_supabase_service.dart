@@ -338,7 +338,7 @@ class SubscriptionSupabaseService {
       return normalizeSubscription(response, role);
     } catch (e) {
       print('Error in fetchSubscriptionById: $e');
-      return null;
+      rethrow;
     }
   }
 
