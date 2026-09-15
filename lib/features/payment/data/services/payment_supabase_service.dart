@@ -51,7 +51,6 @@ class PaymentSupabaseService {
     };
   }
 
-  /// Returns whether [date] is one of the passenger's scheduled ride days.
   bool _isDayActive(DateTime date, Map<String, dynamic> schedule) {
     switch (date.weekday) {
       case 1: return schedule['active_monday'] == true;
@@ -65,9 +64,6 @@ class PaymentSupabaseService {
     }
   }
 
-  /// Counts driver-caused missed days within [cycleStart]..[cycleEnd].
-  /// Passenger-initiated exceptions ("no need fetch") are NOT deducted -
-  /// only the driver failing to provide the ride reduces what's billed.
   Future<int> _countDriverMissedDays(
       String subscriptionId,
       DateTime cycleStart,
@@ -129,7 +125,6 @@ class PaymentSupabaseService {
     final depositEndDate = startDate.add(const Duration(days: 59));
     if (depositEndDate.isAfter(endDate)) return;
 
-    // FIX: Normalize 'today' to a pure calendar date so it doesn't trigger at 12:00 AM on the final day
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     DateTime cycleStart = depositEndDate.add(const Duration(days: 1));
@@ -143,7 +138,11 @@ class PaymentSupabaseService {
 
       DateTime nextCycleStart = cycleEnd.add(const Duration(days: 1));
 
-      if (today.isAfter(cycleEnd)) {
+      // Billing date is ALWAYS cycle end date + 1 day
+      final billingDate = cycleEnd.add(const Duration(days: 1));
+
+      // ONLY generate the invoice if today has reached the billing date
+      if (!today.isBefore(billingDate)) {
         final cycleStartStr = cycleStart.toIso8601String().split('T').first;
         final cycleEndStr = cycleEnd.toIso8601String().split('T').first;
 
@@ -170,10 +169,9 @@ class PaymentSupabaseService {
           final billableDays = (activeCycleDays - missedDays).clamp(0, activeCycleDays);
           final amount = dailyFee * billableDays;
 
-          // A cycle with no scheduled rides, or one fully covered by
-          // driver exceptions, is not billable and must not create an invoice.
           if (amount > 0) {
-            final dueDate = DateTime(cycleEnd.year, cycleEnd.month + 1, 1);
+            // Due date is ALWAYS fixed to the 1st of the next month following billing date
+            final dueDate = DateTime(billingDate.year, billingDate.month + 1, 1);
             final paymentId = 'pay_${DateTime.now().millisecondsSinceEpoch}_${cycleStartStr.replaceAll('-', '')}';
 
             await _supabase.from(_table).insert({
@@ -181,8 +179,8 @@ class PaymentSupabaseService {
               'tumpang_subscription_id': subscriptionId,
               'cycle_start_date': cycleStartStr,
               'cycle_end_date': cycleEndStr,
-              'month': cycleEnd.month,
-              'year': cycleEnd.year,
+              'month': billingDate.month,
+              'year': billingDate.year,
               'due_date': dueDate.toIso8601String(),
               'paid_at': null,
               'amount': amount,
@@ -195,53 +193,117 @@ class PaymentSupabaseService {
   }
 
   Future<void> recalculateUnpaidInvoices(List<Map<String, dynamic>> unpaidPaymentRows) async {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
     for (final row in unpaidPaymentRows) {
       try {
         final paymentId = row['id']?.toString();
         final subscriptionId = row['tumpang_subscription_id']?.toString();
+
+        if (paymentId == null || paymentId.endsWith('_cancel') || subscriptionId == null) {
+          continue;
+        }
+
         final cycleStartStr = row['cycle_start_date']?.toString();
         final cycleEndStr = row['cycle_end_date']?.toString();
-        if (paymentId == null || paymentId.endsWith('_cancel') || subscriptionId == null || cycleStartStr == null || cycleEndStr == null) {
-          continue;
+
+        DateTime? cycleStart;
+        DateTime? cycleEnd;
+
+        if (cycleStartStr != null && cycleEndStr != null) {
+          cycleStart = DateTime.tryParse(cycleStartStr);
+          cycleEnd = DateTime.tryParse(cycleEndStr);
         }
 
-        final cycleStart = DateTime.tryParse(cycleStartStr);
-        final cycleEnd = DateTime.tryParse(cycleEndStr);
-        if (cycleStart == null || cycleEnd == null) continue;
+        // 1. FAULT-TOLERANT DELETION FOR PREMATURE BILLS
+        if (cycleEnd != null) {
+          final billingDate = cycleEnd.add(const Duration(days: 1));
 
-        final sub = await _supabase
-            .from('tumpang_subscription')
-            .select('fee, passenger_trip_id')
-            .eq('id', subscriptionId)
-            .maybeSingle();
-        final dailyFee = double.tryParse(sub?['fee']?.toString() ?? '') ?? 0.0;
-        final passengerTripId = sub?['passenger_trip_id']?.toString();
-        if (passengerTripId == null) continue;
-        final schedule = await _supabase
-            .from('passenger_trips')
-            .select('active_monday, active_tuesday, active_wednesday, active_thursday, active_friday, active_saturday, active_sunday')
-            .eq('id', passengerTripId)
-            .maybeSingle();
-        if (schedule == null) continue;
-
-        var activeCycleDays = 0;
-        for (var date = cycleStart; !date.isAfter(cycleEnd); date = date.add(const Duration(days: 1))) {
-          if (_isDayActive(date, schedule)) activeCycleDays++;
-        }
-        final missedDays = await _countDriverMissedDays(subscriptionId, cycleStart, cycleEnd, schedule);
-        final billableDays = (activeCycleDays - missedDays).clamp(0, activeCycleDays);
-        final correctAmount = dailyFee * billableDays;
-
-        if (correctAmount <= 0) {
-          await _supabase.from(_table).delete().eq('id', paymentId).isFilter('paid_at', null);
-          row['amount'] = 0.0;
-          continue;
+          if (today.isBefore(billingDate)) {
+            // Modify local UI state FIRST so it disappears instantly
+            row['amount'] = 0.0;
+            try {
+              await _supabase.from(_table).delete().eq('id', paymentId).isFilter('paid_at', null);
+            } catch (e) {
+              debugPrint('Supabase blocked delete for premature bill $paymentId: $e');
+            }
+            continue; // Skip the rest for this row
+          }
         }
 
-        final currentAmount = double.tryParse(row['amount']?.toString() ?? '') ?? 0.0;
-        if ((correctAmount - currentAmount).abs() > 0.005) {
-          await _supabase.from(_table).update({'amount': correctAmount}).eq('id', paymentId).isFilter('paid_at', null);
-          row['amount'] = correctAmount;
+        // 2. FAULT-TOLERANT DUE DATE REPAIR
+        DateTime expectedDueDate;
+        if (cycleEnd != null) {
+          final billingDate = cycleEnd.add(const Duration(days: 1));
+          expectedDueDate = DateTime(billingDate.year, billingDate.month + 1, 1);
+        } else {
+          // Fallback for corrupt legacy rows missing cycle dates
+          final m = int.tryParse(row['month']?.toString() ?? '') ?? today.month;
+          final y = int.tryParse(row['year']?.toString() ?? '') ?? today.year;
+          expectedDueDate = DateTime(y, m + 1, 1);
+        }
+
+        final expectedDueDateStr = expectedDueDate.toIso8601String();
+        final currentDueDateStr = row['due_date']?.toString();
+        final updates = <String, dynamic>{};
+
+        if (currentDueDateStr == null || !currentDueDateStr.startsWith(expectedDueDateStr.split('T').first)) {
+          updates['due_date'] = expectedDueDateStr;
+          // Apply local UI state FIRST
+          row['due_date'] = expectedDueDateStr;
+        }
+
+        // 3. RECALCULATE AMOUNTS
+        if (cycleStart != null && cycleEnd != null) {
+          final sub = await _supabase
+              .from('tumpang_subscription')
+              .select('fee, passenger_trip_id')
+              .eq('id', subscriptionId)
+              .maybeSingle();
+
+          final passengerTripId = sub?['passenger_trip_id']?.toString();
+          if (passengerTripId != null) {
+            final schedule = await _supabase
+                .from('passenger_trips')
+                .select('active_monday, active_tuesday, active_wednesday, active_thursday, active_friday, active_saturday, active_sunday')
+                .eq('id', passengerTripId)
+                .maybeSingle();
+
+            if (schedule != null) {
+              final dailyFee = double.tryParse(sub?['fee']?.toString() ?? '') ?? 0.0;
+              var activeCycleDays = 0;
+              for (var date = cycleStart; !date.isAfter(cycleEnd); date = date.add(const Duration(days: 1))) {
+                if (_isDayActive(date, schedule)) activeCycleDays++;
+              }
+              final missedDays = await _countDriverMissedDays(subscriptionId, cycleStart, cycleEnd, schedule);
+              final billableDays = (activeCycleDays - missedDays).clamp(0, activeCycleDays);
+              final correctAmount = dailyFee * billableDays;
+
+              if (correctAmount <= 0) {
+                row['amount'] = 0.0;
+                try {
+                  await _supabase.from(_table).delete().eq('id', paymentId).isFilter('paid_at', null);
+                } catch (_) {}
+                continue;
+              }
+
+              final currentAmount = double.tryParse(row['amount']?.toString() ?? '') ?? 0.0;
+              if ((correctAmount - currentAmount).abs() > 0.005) {
+                updates['amount'] = correctAmount;
+                row['amount'] = correctAmount; // Apply locally
+              }
+            }
+          }
+        }
+
+        // 4. SYNC TO DATABASE SAFELY
+        if (updates.isNotEmpty) {
+          try {
+            await _supabase.from(_table).update(updates).eq('id', paymentId).isFilter('paid_at', null);
+          } catch (e) {
+            debugPrint('Supabase blocked update for invoice $paymentId: $e');
+          }
         }
       } catch (e) {
         debugPrint('Error recalculating invoice ${row['id']}: $e');
@@ -303,7 +365,10 @@ class PaymentSupabaseService {
           .gt('amount', 0)
           .order('due_date', ascending: true);
 
-      final rows = (response as List).cast<Map<String, dynamic>>();
+      // Map copy so Dart allows local edits when hiding bills
+      final rows = (response as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+
+      // Cleans data & enforces strict UI corrections first
       await recalculateUnpaidInvoices(rows);
 
       return rows
@@ -386,10 +451,6 @@ class PaymentSupabaseService {
         .eq('tumpang_subscription_id', subscriptionId)
         .not('paid_at', 'is', null);
 
-    // The deposit is already recorded as its own row in `payments` (inserted
-    // by finalize_tumpang_payment), so it must NOT be re-added here — doing
-    // so double-counted it and inflated totalPaidSoFar, which understated
-    // (or negated) the refund owed on cancellation.
     double totalPaidSoFar = 0.0;
     for (final row in (paidInvoices as List)) {
       totalPaidSoFar += double.tryParse(row['amount']?.toString() ?? '') ?? 0.0;
