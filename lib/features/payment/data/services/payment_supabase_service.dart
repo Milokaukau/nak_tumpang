@@ -216,42 +216,49 @@ class PaymentSupabaseService {
           cycleEnd = DateTime.tryParse(cycleEndStr);
         }
 
-        // 1. FAULT-TOLERANT DELETION FOR PREMATURE BILLS
+        // 1. CLEANUP PREMATURE BILLS SAFELY
         if (cycleEnd != null) {
           final billingDate = cycleEnd.add(const Duration(days: 1));
 
           if (today.isBefore(billingDate)) {
-            // Modify local UI state FIRST so it disappears instantly
+            // Await DB deletion FIRST. Only modify UI map if it succeeds.
+            await _supabase.from(_table).delete().eq('id', paymentId).isFilter('paid_at', null);
             row['amount'] = 0.0;
-            try {
-              await _supabase.from(_table).delete().eq('id', paymentId).isFilter('paid_at', null);
-            } catch (e) {
-              debugPrint('Supabase blocked delete for premature bill $paymentId: $e');
-            }
-            continue; // Skip the rest for this row
+            continue;
           }
         }
 
-        // 2. FAULT-TOLERANT DUE DATE REPAIR
+        // 2. REPAIR DUE DATES & UI METADATA SAFELY
         DateTime expectedDueDate;
+        int expectedMonth;
+        int expectedYear;
+
         if (cycleEnd != null) {
           final billingDate = cycleEnd.add(const Duration(days: 1));
           expectedDueDate = DateTime(billingDate.year, billingDate.month + 1, 1);
+          expectedMonth = billingDate.month;
+          expectedYear = billingDate.year;
         } else {
-          // Fallback for corrupt legacy rows missing cycle dates
-          final m = int.tryParse(row['month']?.toString() ?? '') ?? today.month;
-          final y = int.tryParse(row['year']?.toString() ?? '') ?? today.year;
-          expectedDueDate = DateTime(y, m + 1, 1);
+          expectedMonth = int.tryParse(row['month']?.toString() ?? '') ?? today.month;
+          expectedYear = int.tryParse(row['year']?.toString() ?? '') ?? today.year;
+          expectedDueDate = DateTime(expectedYear, expectedMonth + 1, 1);
         }
 
         final expectedDueDateStr = expectedDueDate.toIso8601String();
         final currentDueDateStr = row['due_date']?.toString();
+        final currentMonth = int.tryParse(row['month']?.toString() ?? '');
+        final currentYear = int.tryParse(row['year']?.toString() ?? '');
+
         final updates = <String, dynamic>{};
 
         if (currentDueDateStr == null || !currentDueDateStr.startsWith(expectedDueDateStr.split('T').first)) {
           updates['due_date'] = expectedDueDateStr;
-          // Apply local UI state FIRST
-          row['due_date'] = expectedDueDateStr;
+        }
+        if (currentMonth != expectedMonth) {
+          updates['month'] = expectedMonth;
+        }
+        if (currentYear != expectedYear) {
+          updates['year'] = expectedYear;
         }
 
         // 3. RECALCULATE AMOUNTS
@@ -281,31 +288,32 @@ class PaymentSupabaseService {
               final correctAmount = dailyFee * billableDays;
 
               if (correctAmount <= 0) {
+                await _supabase.from(_table).delete().eq('id', paymentId).isFilter('paid_at', null);
                 row['amount'] = 0.0;
-                try {
-                  await _supabase.from(_table).delete().eq('id', paymentId).isFilter('paid_at', null);
-                } catch (_) {}
                 continue;
               }
 
               final currentAmount = double.tryParse(row['amount']?.toString() ?? '') ?? 0.0;
               if ((correctAmount - currentAmount).abs() > 0.005) {
                 updates['amount'] = correctAmount;
-                row['amount'] = correctAmount; // Apply locally
               }
             }
           }
         }
 
-        // 4. SYNC TO DATABASE SAFELY
+        // 4. SYNC TO DATABASE FIRST, UPDATE UI ONLY ON SUCCESS
         if (updates.isNotEmpty) {
-          try {
-            await _supabase.from(_table).update(updates).eq('id', paymentId).isFilter('paid_at', null);
-          } catch (e) {
-            debugPrint('Supabase blocked update for invoice $paymentId: $e');
-          }
+          // Await DB update FIRST before applying locally
+          await _supabase.from(_table).update(updates).eq('id', paymentId).isFilter('paid_at', null);
+
+          // If the await above didn't throw an error, it succeeded. Now update local UI object.
+          if (updates.containsKey('due_date')) row['due_date'] = updates['due_date'];
+          if (updates.containsKey('month')) row['month'] = updates['month'];
+          if (updates.containsKey('year')) row['year'] = updates['year'];
+          if (updates.containsKey('amount')) row['amount'] = updates['amount'];
         }
       } catch (e) {
+        // Errors correctly block UI updates and pass logging down
         debugPrint('Error recalculating invoice ${row['id']}: $e');
       }
     }
@@ -365,10 +373,8 @@ class PaymentSupabaseService {
           .gt('amount', 0)
           .order('due_date', ascending: true);
 
-      // Map copy so Dart allows local edits when hiding bills
       final rows = (response as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
 
-      // Cleans data & enforces strict UI corrections first
       await recalculateUnpaidInvoices(rows);
 
       return rows
