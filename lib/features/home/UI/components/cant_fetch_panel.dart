@@ -112,6 +112,7 @@ class CantFetchPanel extends StatelessWidget {
           reasonOptions: HomeViewModel.driverReasons,
           selectedReason: vm.exceptionReason,
           onReasonChanged: vm.setExceptionReason,
+          emergencyReasons: const ['Sick / Not feeling well', 'Personal emergency'],
           customReasonController: vm.exceptionCustomReasonController,
           infoBoxColor: AppColors.warningAmberBg,
           infoBoxTextColor: AppColors.warningAmberText,

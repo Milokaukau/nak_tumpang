@@ -161,6 +161,9 @@ class _EditExceptionSheetState extends State<EditExceptionSheet> {
                 isSubmitting: isSubmitting,
                 minDate: widget.minDate,
                 maxDate: widget.maxDate,
+                emergencyReasons: isDriverInitiated
+                    ? const ['Sick / Not feeling well', 'Personal emergency']
+                    : const ['Personal emergency'],
                 onCancel: () => Navigator.of(context).pop(),
                 onConfirm: _save,
               ),
