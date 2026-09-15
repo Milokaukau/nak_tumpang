@@ -152,7 +152,6 @@ class NegotiationSupabaseService {
     String? overridePickupTime,
     double? overrideFee,
   }) async {
-    // Generate unique extension request ID
     final subscriptionId = subscription['id'] as String;
 
     // Format dates for database storage
