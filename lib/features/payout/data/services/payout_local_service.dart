@@ -39,7 +39,7 @@ class PayoutLocalService {
   }
 
   Future<Map<String, dynamic>?> getCachedWalletBalance(String userId) async {
-    final db = await _dbService.database;
+    final db = await _dbService.readOnlyDatabase;
     final rows = await db.query('driver_profiles', where: 'user_id = ?', whereArgs: [userId], limit: 1);
     return rows.isEmpty ? null : rows.first;
   }
@@ -70,7 +70,7 @@ class PayoutLocalService {
         int? year,
         int? month, // 1-12; only meaningful together with `year`
       }) async {
-    final db = await _dbService.database;
+    final db = await _dbService.readOnlyDatabase;
     var where = 'user_id = ?';
     final args = <Object?>[userId];
 
@@ -94,7 +94,7 @@ class PayoutLocalService {
   }
 
   Future<List<DateTime>> getCachedPayoutHistoryDates(String userId) async {
-    final db = await _dbService.database;
+    final db = await _dbService.readOnlyDatabase;
     final rows = await db.query(
       'payout_history',
       columns: ['requested_at'],
@@ -146,7 +146,7 @@ class PayoutLocalService {
 
   // payoutId -> intended terminal status
   Future<Map<String, String>> getPendingReconciliations() async {
-    final db = await _dbService.database;
+    final db = await _dbService.readOnlyDatabase;
     final rows = await db.query('pending_payout_reconciliation');
     return {for (final row in rows) row['payout_id'] as String: row['status'] as String};
   }
@@ -159,7 +159,7 @@ class PayoutLocalService {
   }
 
   Future<double?> getCachedBankTransferFee() async {
-    final db = await _dbService.database;
+    final db = await _dbService.readOnlyDatabase;
     final rows = await db.query('payout_settings', limit: 1);
     if (rows.isEmpty) return null;
     return (rows.first['bank_transfer_fee'] as num?)?.toDouble();

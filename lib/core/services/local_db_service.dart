@@ -13,19 +13,57 @@ class LocalDbService {
     return _database!;
   }
 
+  static Database? _readOnlyDatabase;
+  static Future<Database>? _readOnlyDatabaseFuture;
+
   Future<Database> _initDB(String filePath) async {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, filePath);
 
     return await openDatabase(
       path,
-      version: 8,
+      version: 10,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
+  }
+
+  /// A second handle onto the same file, opened read-only at the SQLite
+  /// engine level. This is the mirror of the Supabase-side RLS lockdown on
+  /// driver_profiles/payout_history/payout_settings (view-only from the
+  /// client; every write goes through settle_payments()/request_payout()):
+  /// nothing that only needs to *display* cached wallet/trip data should be
+  /// able to write to this database file, even by accident. Local services'
+  /// `get*`/`getCached*` methods should use this getter; only the `cache*`/
+  /// `save*`/`clear*` methods that mirror a successful Supabase round-trip
+  /// should use the writable [database] getter above.
+  ///
+  /// Must be opened after the writable connection has run migrations at
+  /// least once (a read-only handle can't create or upgrade the schema),
+  /// which `database` above guarantees since it's always awaited first.
+  Future<Database> get readOnlyDatabase {
+    if (_readOnlyDatabase != null) return Future.value(_readOnlyDatabase!);
+    // Cache the in-flight open itself, not just the result — without
+    // this, two get*/getCached* calls landing before the first open
+    // resolves would each pass the `_readOnlyDatabase != null` check
+    // above and both call openDatabase, leaking a duplicate handle.
+    return _readOnlyDatabaseFuture ??= _openReadOnlyDatabase();
+  }
+
+  Future<Database> _openReadOnlyDatabase() async {
+    await database; // ensure the file exists and is migrated
+    final dbPath = await getDatabasesPath();
+    final path = join(dbPath, 'tumpang_cache.db');
+    // singleInstance: false is what actually makes this read-only:
+    // sqflite's default (true) means opening the same path again just
+    // hands back the existing writable instance and silently ignores
+    // readOnly: true, so without this the "read-only" handle could
+    // write just fine.
+    _readOnlyDatabase = await openDatabase(path, readOnly: true, singleInstance: false);
+    return _readOnlyDatabase!;
   }
 
   Future<void> _upgradeDB(Database db, int oldVersion, int newVersion) async {
@@ -178,6 +216,31 @@ class LocalDbService {
       // Adding it now, nullable, closes that gap before it's needed
       // rather than after.
       await db.execute('ALTER TABLE payments ADD COLUMN payment_intent_id TEXT');
+    }
+
+    if (oldVersion < 9) {
+      // Mirrors the Supabase migration that added these to `payments` and
+      // `payout_settings` (see supabase/migrations/xxxx_platform_fee_and_payout_functions.sql).
+      // settle_payments() sets platform_fee/driver_net_amount server-side
+      // when an invoice is paid; driver_net_amount is what PayoutViewModel
+      // reads for "recent trips" points and the trip detail dialog's
+      // breakdown. Nullable here for the same reason payment_intent_id is:
+      // unsettled (paid_at IS NULL) rows never have these set.
+      await db.execute('ALTER TABLE payments ADD COLUMN platform_fee REAL');
+      await db.execute('ALTER TABLE payments ADD COLUMN driver_net_amount REAL');
+      await db.execute('ALTER TABLE payout_settings ADD COLUMN platform_fee REAL NOT NULL DEFAULT 1.00');
+    }
+
+    if (oldVersion < 10) {
+      // Supabase's `payments` table also carries `credited_to_driver_at`
+      // (see supabase/sql/settle_payments.sql) — set alongside
+      // platform_fee/driver_net_amount the moment settle_payments() marks
+      // an invoice paid_at. Without this column here, any cache write that
+      // passes through a raw settled-payment row (the same "bare .select()"
+      // failure mode as payment_intent_id / platform_fee above) would throw
+      // "table payments has no column named credited_to_driver_at". Kept
+      // nullable for the same reason: unsettled rows never have it.
+      await db.execute('ALTER TABLE payments ADD COLUMN credited_to_driver_at TEXT');
     }
   }
 
@@ -366,6 +429,9 @@ class LocalDbService {
         cycle_start_date TEXT,
         cycle_end_date TEXT,
         payment_intent_id TEXT,
+        platform_fee REAL,
+        driver_net_amount REAL,
+        credited_to_driver_at TEXT,
         FOREIGN KEY (tumpang_subscription_id) REFERENCES tumpang_subscription (id) ON DELETE CASCADE
       )
     ''');
@@ -459,7 +525,8 @@ class LocalDbService {
     await db.execute('''
       CREATE TABLE payout_settings (
         id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
-        bank_transfer_fee REAL NOT NULL DEFAULT 1.00
+        bank_transfer_fee REAL NOT NULL DEFAULT 1.00,
+        platform_fee REAL NOT NULL DEFAULT 1.00
       )
     ''');
 
