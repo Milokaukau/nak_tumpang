@@ -82,8 +82,8 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
           currentValue: currentValue,
           onSubmit: (newValue) async {
             final parsedFee = double.tryParse(newValue);
-            if (fieldPrefix == 'fee' && (parsedFee == null || !parsedFee.isFinite || parsedFee <= 0)) {
-              throw NegotiationException('Please enter a valid fee amount.');
+            if (fieldPrefix == 'fee' && (parsedFee == null || !parsedFee.isFinite || parsedFee <= 0 || parsedFee > 100.0)) {
+              throw NegotiationException('Please enter a valid fee amount between RM 1 and RM 100.');
             }
             final dynamic valueToSubmit = fieldPrefix == 'fee' ? parsedFee! : newValue;
             await controller.proposeNewTerm(requestId: widget.requestId, fieldPrefix: fieldPrefix, value: valueToSubmit);

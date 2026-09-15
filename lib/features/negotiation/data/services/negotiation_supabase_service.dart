@@ -24,6 +24,7 @@ class NegotiationSupabaseService {
     required double amount,
     required String requestId,
   }) async {
+    // Invoke Supabase payment edge function
     final response = await _supabase.functions.invoke(
       'create-payment-intent',
       body: {
@@ -44,7 +45,6 @@ class NegotiationSupabaseService {
   }
 
   /// Finalizes a brand-new subscription after a successful deposit payment.
-  ///
   /// All multi-table writes (subscription insert, payment insert, request
   /// status update) now happen inside the `finalize_tumpang_payment` Postgres
   /// function, in a single atomic transaction. `paymentIntentId` is used
@@ -152,7 +152,10 @@ class NegotiationSupabaseService {
     String? overridePickupTime,
     double? overrideFee,
   }) async {
+    // Generate unique extension request ID
     final subscriptionId = subscription['id'] as String;
+
+    // Format dates for database storage
     final requestId = 'ext_${DateTime.now().millisecondsSinceEpoch}';
     final newEndDateStr = newEndDate.toIso8601String().split('T').first;
 

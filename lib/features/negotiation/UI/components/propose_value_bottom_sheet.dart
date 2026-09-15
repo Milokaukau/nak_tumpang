@@ -36,6 +36,7 @@ class _ProposeValueBottomSheetState extends State<ProposeValueBottomSheet> {
   bool get _isFee => widget.title.toLowerCase().contains('fee');
 
   static const int _minFee = 1; // RM1 floor — a fee can't be zero or negative
+  static const double _maxFee = 100.0; // RM100 maximum fee ceiling
 
   // Fee mode state: Now a double to preserve incoming legacy fractional fees
   late double _feeValue;
@@ -54,6 +55,7 @@ class _ProposeValueBottomSheetState extends State<ProposeValueBottomSheet> {
       // Preserve fractional values on load, do not use .round()
       _feeValue = parsed ?? _minFee.toDouble();
       if (_feeValue < _minFee) _feeValue = _minFee.toDouble();
+      if (_feeValue > _maxFee) _feeValue = _maxFee;
     } else {
       _controller = TextEditingController(text: widget.currentValue);
     }
@@ -66,10 +68,11 @@ class _ProposeValueBottomSheetState extends State<ProposeValueBottomSheet> {
   }
 
   void _incrementFee() {
-    if (_isSubmitting) return;
+    if (_isSubmitting || _feeValue >= _maxFee) return;
     setState(() {
       // Snaps to the next whole integer if fractional, or adds exactly 1.0
-      _feeValue = (_feeValue + 1.0).floorToDouble();
+      final nextVal = (_feeValue + 1.0).floorToDouble();
+      _feeValue = nextVal > _maxFee ? _maxFee : nextVal;
     });
   }
 
@@ -91,6 +94,11 @@ class _ProposeValueBottomSheetState extends State<ProposeValueBottomSheet> {
 
   Future<void> _submit() async {
     if (_isSubmitting) return;
+
+    if (_isFee && (_feeValue < _minFee || _feeValue > _maxFee)) {
+      setState(() => _errorText = 'Fee must be between RM 1 and RM 100.');
+      return;
+    }
 
     final String value;
     if (_isFee) {
@@ -146,31 +154,35 @@ class _ProposeValueBottomSheetState extends State<ProposeValueBottomSheet> {
           const SizedBox(height: 20),
 
           if (_isFee) ...[
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _StepButton(
-                  icon: Icons.remove,
-                  onPressed: (_isSubmitting || _feeValue <= _minFee) ? null : _decrementFee,
-                ),
-                Expanded(
-                  child: Column(
-                    children: [
-                      Text(
-                        'RM $_formattedFee',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(fontSize: 34, fontWeight: FontWeight.bold, color: AppColors.black),
-                      ),
-                      const SizedBox(height: 2),
-                      const Text('per day', style: TextStyle(fontSize: 13, color: Colors.grey, fontWeight: FontWeight.w500)),
-                    ],
+            // Added explicit padding around the fee stepper row
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 12.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _StepButton(
+                    icon: Icons.remove,
+                    onPressed: (_isSubmitting || _feeValue <= _minFee) ? null : _decrementFee,
                   ),
-                ),
-                _StepButton(
-                  icon: Icons.add,
-                  onPressed: _isSubmitting ? null : _incrementFee,
-                ),
-              ],
+                  Expanded(
+                    child: Column(
+                      children: [
+                        Text(
+                          'RM $_formattedFee',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(fontSize: 34, fontWeight: FontWeight.bold, color: AppColors.black),
+                        ),
+                        const SizedBox(height: 2),
+                        const Text('per day (Max RM100)', style: TextStyle(fontSize: 13, color: Colors.grey, fontWeight: FontWeight.w500)),
+                      ],
+                    ),
+                  ),
+                  _StepButton(
+                    icon: Icons.add,
+                    onPressed: (_isSubmitting || _feeValue >= _maxFee) ? null : _incrementFee,
+                  ),
+                ],
+              ),
             ),
           ] else ...[
             TextField(

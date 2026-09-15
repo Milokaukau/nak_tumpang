@@ -2,7 +2,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:nak_tumpang/core/services/local_db_service.dart';
 
 class NegotiationLocalService {
-  // Use the singleton instance defined by your team lead
+  // Use the singleton instance
   final LocalDbService _dbService = LocalDbService.instance;
 
   // INSERT OR REPLACE (Upsert) to cache requests from Supabase
@@ -36,7 +36,6 @@ class NegotiationLocalService {
   }
 
   // SELECT for offline viewing (Pending and Complete only)
-  //
   // NOTE ON ACCOUNT SCOPING: this table has no owner/user-id column to
   // filter by, so this cache is only ever safe to hold ONE account's data
   // at a time. NegotiationViewModel is responsible for calling

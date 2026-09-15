@@ -26,7 +26,7 @@ class _DateRangeProposalBottomSheetState extends State<DateRangeProposalBottomSh
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
 
-    // 1. Parse Start Date
+    // 1. Parse Start Date (Default to sysdate if invalid or in the past)
     _startDate = DateTime.tryParse(widget.initialStartDate) ?? today;
     _startDate = DateTime(_startDate.year, _startDate.month, _startDate.day);
 
@@ -34,21 +34,19 @@ class _DateRangeProposalBottomSheetState extends State<DateRangeProposalBottomSh
       _startDate = today;
     }
 
-    // 2. Parse End Date
+    // 2. Parse End Date & Auto-Fill Default (Start + 14 days)
     final parsedEnd = DateTime.tryParse(widget.initialEndDate);
-    final twoWeeksLater = DateRangeRules.minEndDate(_startDate);
+    final twoWeeksLater = DateRangeRules.minEndDate(_startDate); // start + 14 days
 
     if (parsedEnd != null) {
       final normalizedEnd = DateTime(parsedEnd.year, parsedEnd.month, parsedEnd.day);
-      final daysDiff = normalizedEnd.difference(_startDate).inDays;
-
       if (normalizedEnd.isBefore(twoWeeksLater)) {
         _endDate = twoWeeksLater;
       } else {
         _endDate = normalizedEnd;
       }
     } else {
-      // 3. New Request Auto-Fill: Exactly 2 weeks
+      // New Request / First Entry Default: Exactly start + 14 days
       _endDate = twoWeeksLater;
     }
   }
