@@ -129,8 +129,9 @@ class _InvoiceSheetState extends State<InvoiceSheet> {
 
     final isPaid = widget.payment.paidAt != null;
     final isOverdue = !isPaid && DateTime.now().isAfter(widget.payment.dueDate);
+    final isCancellation = widget.payment.id.endsWith('_cancel');
 
-    final totalDue = isPaid
+    final totalDue = isPaid || isCancellation
         ? widget.payment.amount
         : (_loadError != null
         ? widget.payment.amount

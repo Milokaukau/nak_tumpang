@@ -36,6 +36,7 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
     if (date == null) return value;
     return '${date.day.toString().padLeft(2, '0')}-${date.month.toString().padLeft(2, '0')}-${date.year}';
   }
+
   final SubscriptionSupabaseService _subscriptionService = SubscriptionSupabaseService();
 
   String _formatAmPm(String dbTime) {
@@ -222,15 +223,6 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
     }
   }
 
-  /// Opens the extend flow for an existing subscription. Both
-  /// NegotiationSummaryCard's "Continue Subscription" (onRenew) and
-  /// "Edit / Propose New Terms" (onRenegotiate) buttons route here —
-  /// there's no separate "instant renew" backend path: createExtensionRequest
-  /// always sets sub_end_is_accepted to false, so even an unedited
-  /// extension still needs the driver's acceptance. The screen itself
-  /// already lets the user leave every field untouched if they just want
-  /// to push the end date out, or edit anything if they want to
-  /// renegotiate — one screen genuinely covers both buttons.
   void _openExtendScreen(BuildContext context, String? subscriptionId) {
     if (subscriptionId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -251,11 +243,11 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
 
   Widget _buildSubscriptionLinkCard(String? subscriptionId, bool isDriver, String currentUserId) {
     if (subscriptionId == null) {
-      return const SizedBox.shrink(); // older completed requests with no linked subscription
+      return const SizedBox.shrink();
     }
 
     return FutureBuilder<Map<String, dynamic>?>(
-      key: ValueKey(subscriptionId), // rebuild if id changes
+      key: ValueKey(subscriptionId),
       future: _subscriptionService.fetchSubscriptionById(
         subscriptionId,
         isDriver ? 'driver' : 'passenger',
@@ -366,7 +358,8 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
 
                 final targetTripId = isDriver ? request.passengerTripId : request.driverTripId;
                 final myTripId = isDriver ? request.driverTripId : request.passengerTripId;
-                final bool isCompleted = request.status == 'completed';final bool isRejected = request.status == 'rejected';
+                final bool isCompleted = request.status == 'completed';
+                final bool isRejected = request.status == 'rejected';
                 final bool isCancelled = request.status == 'cancelled';
 
                 final bool isFinalized = isCompleted || isRejected || isCancelled;
@@ -385,8 +378,6 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                     final userData = userSnapshot.data;
                     final displayName = userData?['name'] ?? userData?['full_name'] ?? 'User';
 
-                    // Fetch trip name synchronously here!
-                    final myTripId = isDriver ? request.driverTripId : request.passengerTripId;
                     final tripName = controller.getCachedTripName(myTripId);
 
                     return SingleChildScrollView(
@@ -475,7 +466,7 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                                 ),
                               ],
                             ),
-                            onPropose: () => _openProposalSheet(context, controller, 'Fee (per day)', request.fee.value.toStringAsFixed(0), 'fee'),
+                            onPropose: () => _openProposalSheet(context, controller, 'Fee (per day)', request.fee.value.toString(), 'fee'),
                             onAccept: () => _runNegotiationAction(() => controller.acceptTerm(widget.requestId, 'fee')),
                           ),
 
