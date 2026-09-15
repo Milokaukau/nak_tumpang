@@ -11,21 +11,6 @@ const _weekdayNames = ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday
 
 class AddEditTripScreen extends StatelessWidget {
   final Map<String, dynamic>? existingTrip;
-
-  /// Overrides which role's fields/table this screen submits to.
-  /// Normally left null so it falls back to
-  /// `MyTripsViewModel.currentUserRole` (the sidebar "Add trip" flow,
-  /// where that's already been loaded by the time My Trips is open).
-  ///
-  /// Explicit because right after registration (see RegisterScreen's
-  /// post-signup "add trip" push) `MyTripsViewModel.loadMyTrips()`
-  /// hasn't run yet this session, so `currentUserRole` would still be
-  /// sitting on its 'passenger' default regardless of which role the
-  /// driver just picked on the signup form — silently inserting their
-  /// first route into `passenger_trips` instead of `driver_trips`. The
-  /// caller already knows the role for certain in that flow, so it's
-  /// passed straight through instead of trusting a value nothing has
-  /// populated yet.
   final String? role;
 
   const AddEditTripScreen({super.key, this.existingTrip, this.role});
@@ -48,10 +33,7 @@ class _AddEditTripView extends StatelessWidget {
     final savedTrip = await vm.submit();
     if (!context.mounted || savedTrip == null) return;
 
-    // Refresh the My Trips list
     context.read<MyTripsViewModel>().loadMyTrips();
-
-    // --- OPTIMIZED: Update Home Dashboard locally instead of heavy API refetch ---
     context.read<HomeViewModel>().addOrUpdateLocalTrip(savedTrip);
 
     Navigator.of(context).pop();
@@ -65,6 +47,7 @@ class _AddEditTripView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final vm = context.watch<AddEditTripViewModel>();
+    final isPassenger = vm.role != 'driver';
 
     return Scaffold(
       backgroundColor: AppColors.white,
@@ -127,21 +110,13 @@ class _AddEditTripView extends StatelessWidget {
               if (vm.dayError != null) _errorText(vm.dayError!),
               const SizedBox(height: 20),
 
-              const Text('I usually depart at...', style: TextStyle(fontWeight: FontWeight.w600)),
+              Text(isPassenger ? 'I prefer to be picked up at...' : 'I usually depart at...',
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
               const SizedBox(height: 6),
               _TimePickerField(
                 time: vm.departTime,
                 onTap: () => _pickTime(context, vm.departTime, vm.setDepartTime),
               ),
-              const SizedBox(height: 20),
-
-              const Text('I usually arrive destination at...', style: TextStyle(fontWeight: FontWeight.w600)),
-              const SizedBox(height: 6),
-              _TimePickerField(
-                time: vm.arriveTime,
-                onTap: () => _pickTime(context, vm.arriveTime, vm.setArriveTime),
-              ),
-              if (vm.timeError != null) _errorText(vm.timeError!),
 
               if (vm.errorMessage != null) ...[
                 const SizedBox(height: 16),
@@ -190,10 +165,6 @@ class _AddEditTripView extends StatelessWidget {
     );
   }
 }
-
-// ---------------------------------------------------------
-// Reused custom components to match your exact requested UI
-// ---------------------------------------------------------
 
 class _DayPicker extends StatelessWidget {
   final int selectedDay;
