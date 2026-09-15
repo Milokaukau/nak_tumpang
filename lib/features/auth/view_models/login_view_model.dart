@@ -110,11 +110,19 @@ class LoginViewModel extends ChangeNotifier {
       if (existingRow == null) {
         final meta = response.user?.userMetadata;
         final role = meta?['role'] as String? ?? 'passenger';
+        // `phone` is NOT NULL on `users`. If it's missing from the auth
+        // metadata (an interrupted/older signUp that never carried it),
+        // upserting null here throws every time — the whole self-heal
+        // (and the login) would fail identically forever, since nothing
+        // ever adds the phone metadata back retroactively. Fall back to
+        // an empty string so the row can be created; the profile screen
+        // already prompts drivers/passengers to fill in missing details.
+        final phone = meta?['phone'] as String? ?? '';
 
         await _supabase.from('users').upsert({
           'id': userId,
           'name': meta?['name'] as String? ?? '',
-          'phone': meta?['phone'] as String?,
+          'phone': phone,
           'email': response.user?.email,
           'role': role,
         });
@@ -178,6 +186,11 @@ class LoginViewModel extends ChangeNotifier {
           : e.message;
       return null;
     } catch (e) {
+      // Surface the real cause in logs — this branch used to swallow
+      // everything into one generic message, which made a permanently
+      // failing self-heal (e.g. a NOT NULL violation) indistinguishable
+      // from a one-off network blip, with no way to tell them apart.
+      debugPrint('LoginViewModel.submit failed: $e');
       errorMessage = 'Something went wrong. Please try again.';
       return null;
     } finally {

@@ -25,6 +25,16 @@ class LocalDbService {
       version: 10,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
+        // WAL lets the separate read-only connection below read
+        // concurrently while this connection writes, instead of the
+        // default rollback-journal mode where a write locks the whole
+        // file and any other connection touching it gets rejected with
+        // "database is locked" rather than waiting.
+        await db.rawQuery('PRAGMA journal_mode = WAL');
+        // Belt-and-braces: if a lock is ever still contended for a
+        // moment (e.g. mid-checkpoint), retry for up to 3s instead of
+        // failing the call instantly.
+        await db.rawQuery('PRAGMA busy_timeout = 3000');
       },
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
@@ -63,6 +73,10 @@ class LocalDbService {
     // readOnly: true, so without this the "read-only" handle could
     // write just fine.
     _readOnlyDatabase = await openDatabase(path, readOnly: true, singleInstance: false);
+    // Same reasoning as the writable connection's onConfigure above —
+    // this connection also needs to not choke instantly if it lands on
+    // the file during a brief write, now that WAL is enabled there.
+    await _readOnlyDatabase!.rawQuery('PRAGMA busy_timeout = 3000');
     return _readOnlyDatabase!;
   }
 

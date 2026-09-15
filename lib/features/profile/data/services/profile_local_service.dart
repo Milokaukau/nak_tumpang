@@ -51,7 +51,7 @@ class ProfileLocalService {
   }
 
   Future<Map<String, dynamic>?> getCachedUserProfile(String userId) async {
-    final db = await _dbService.readOnlyDatabase;
+    final db = await _dbService.database;
     final rows = await db.query('users', where: 'id = ?', whereArgs: [userId], limit: 1);
     return rows.isEmpty ? null : rows.first;
   }
@@ -72,7 +72,7 @@ class ProfileLocalService {
   }
 
   Future<Map<String, dynamic>?> getCachedDriverLicense(String userId) async {
-    final db = await _dbService.readOnlyDatabase;
+    final db = await _dbService.database;
     final rows = await db.query(
       'driver_profiles',
       columns: ['license_number', 'license_url'],
