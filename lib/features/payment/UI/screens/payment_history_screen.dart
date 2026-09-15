@@ -1,103 +1,91 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+import 'package:nak_tumpang/core/entities/payment.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
-import 'package:nak_tumpang/features/payment/view_models/payment_view_model.dart';
-import 'package:nak_tumpang/features/payment/UI/components/payment_history_card.dart';
+import 'package:nak_tumpang/features/payment/UI/components/invoice_sheet.dart';
 
-/// Standalone screen listing a passenger's completed/paid invoices.
-///
-/// Previously this file accidentally duplicated the `PaymentHistoryCard`
-/// widget class itself (same class name as
-/// UI/components/payment_history_card.dart), which is a compile-time name
-/// collision waiting to happen if both ever get imported into the same
-/// file. This is now a real screen that reuses the actual card widget,
-/// following the same fetch/loading/error/empty pattern used by
-/// RequestListScreen and PaymentScreen.
-class PaymentHistoryScreen extends StatefulWidget {
-  const PaymentHistoryScreen({super.key});
+class PaymentHistoryCard extends StatelessWidget {
+  final Payment payment;
 
-  @override
-  State<PaymentHistoryScreen> createState() => _PaymentHistoryScreenState();
-}
+  const PaymentHistoryCard({super.key, required this.payment});
 
-class _PaymentHistoryScreenState extends State<PaymentHistoryScreen> {
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<PaymentViewModel>().fetchAllPayments();
-    });
+  String _formatDateDdMmYyyy(DateTime date) {
+    return '${date.day.toString().padLeft(2, '0')}-${date.month.toString().padLeft(2, '0')}-${date.year}';
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.white,
-      appBar: AppBar(
-        title: const Text('Payment History', style: TextStyle(color: AppColors.black, fontWeight: FontWeight.bold)),
-        backgroundColor: AppColors.white,
-        elevation: 0.5,
-        iconTheme: const IconThemeData(color: AppColors.black),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: AppColors.black),
-          onPressed: () => Navigator.maybePop(context),
-        ),
-      ),
-      body: Consumer<PaymentViewModel>(
-        builder: (context, viewModel, child) {
-          // UPDATE: Only show full-screen spinner if it is the first load
-          if (viewModel.isLoading && viewModel.paymentHistory.isEmpty) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          if (viewModel.errorMessage != null) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24.0),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(viewModel.errorMessage!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.red)),
-                    const SizedBox(height: 12),
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(backgroundColor: AppColors.primaryYellow, foregroundColor: AppColors.black),
-                      onPressed: () => viewModel.fetchAllPayments(),
-                      child: const Text('Retry'),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }
-
-          return RefreshIndicator(
-            onRefresh: () => viewModel.fetchAllPayments(),
-            child: viewModel.paymentHistory.isEmpty
-                ? Stack(
-              children: [
-                ListView(physics: const AlwaysScrollableScrollPhysics()),
-                const Center(
-                  child: Text(
-                    'No completed payments found.\nPull down to refresh.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.grey),
-                  ),
-                ),
-              ],
-            )
-                : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: viewModel.paymentHistory.length,
-              itemBuilder: (context, index) {
-                final payment = viewModel.paymentHistory[index];
-                return PaymentHistoryCard(
-                  key: ValueKey(payment.id),
-                  payment: payment,
-                );
-              },
-            ),
-          );
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: InkWell(
+        onTap: () {
+          InvoiceSheet.show(context, payment);
         },
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppColors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.grey.shade300),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Text(
+                      payment.direction,
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'RM ${payment.amount.toStringAsFixed(2)}',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.green),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                payment.dateRange,
+                style: const TextStyle(fontSize: 12, color: Colors.black87),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.check_circle, color: Colors.green, size: 16),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Paid on ${payment.paidAt != null ? _formatDateDdMmYyyy(payment.paidAt!) : 'N/A'}',
+                        style: const TextStyle(fontSize: 12, color: Colors.green, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      const Text(
+                        'View Receipt',
+                        style: TextStyle(fontSize: 11, color: Colors.blue, fontWeight: FontWeight.bold),
+                      ),
+                      Text(
+                        'Ref: ${payment.id}',
+                        style: const TextStyle(fontSize: 11, color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
