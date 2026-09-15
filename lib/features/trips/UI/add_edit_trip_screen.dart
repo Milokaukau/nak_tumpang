@@ -65,6 +65,7 @@ class _AddEditTripView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final vm = context.watch<AddEditTripViewModel>();
+    final isPassenger = vm.role != 'driver';
 
     return Scaffold(
       backgroundColor: AppColors.white,
@@ -127,7 +128,8 @@ class _AddEditTripView extends StatelessWidget {
               if (vm.dayError != null) _errorText(vm.dayError!),
               const SizedBox(height: 20),
 
-              const Text('I usually depart at...', style: TextStyle(fontWeight: FontWeight.w600)),
+              Text(isPassenger ? 'I prefer to be picked up at...' : 'I usually depart at...',
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
               const SizedBox(height: 6),
               _TimePickerField(
                 time: vm.departTime,
@@ -135,7 +137,8 @@ class _AddEditTripView extends StatelessWidget {
               ),
               const SizedBox(height: 20),
 
-              const Text('I usually arrive destination at...', style: TextStyle(fontWeight: FontWeight.w600)),
+              Text(isPassenger ? 'I prefer to be dropped off at...' : 'I usually arrive destination at...',
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
               const SizedBox(height: 6),
               _TimePickerField(
                 time: vm.arriveTime,
