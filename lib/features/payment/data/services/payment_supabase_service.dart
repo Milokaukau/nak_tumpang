@@ -26,6 +26,21 @@ class PaymentSupabaseService {
   DateTime _nextCalendarDate(DateTime date) =>
       DateTime(date.year, date.month, date.day + 1);
 
+  // Inclusive calendar-day count between two dates, computed via UTC-normalized
+  // date-only values so a DST transition between start and end can't shave a
+  // day off an elapsed-hours-based difference().inDays calculation.
+  int _inclusiveCalendarDays(DateTime start, DateTime end) =>
+      DateTime.utc(end.year, end.month, end.day)
+          .difference(DateTime.utc(start.year, start.month, start.day))
+          .inDays +
+          1;
+
+  // Advance a date by a fixed number of CALENDAR days (not 24-hour periods),
+  // so a DST transition crossed along the way can't push the result onto the
+  // wrong side of a calendar date.
+  DateTime _addCalendarDays(DateTime date, int days) =>
+      DateTime(date.year, date.month, date.day + days);
+
   Future<Map<String, dynamic>> fetchProformaInvoiceDetails({
     required String subscriptionId,
     DateTime? cycleStart,
@@ -139,10 +154,10 @@ class PaymentSupabaseService {
         .maybeSingle();
     if (schedule == null) return;
 
-    final totalDays = endDate.difference(startDate).inDays + 1;
+    final totalDays = _inclusiveCalendarDays(startDate, endDate);
     if (totalDays <= 60) return;
 
-    final depositEndDate = startDate.add(const Duration(days: 59));
+    final depositEndDate = _addCalendarDays(startDate, 59);
     if (depositEndDate.isAfter(endDate)) return;
 
     final now = DateTime.now();
@@ -150,7 +165,7 @@ class PaymentSupabaseService {
     DateTime cycleStart = _nextCalendarDate(depositEndDate);
 
     while (!cycleStart.isAfter(endDate)) {
-      DateTime cycleEnd = cycleStart.add(const Duration(days: 29));
+      DateTime cycleEnd = _addCalendarDays(cycleStart, 29);
 
       if (cycleEnd.isAfter(endDate)) {
         cycleEnd = endDate;
@@ -420,7 +435,6 @@ class PaymentSupabaseService {
           .select('*, tumpang_subscription(pickup_location, dropoff_location)')
           .inFilter('tumpang_subscription_id', subIds)
           .isFilter('paid_at', null)
-          .gt('amount', 0)
           .order('due_date', ascending: true);
 
       // Map copy so Dart allows local edits when hiding bills
