@@ -103,7 +103,12 @@ class PayoutDetailsDialog extends StatelessWidget {
                   child: BaseButton(
                     text: 'Confirm',
                     isLoading: vm.isSubmitting,
-                    onPressed: () => _confirm(context, vm),
+                    // submitPayout() already guards against a second call
+                    // landing while one's in flight, but the button itself
+                    // wasn't visibly locked the same way Back is above —
+                    // this closes that gap so a fast double-tap doesn't
+                    // look like nothing happened.
+                    onPressed: vm.isSubmitting ? null : () => _confirm(context, vm),
                   ),
                 ),
               ],

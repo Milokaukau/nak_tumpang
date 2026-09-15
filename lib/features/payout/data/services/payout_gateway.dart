@@ -11,11 +11,12 @@ abstract class PayoutGateway {
   Stream<String> process(String payoutId);
 }
 
-// payout marked as paid when success dialog is on screen
+// payout goes through a brief 'processing' step before being marked paid
 class MockPayoutGateway implements PayoutGateway {
   @override
   Stream<String> process(String payoutId) async* {
-    await Future.delayed(const Duration(milliseconds: 500));
+    yield 'processing';
+    await Future.delayed(const Duration(milliseconds: 900));
     yield 'completed';
   }
 }

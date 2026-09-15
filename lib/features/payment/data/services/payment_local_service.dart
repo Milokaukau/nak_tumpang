@@ -40,7 +40,7 @@ class PaymentLocalService {
   // (see its auth-state listener) so a second user on the same device can
   // never read a previous user's cached payment history.
   Future<List<Map<String, dynamic>>> getOfflinePayments({required bool isCompleted}) async {
-    final db = await _dbService.database;
+    final db = await _dbService.readOnlyDatabase;
 
     final whereClause = isCompleted ? 'paid_at IS NOT NULL' : 'paid_at IS NULL';
 

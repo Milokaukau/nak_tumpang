@@ -120,23 +120,41 @@ class PayoutHistoryDisplay {
 }
 
 class RecentTripDisplay {
-  final String tripId; // tumpang_request.id — shown as a reference on the receipt
+  final String tripId; // payments.id (settled) — shown as a reference on the receipt
   final String passengerName;
+  final String tripName; // the driver's own trip name this cycle was billed against
   final String pickupName;
   final String dropoffName;
-  final double points;
+  final double points; // net, after platform fee — what actually hit the wallet
+  final double grossAmount; // what the passenger paid, before the platform fee
+  final double platformFee;
+  final double dailyFee; // tumpang_subscription.fee — the per-day rate for this ride
+  final DateTime? cycleStartDate;
+  final DateTime? cycleEndDate;
   final String monthLabel; // e.g. "August"
   final DateTime? tripDate; // full date, for the trip detail popup
 
   RecentTripDisplay({
     required this.tripId,
     required this.passengerName,
+    required this.tripName,
     required this.pickupName,
     required this.dropoffName,
     required this.points,
+    required this.grossAmount,
+    required this.platformFee,
+    required this.dailyFee,
+    this.cycleStartDate,
+    this.cycleEndDate,
     required this.monthLabel,
     this.tripDate,
   });
+
+  // Billed days derived from amount ÷ daily rate rather than the raw
+  // cycle_start/cycle_end span — grossAmount already has driver-caused
+  // missed days deducted (see _countDriverMissedDays), the raw date range
+  // doesn't, so recomputing from dates alone would overcount.
+  int get billableDays => dailyFee > 0 ? (grossAmount / dailyFee).round() : 0;
 }
 
 class PayoutViewModel extends ChangeNotifier {
@@ -605,21 +623,37 @@ class PayoutViewModel extends ChangeNotifier {
     // that doesn't actually back up the points figure next to it.
     tripsCompletedCount = 0;
     for (final trip in monthTrips) {
-      thisMonthPoints += (trip['fee'] as num?)?.toDouble() ?? 0;
+      // driver_net_amount is set by settle_payments() — the invoice
+      // amount with the RM1 platform fee already deducted.
+      thisMonthPoints += (trip['driver_net_amount'] as num?)?.toDouble() ?? 0;
       tripsCompletedCount++;
     }
 
     final recent = await _service.fetchRecentCompletedTrips(userId, limit: 10);
     recentTrips = recent.map((trip) {
-      final dateStr = trip['sub_start_date'] as String?;
+      // paid_at (when it actually posted to the wallet) rather than
+      // cycle_start_date, so "recent" ordering matches what actually
+      // credited the driver.
+      final dateStr = trip['paid_at'] as String?;
       final date = dateStr != null ? DateTime.tryParse(dateStr) : null;
-      final passengerName = trip['passenger_trips']?['users']?['name'] as String? ?? 'Passenger';
+      final subscription = trip['tumpang_subscription'] as Map<String, dynamic>?;
+      final passengerName =
+          subscription?['passenger_trips']?['users']?['name'] as String? ?? 'Passenger';
+      final driverTrip = subscription?['driver_trips'] as Map<String, dynamic>?;
+      final cycleStartStr = trip['cycle_start_date'] as String?;
+      final cycleEndStr = trip['cycle_end_date'] as String?;
       return RecentTripDisplay(
         tripId: trip['id']?.toString() ?? '-',
         passengerName: passengerName,
-        pickupName: trip['pickup_name'] as String? ?? '-',
-        dropoffName: trip['dropoff_name'] as String? ?? '-',
-        points: (trip['fee'] as num?)?.toDouble() ?? 0,
+        tripName: driverTrip?['trip_name'] as String? ?? '-',
+        pickupName: subscription?['pickup_location'] as String? ?? '-',
+        dropoffName: subscription?['dropoff_location'] as String? ?? '-',
+        points: (trip['driver_net_amount'] as num?)?.toDouble() ?? 0,
+        grossAmount: (trip['amount'] as num?)?.toDouble() ?? 0,
+        platformFee: (trip['platform_fee'] as num?)?.toDouble() ?? 0,
+        dailyFee: double.tryParse(subscription?['fee']?.toString() ?? '') ?? 0,
+        cycleStartDate: cycleStartStr != null ? DateTime.tryParse(cycleStartStr) : null,
+        cycleEndDate: cycleEndStr != null ? DateTime.tryParse(cycleEndStr) : null,
         monthLabel: date != null ? _monthName(date.month) : '-',
         tripDate: date,
       );
@@ -800,6 +834,12 @@ class PayoutViewModel extends ChangeNotifier {
       // netAmount than what the driver saw live.
       final cachedFee = fee ?? (selectedMethod == PayoutMethod.bankTransfer ? kFallbackBankTransferFee : 0);
       lastPayoutId = payoutId;
+      // Explicit reset, not just relying on the field's initial value —
+      // this view model is long-lived (one instance per driver session,
+      // not per-dialog), so a previous payout could've already left this
+      // at 'completed'. runPayoutStatusAnimation() (called once the
+      // success dialog is on screen) drives it from here through the
+      // gateway's processing -> completed animation.
       payoutStatus = 'pending';
       final now = DateTime.now();
 
@@ -838,7 +878,7 @@ class PayoutViewModel extends ChangeNotifier {
           PayoutHistoryDisplay(
             id: payoutId,
             amount: amount,
-            status: 'pending',
+            status: 'completed',
             paymentMethod: selectedMethod,
             bankName: bankName,
             bankAccNo: bankAccNo,
@@ -885,78 +925,66 @@ class PayoutViewModel extends ChangeNotifier {
     }
   }
 
-  // status transitions come from the (currently mocked) payout gateway.
-  // 'processing' is UI-only — see the payoutStatusLabel/Color doc
-  // comment above for why it's never written to payout_history.
-  //
-  // Both payment methods run this and auto-complete — see
-  // MockPayoutGateway's doc comment for why that's a deliberate demo
-  // simplification rather than a claim that real bank transfers clear
-  // instantly.
+  // Drives the pending -> processing -> completed animation on the
+  // success dialog by consuming the (currently mocked) payout gateway's
+  // status stream — see MockPayoutGateway's doc comment for why this is
+  // a deliberate demo simplification. 'processing' is UI-only and never
+  // written to payout_history (see payoutStatusLabel/Color); only the
+  // terminal 'completed'/'failed' status gets persisted, with the same
+  // retry/reconciliation safety net as before in case that write fails.
   Future<void> runPayoutStatusAnimation() async {
     final payoutId = lastPayoutId;
     if (payoutId == null) return;
 
-    payoutStatus = 'pending';
-    _safeNotify();
-
     await for (final status in _gateway.process(payoutId)) {
-      if (_disposed) return;
       payoutStatus = status;
-      final isTerminal = status == 'completed' || status == 'failed';
-      // Mutate payoutHistory *before* the first notify for a terminal
-      // status, so the one rebuild this triggers already reflects the
-      // synced entry — this is also the last emission from the stream,
-      // so there's no later notify that would otherwise pick it up and
-      // the History tab would stay stuck showing "Pending".
-      if (isTerminal) {
-        _syncHistoryStatus(payoutId, status);
-      }
       _safeNotify();
-      if (isTerminal) {
+      if (status != 'completed' && status != 'failed') continue;
+
+      _syncHistoryStatus(payoutId, status);
+      _safeNotify();
+
+      try {
+        await _service.updatePayoutStatus(payoutId, status);
+        await _localService.updateCachedPayoutStatus(payoutId, status, processedAt: DateTime.now());
+      } catch (e) {
+        // The UI already shows this payout as done — don't let a failed
+        // write silently leave payout_history disagreeing with what the
+        // driver saw. Flag it for reconciliation and retry once, rather
+        // than losing the failure entirely.
+        pendingReconciliation[payoutId] = status;
+        // Local persistence is independent of the remote retry below — a
+        // database error here (e.g. sqflite hiccup) must not skip the
+        // immediate remote retry, which is the more time-sensitive of the two.
+        var localSaveOk = true;
+        try {
+          await _localService.savePendingReconciliation(payoutId, status);
+        } catch (localError) {
+          localSaveOk = false;
+          debugPrint('Failed to queue payout reconciliation for $payoutId: $localError');
+        }
+        debugPrint('Failed to persist payout status for $payoutId: $e');
+        await Future.delayed(const Duration(seconds: 3));
         try {
           await _service.updatePayoutStatus(payoutId, status);
           await _localService.updateCachedPayoutStatus(payoutId, status, processedAt: DateTime.now());
-        } catch (e) {
-          // The UI already shows this payout as done — don't let a
-          // failed write silently leave payout_history disagreeing with
-          // what the driver saw. Flag it for reconciliation and retry
-          // once, rather than losing the failure entirely.
-          pendingReconciliation[payoutId] = status;
-          // Local persistence is independent of the remote retry below —
-          // a database error here (e.g. sqflite hiccup) must not skip
-          // the immediate remote retry, which is the more time-sensitive
-          // of the two.
-          var localSaveOk = true;
-          try {
-            await _localService.savePendingReconciliation(payoutId, status);
-          } catch (localError) {
-            localSaveOk = false;
-            debugPrint('Failed to queue payout reconciliation for $payoutId: $localError');
-          }
-          debugPrint('Failed to persist payout status for $payoutId: $e');
-          await Future.delayed(const Duration(seconds: 3));
-          try {
-            await _service.updatePayoutStatus(payoutId, status);
-            await _localService.updateCachedPayoutStatus(payoutId, status, processedAt: DateTime.now());
-            await _localService.removePendingReconciliation(payoutId);
-            pendingReconciliation.remove(payoutId);
-          } catch (e2) {
-            // Still unresolved after the immediate retry — it needs to
-            // stay recorded in pending_payout_reconciliation so
-            // _applyPendingReconciliations can retry it later (including
-            // across app restarts). If the earlier local save above
-            // failed, that record was never written, so try once more
-            // here rather than silently losing the reconciliation.
-            if (!localSaveOk) {
-              try {
-                await _localService.savePendingReconciliation(payoutId, status);
-              } catch (localError2) {
-                debugPrint('Still failed to queue payout reconciliation for $payoutId: $localError2');
-              }
+          await _localService.removePendingReconciliation(payoutId);
+          pendingReconciliation.remove(payoutId);
+        } catch (e2) {
+          // Still unresolved after the immediate retry — it needs to stay
+          // recorded in pending_payout_reconciliation so
+          // _applyPendingReconciliations can retry it later (including
+          // across app restarts). If the earlier local save above failed,
+          // that record was never written, so try once more here rather
+          // than silently losing the reconciliation.
+          if (!localSaveOk) {
+            try {
+              await _localService.savePendingReconciliation(payoutId, status);
+            } catch (localError2) {
+              debugPrint('Still failed to queue payout reconciliation for $payoutId: $localError2');
             }
-            debugPrint('Retry also failed to persist payout status for $payoutId: $e2');
           }
+          debugPrint('Retry also failed to persist payout status for $payoutId: $e2');
         }
       }
     }

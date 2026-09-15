@@ -33,6 +33,8 @@ class TripDetailDialog extends StatelessWidget {
                 style: const TextStyle(color: AppColors.greyText, fontSize: 12),
               ),
               const SizedBox(height: 16),
+              _DetailRow(icon: Icons.directions_car_outlined, label: 'Trip', value: trip.tripName),
+              const SizedBox(height: 12),
               _DetailRow(icon: Icons.person_outline, label: 'Passenger', value: trip.passengerName),
               const SizedBox(height: 12),
               _DetailRow(icon: Icons.trip_origin, label: 'Pickup', value: trip.pickupName),
@@ -40,7 +42,44 @@ class TripDetailDialog extends StatelessWidget {
               _DetailRow(icon: Icons.location_on_outlined, label: 'Drop-off', value: trip.dropoffName),
               const SizedBox(height: 12),
               _DetailRow(icon: Icons.calendar_today_outlined, label: 'Date', value: _formatDate(trip)),
+              const SizedBox(height: 12),
+              _DetailRow(icon: Icons.date_range_outlined, label: 'Duration', value: _formatDuration(trip)),
+              const SizedBox(height: 12),
+              _DetailRow(
+                icon: Icons.payments_outlined,
+                label: 'Price/day',
+                value: 'RM${trip.dailyFee.toStringAsFixed(2)}',
+              ),
               const SizedBox(height: 16),
+              const Divider(height: 1, color: AppColors.greyBorder),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text('Passenger paid', style: TextStyle(color: AppColors.greyText)),
+                  ),
+                  Text('RM${trip.grossAmount.toStringAsFixed(2)}'),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'RM${trip.dailyFee.toStringAsFixed(2)} × ${trip.billableDays} '
+                    'day${trip.billableDays == 1 ? '' : 's'} = RM${trip.grossAmount.toStringAsFixed(2)}',
+                style: const TextStyle(color: AppColors.greyText, fontSize: 11.5),
+              ),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text('Platform fee', style: TextStyle(color: AppColors.greyText)),
+                  ),
+                  Text(
+                    '-RM${trip.platformFee.toStringAsFixed(2)}',
+                    style: const TextStyle(color: AppColors.greyText),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
               const Divider(height: 1, color: AppColors.greyBorder),
               const SizedBox(height: 16),
               Row(
@@ -87,6 +126,14 @@ class TripDetailDialog extends StatelessWidget {
     final date = trip.tripDate;
     if (date == null) return trip.monthLabel;
     return '${date.day} ${trip.monthLabel} ${date.year}';
+  }
+
+  String _formatDuration(RecentTripDisplay trip) {
+    final start = trip.cycleStartDate;
+    final end = trip.cycleEndDate;
+    final daysLabel = '${trip.billableDays} day${trip.billableDays == 1 ? '' : 's'} billed';
+    if (start == null || end == null) return daysLabel;
+    return '${start.day}/${start.month} – ${end.day}/${end.month} ($daysLabel)';
   }
 
   String _shortRef(String id) {
