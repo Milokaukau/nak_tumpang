@@ -7,6 +7,7 @@ class NegotiationFieldRow extends StatelessWidget {
   final bool isAccepted;
   final bool isRequestedByMe;
   final bool isReadOnly;
+  final bool isOffline; // NEW: Added offline flag to control button states
   final VoidCallback onAccept;
   final VoidCallback onPropose;
   final Widget? topWidget;
@@ -20,6 +21,7 @@ class NegotiationFieldRow extends StatelessWidget {
     required this.onAccept,
     required this.onPropose,
     this.isReadOnly = false,
+    this.isOffline = false, // Defaults to false so it doesn't break online usage
     this.topWidget,
   });
 
@@ -43,8 +45,7 @@ class NegotiationFieldRow extends StatelessWidget {
             ],
             Row(
               children: [
-                const Icon(Icons.lock, color: Colors.grey, size: 18),
-                const SizedBox(width: 8),
+                // REMOVED: Lock icon removed from here
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -85,7 +86,8 @@ class NegotiationFieldRow extends StatelessWidget {
               ),
             ),
             TextButton(
-              onPressed: onPropose,
+              // Passing null disables and greys out the button
+              onPressed: isOffline ? null : onPropose,
               child: const Text('Edit'),
             ),
           ],
@@ -140,7 +142,7 @@ class NegotiationFieldRow extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(vertical: 12),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
                       ),
-                      onPressed: onPropose,
+                      onPressed: isOffline ? null : onPropose, // Disables offline
                       child: const Text('Edit'),
                     ),
                   ),
@@ -159,7 +161,7 @@ class NegotiationFieldRow extends StatelessWidget {
                             padding: const EdgeInsets.symmetric(vertical: 12),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
                           ),
-                          onPressed: onPropose,
+                          onPressed: isOffline ? null : onPropose, // Disables offline
                           child: const Text('Propose Another'),
                         ),
                       ),
@@ -169,10 +171,12 @@ class NegotiationFieldRow extends StatelessWidget {
                           style: ElevatedButton.styleFrom(
                             backgroundColor: AppColors.primaryYellow,
                             foregroundColor: AppColors.black,
+                            disabledBackgroundColor: Colors.grey.shade300, // Grey background when disabled
+                            disabledForegroundColor: Colors.grey.shade600, // Grey text when disabled
                             padding: const EdgeInsets.symmetric(vertical: 12),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
                           ),
-                          onPressed: onAccept,
+                          onPressed: isOffline ? null : onAccept, // Disables offline
                           child: const Text('Accept'),
                         ),
                       ),

@@ -9,12 +9,6 @@ class NegotiationLocalService {
   Future<void> cacheTumpangRequests(List<Map<String, dynamic>> requests) async {
     final db = await _dbService.database;
 
-    // Temporarily bypass strict foreign key rules to allow partial caching.
-    // Everything between here and the PRAGMA ON below is wrapped in
-    // try/finally: this connection is shared, so if batch.commit() throws
-    // (e.g. a genuinely malformed row) and we don't restore the PRAGMA,
-    // foreign_keys stays OFF for every later write on this connection —
-    // silently letting unrelated writes create invalid relationships.
     await db.execute('PRAGMA foreign_keys = OFF');
     try {
       final batch = db.batch();
@@ -29,29 +23,38 @@ class NegotiationLocalService {
       }
       await batch.commit(noResult: true);
     } finally {
-      // Restore the strict rules to respect the team lead's configuration —
-      // runs even if batch.commit() above threw.
       await db.execute('PRAGMA foreign_keys = ON');
     }
   }
 
   // SELECT for offline viewing (Pending and Complete only)
-  // NOTE ON ACCOUNT SCOPING: this table has no owner/user-id column to
-  // filter by, so this cache is only ever safe to hold ONE account's data
-  // at a time. NegotiationViewModel is responsible for calling
-  // [clearRequestsCache] on logout and on switching to a different
-  // account (see its auth-state listener) so a second user on the same
-  // device can never read a previous user's cached negotiation terms.
   Future<List<Map<String, dynamic>>> getOfflineRequests(String status) async {
-    final db = await _dbService.database;
+    // FIX: Using readOnlyDatabase bypasses database locks from background writes,
+    // instantly fixing the "long load" freeze.
+    final db = await _dbService.readOnlyDatabase;
 
     final result = await db.query(
       'tumpang_request',
       where: 'status = ?',
-      whereArgs: [status], // e.g., 'pending' or 'completed'
+      whereArgs: [status],
     );
 
     return result.map((row) => _mapIntegersToBooleans(row)).toList();
+  }
+
+  // NEW FIX: Allows buttons/notifications to fetch a specific request instantly offline
+  // without relying on memory caches that might be frozen.
+  Future<Map<String, dynamic>?> getOfflineRequestById(String id) async {
+    final db = await _dbService.readOnlyDatabase;
+    final result = await db.query(
+      'tumpang_request',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    if (result.isNotEmpty) {
+      return _mapIntegersToBooleans(result.first);
+    }
+    return null;
   }
 
   // DELETE to clear cache upon logout
@@ -73,7 +76,6 @@ class NegotiationLocalService {
 
   Map<String, dynamic> _mapIntegersToBooleans(Map<String, dynamic> data) {
     final result = Map<String, dynamic>.from(data);
-    // Add all your boolean field names here
     final boolFields = [
       'pickup_is_accepted', 'dropoff_is_accepted', 'pickup_time_is_accepted',
       'fee_is_accepted', 'sub_start_is_accepted', 'sub_end_is_accepted', 'is_extension'

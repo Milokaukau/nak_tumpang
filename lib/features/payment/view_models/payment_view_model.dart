@@ -164,6 +164,13 @@ class PaymentViewModel extends ChangeNotifier {
     DateTime? cycleStart,
     DateTime? cycleEnd,
   }) async {
+    // NEW FIX: Fail fast if offline to prevent the 30-second Supabase timeout freeze
+    if (isOffline) {
+      proformaErrorMessage = 'Cannot load detailed breakdown while offline.';
+      notifyListeners();
+      return null;
+    }
+
     isLoadingProforma = true;
     proformaErrorMessage = null;
     notifyListeners();
