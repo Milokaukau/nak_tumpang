@@ -121,8 +121,25 @@ class PaymentViewModel extends ChangeNotifier {
       } else {
         // Fetch from Supabase
         await _service.generateDueInvoicesForUser(userId);
-        pendingPayments = await _service.fetchPendingPayments(userId);
+
+        // fetchPendingPayments also repairs/cleans up invalid invoices
+        // remotely (premature bills, zeroed-out amounts) and hands back
+        // which invoice ids it deleted so the offline cache can be kept
+        // in sync.
+        final pendingResult = await _service.fetchPendingPayments(userId);
+        pendingPayments = pendingResult.payments;
         paymentHistory = await _service.fetchPaymentHistory(userId);
+
+        // Purge any zombie invoices the service just deleted server-side so
+        // they don't resurface from the offline cache next time the app is
+        // opened without a network connection.
+        if (pendingResult.deletedInvoiceIds.isNotEmpty) {
+          try {
+            await _localService.deletePaymentsByIds(pendingResult.deletedInvoiceIds);
+          } catch (e) {
+            debugPrint('Failed to purge zombie invoices from local cache: $e');
+          }
+        }
 
         // Safely cache to SQLite without crashing UI on foreign key violations
         try {
