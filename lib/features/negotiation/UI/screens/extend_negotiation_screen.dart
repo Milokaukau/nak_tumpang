@@ -27,7 +27,7 @@ class _ExtendNegotiationScreenState extends State<ExtendNegotiationScreen> {
 
   bool _isLoading = true;
   bool _isSubmitting = false;
-  String? _loadError; // Added to track load failures
+  String? _loadError;
 
   Map<String, dynamic>? _subscription;
 
@@ -186,7 +186,7 @@ class _ExtendNegotiationScreenState extends State<ExtendNegotiationScreen> {
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (context) => ProposeValueBottomSheet(
         title: 'Fee (per day)',
-        currentValue: _fee.toStringAsFixed(0),
+        currentValue: _fee.toString(), // FIX: Passing raw fractional value instead of rounded string
         onSubmit: (value) async {
           final parsed = double.tryParse(value);
           if (parsed == null || !parsed.isFinite || parsed <= 0) {
@@ -281,7 +281,6 @@ class _ExtendNegotiationScreenState extends State<ExtendNegotiationScreen> {
       final newRequestId = await controller.submitExtensionRequest(
         subscription: _subscription!,
         newEndDate: _newEndDate,
-        // Every extension is treated identically, but we keep this flag to accurately log history
         extensionType: anyTermsChanged ? 'renegotiate' : 'date_only',
         overridePickupName: pickupChanged ? _pickupName : null,
         overridePickupLat: pickupChanged ? _pickupLat : null,
@@ -425,7 +424,7 @@ class _ExtendNegotiationScreenState extends State<ExtendNegotiationScreen> {
 
           NegotiationFieldRow(
             title: 'Tumpang Fee',
-            value: 'RM ${_fee.toStringAsFixed(0)}/day',
+            value: 'RM ${_fee.toStringAsFixed(2)}/day', // Updated consistency with fraction values
             isAccepted: true,
             isRequestedByMe: false,
             onPropose: _openFeeSheet,
