@@ -177,7 +177,7 @@ class _WalletTab extends StatelessWidget {
                 const SizedBox(width: 12),
                 Expanded(
                   child: _StatBox(
-                    label: 'Trips this month',
+                    label: 'Payments this month',
                     value: '${vm.tripsCompletedCount}',
                   ),
                 ),

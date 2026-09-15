@@ -179,6 +179,9 @@ class PayoutViewModel extends ChangeNotifier {
   // corrected the moment it resolved
   double bankTransferFee = kFallbackBankTransferFee;
 
+  // Count of settled payment rows (billing cycles) this month, not
+  // individual ride days — see _loadWalletData for why. Backs the
+  // "Payments this month" stat card.
   int tripsCompletedCount = 0;
   double thisMonthPoints = 0;
   List<RecentTripDisplay> recentTrips = [];
@@ -619,8 +622,11 @@ class PayoutViewModel extends ChangeNotifier {
     );
     thisMonthPoints = 0;
     // Kept in lockstep with thisMonthPoints — both describe the same
-    // current-month window, so the stat cards never show a trip count
-    // that doesn't actually back up the points figure next to it.
+    // current-month window. Note this counts settled payment rows
+    // (billing cycles), not individual ride days — a single row can
+    // cover several billed days (amount = dailyFee × billableDays,
+    // see payment_supabase_service.dart), so the UI label reads
+    // "Payments this month", not "Trips this month".
     tripsCompletedCount = 0;
     for (final trip in monthTrips) {
       // driver_net_amount is set by settle_payments() — the invoice
@@ -878,7 +884,7 @@ class PayoutViewModel extends ChangeNotifier {
           PayoutHistoryDisplay(
             id: payoutId,
             amount: amount,
-            status: 'completed',
+            status: 'pending',
             paymentMethod: selectedMethod,
             bankName: bankName,
             bankAccNo: bankAccNo,

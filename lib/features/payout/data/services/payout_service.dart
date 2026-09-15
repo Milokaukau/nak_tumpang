@@ -34,9 +34,14 @@ class PayoutService {
         .select('id, driver_net_amount, paid_at, tumpang_subscription!inner(driver_trips!inner(user_id))')
         .eq('tumpang_subscription.driver_trips.user_id', userId)
         .eq('payment_type', 'monthly')
-        .not('paid_at', 'is', null)
         .gte('paid_at', start.toIso8601String())
-        .lt('paid_at', end.toIso8601String());
+        .lt('paid_at', end.toIso8601String())
+    // paid_at alone isn't enough to call a row "settled" — it can be
+    // set without credited_to_driver_at/driver_net_amount also being
+    // populated on rows predating settle_payments(), which would
+    // otherwise count as a zero-value trip here.
+        .not('credited_to_driver_at', 'is', null)
+        .not('driver_net_amount', 'is', null);
 
     return List<Map<String, dynamic>>.from(response);
   }
@@ -71,7 +76,11 @@ class PayoutService {
         ''')
         .eq('tumpang_subscription.driver_trips.user_id', userId)
         .eq('payment_type', 'monthly')
-        .not('paid_at', 'is', null)
+    // Same settlement-field reasoning as fetchCompletedTripsInRange
+    // above — paid_at alone doesn't guarantee this row was actually
+    // processed by settle_payments().
+        .not('credited_to_driver_at', 'is', null)
+        .not('driver_net_amount', 'is', null)
         .order('paid_at', ascending: false)
         .limit(limit);
 

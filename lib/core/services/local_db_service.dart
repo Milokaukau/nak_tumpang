@@ -14,6 +14,7 @@ class LocalDbService {
   }
 
   static Database? _readOnlyDatabase;
+  static Future<Database>? _readOnlyDatabaseFuture;
 
   Future<Database> _initDB(String filePath) async {
     final dbPath = await getDatabasesPath();
@@ -43,12 +44,25 @@ class LocalDbService {
   /// Must be opened after the writable connection has run migrations at
   /// least once (a read-only handle can't create or upgrade the schema),
   /// which `database` above guarantees since it's always awaited first.
-  Future<Database> get readOnlyDatabase async {
-    if (_readOnlyDatabase != null) return _readOnlyDatabase!;
+  Future<Database> get readOnlyDatabase {
+    if (_readOnlyDatabase != null) return Future.value(_readOnlyDatabase!);
+    // Cache the in-flight open itself, not just the result — without
+    // this, two get*/getCached* calls landing before the first open
+    // resolves would each pass the `_readOnlyDatabase != null` check
+    // above and both call openDatabase, leaking a duplicate handle.
+    return _readOnlyDatabaseFuture ??= _openReadOnlyDatabase();
+  }
+
+  Future<Database> _openReadOnlyDatabase() async {
     await database; // ensure the file exists and is migrated
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, 'tumpang_cache.db');
-    _readOnlyDatabase = await openDatabase(path, readOnly: true);
+    // singleInstance: false is what actually makes this read-only:
+    // sqflite's default (true) means opening the same path again just
+    // hands back the existing writable instance and silently ignores
+    // readOnly: true, so without this the "read-only" handle could
+    // write just fine.
+    _readOnlyDatabase = await openDatabase(path, readOnly: true, singleInstance: false);
     return _readOnlyDatabase!;
   }
 
