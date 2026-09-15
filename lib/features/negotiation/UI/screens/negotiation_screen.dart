@@ -16,6 +16,7 @@ import 'package:nak_tumpang/features/negotiation/utils/negotiation_error.dart';
 import 'package:nak_tumpang/core/services/network_service.dart';
 import 'package:nak_tumpang/features/subscriptions/data/services/subscription_supabase_service.dart';
 import 'package:nak_tumpang/features/subscriptions/UI/screens/subscription_detail_screen.dart';
+import 'package:nak_tumpang/features/negotiation/UI/screens/extend_negotiation_screen.dart';
 
 class NegotiationScreen extends StatefulWidget {
   final String requestId;
@@ -35,6 +36,7 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
     if (date == null) return value;
     return '${date.day.toString().padLeft(2, '0')}-${date.month.toString().padLeft(2, '0')}-${date.year}';
   }
+
   final SubscriptionSupabaseService _subscriptionService = SubscriptionSupabaseService();
 
   String _formatAmPm(String dbTime) {
@@ -221,13 +223,31 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
     }
   }
 
+  void _openExtendScreen(BuildContext context, String? subscriptionId) {
+    if (subscriptionId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Couldn't find this subscription. Please try again from the subscription details."),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ExtendNegotiationScreen(subscriptionId: subscriptionId),
+      ),
+    );
+  }
+
   Widget _buildSubscriptionLinkCard(String? subscriptionId, bool isDriver, String currentUserId) {
     if (subscriptionId == null) {
-      return const SizedBox.shrink(); // older completed requests with no linked subscription
+      return const SizedBox.shrink();
     }
 
     return FutureBuilder<Map<String, dynamic>?>(
-      key: ValueKey(subscriptionId), // rebuild if id changes
+      key: ValueKey(subscriptionId),
       future: _subscriptionService.fetchSubscriptionById(
         subscriptionId,
         isDriver ? 'driver' : 'passenger',
@@ -338,7 +358,8 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
 
                 final targetTripId = isDriver ? request.passengerTripId : request.driverTripId;
                 final myTripId = isDriver ? request.driverTripId : request.passengerTripId;
-                final bool isCompleted = request.status == 'completed';final bool isRejected = request.status == 'rejected';
+                final bool isCompleted = request.status == 'completed';
+                final bool isRejected = request.status == 'rejected';
                 final bool isCancelled = request.status == 'cancelled';
 
                 final bool isFinalized = isCompleted || isRejected || isCancelled;
@@ -358,8 +379,6 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                     final displayName = userData?['name'] ?? userData?['full_name'] ?? 'User';
                     final avatarUrl = userData?['avatar_url'] as String?;
 
-                    // Fetch trip name synchronously here!
-                    final myTripId = isDriver ? request.driverTripId : request.passengerTripId;
                     final tripName = controller.getCachedTripName(myTripId);
 
                     return SingleChildScrollView(
@@ -459,7 +478,7 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                                 ),
                               ],
                             ),
-                            onPropose: () => _openProposalSheet(context, controller, 'Fee (per day)', request.fee.value.toStringAsFixed(2), 'fee'),
+                            onPropose: () => _openProposalSheet(context, controller, 'Fee (per day)', request.fee.value.toString(), 'fee'),
                             onAccept: () => _runNegotiationAction(() => controller.acceptTerm(widget.requestId, 'fee')),
                           ),
 
@@ -473,6 +492,8 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                             onReject: () => _confirmReject(context, controller),
                             onCancelRequest: () => _confirmCancel(context, controller),
                             onCancelSubscription: () => _confirmCancel(context, controller),
+                            onRenew: () => _openExtendScreen(context, request.subscriptionId),
+                            onRenegotiate: () => _openExtendScreen(context, request.subscriptionId),
                             onProceedToSummary: () {
                               Navigator.push(
                                 context,

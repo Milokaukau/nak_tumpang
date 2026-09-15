@@ -193,8 +193,15 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
             depositEndDate,
             schedule,
           );
+
           final targetTotalDeposit = depositActiveDays * dailyFee;
-          final bool depositCapped = request.subscriptionDays > 60;
+
+          // Calculate the actual shortfall to charge extensions correctly
+          final oldDeposit = snapshot.data!['oldDeposit'] as double? ?? 0.0;
+          final payableDeposit = request.isExtension
+              ? (targetTotalDeposit - oldDeposit).clamp(0.0, double.infinity)
+              : targetTotalDeposit;
+
           final totalActiveDays = NegotiationViewModel.countActiveDays(startDate, endDate, schedule);
 
           final invoicePeriods = NegotiationViewModel.calculateInvoicePeriods(
@@ -204,7 +211,6 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
             schedule: schedule,
             depositDays: depositDays,
           );
-          final int remainingDays = invoicePeriods.fold<int>(0, (sum, p) => sum + (p['days'] as int));
           final double remainingAmount = invoicePeriods.fold<double>(0, (sum, p) => sum + (p['amount'] as double));
 
           return SingleChildScrollView(
@@ -255,17 +261,14 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
                         const SizedBox(height: 16),
                         _SummaryRow(
                           label: 'Tumpang Fee',
-                          value: 'RM ${dailyFee.toStringAsFixed(2)}/day\n'
-                              'RM ${(dailyFee * totalActiveDays).toStringAsFixed(2)} for $totalActiveDays scheduled day${totalActiveDays == 1 ? '' : 's'}',
+                          value: 'RM ${(dailyFee * totalActiveDays).toStringAsFixed(2)}',
                           isBold: true,
                         ),
                         const SizedBox(height: 8),
 
                         _SummaryRow(
                           label: request.isExtension ? 'Required Deposit' : 'Deposit',
-                          value: 'RM ${targetTotalDeposit.toStringAsFixed(2)} '
-                              '($depositActiveDays scheduled day${depositActiveDays == 1 ? '' : 's'} charged'
-                              '${depositCapped ? ' in the first 60 calendar days' : ''})',
+                          value: 'RM ${payableDeposit.toStringAsFixed(2)}',
                           isBold: true,
                         ),
 
@@ -273,9 +276,7 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
                           const SizedBox(height: 8),
                           _SummaryRow(
                             label: 'Remaining Balance',
-                            value: 'RM ${remainingAmount.toStringAsFixed(2)} for $remainingDays scheduled day${remainingDays == 1 ? '' : 's'} total'
-                                ' (billed as ${invoicePeriods.length} invoice${invoicePeriods.length == 1 ? '' : 's'} after the deposit period)\n'
-                                '${invoicePeriods.map((p) => 'Calendar days ${p['startDay']}\u2013${p['endDay']}: RM ${(p['amount'] as double).toStringAsFixed(2)} (${p['days']} scheduled day${p['days'] == 1 ? '' : 's'})').join('\n')}',
+                            value: 'RM ${remainingAmount.toStringAsFixed(2)}',
                             isBold: true,
                           ),
                         ],
@@ -294,7 +295,7 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
                                 ? null
                                 : () => _handlePayDeposit(
                               request: request,
-                              totalDeposit: targetTotalDeposit,
+                              totalDeposit: payableDeposit,
                             ),
                             child: _isProcessing
                                 ? const SizedBox(
@@ -303,7 +304,7 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
                               child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.black),
                             )
                                 : Text(
-                              'Pay RM ${targetTotalDeposit.toStringAsFixed(2)} to confirm',
+                              'Pay RM ${payableDeposit.toStringAsFixed(2)} to confirm',
                               style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
                               textAlign: TextAlign.center,
                             ),
