@@ -449,14 +449,14 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
 
                           NegotiationFieldRow(
                             title: 'Tumpang Fee',
-                            value: 'RM ${request.fee.value.toStringAsFixed(0)}',
+                            value: 'RM ${request.fee.value.toStringAsFixed(2)}',
                             isAccepted: request.fee.isAccepted,
                             isRequestedByMe: request.fee.requestedBy == controller.currentUserId,
                             isReadOnly: fieldsReadOnly,
                             topWidget: Column(
                               children: [
                                 Text(
-                                  'RM ${request.fee.value.toStringAsFixed(0)}/day  x  ${request.subscriptionDays} day${request.subscriptionDays == 1 ? '' : 's'}',
+                                  'RM ${request.fee.value.toStringAsFixed(2)}/day  x  ${request.subscriptionDays} day${request.subscriptionDays == 1 ? '' : 's'}',
                                   style: const TextStyle(fontSize: 13, color: AppColors.black),
                                 ),
                                 const SizedBox(height: 4),
