@@ -247,7 +247,7 @@ class ProfileViewModel extends ChangeNotifier {
 
   String? _validateLicenseNumber(String? v) {
     if (_role != 'driver') return null;
-    return Validators.licenseNumber(v);
+    return Validators.carPlateNumber(v);
   }
 
   /// Whether the driver is actually attempting a password change — any

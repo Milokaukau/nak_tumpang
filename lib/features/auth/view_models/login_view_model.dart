@@ -62,6 +62,7 @@ class LoginViewModel extends ChangeNotifier {
     return null;
   }
 
+  // does nothing until first submit attempt
   void revalidateIfNeeded() {
     if (!_autoValidate) return;
     emailError = _validateEmail(emailController.text);
@@ -80,13 +81,7 @@ class LoginViewModel extends ChangeNotifier {
 
     if (emailError != null || passwordError != null) return null;
 
-    // Logging in is a Supabase Auth round trip — there's no offline
-    // credential check to fall back on, and the local SQLite cache only
-    // ever holds data for an already-authenticated user. Without this,
-    // an offline attempt fell through to signInWithPassword() and came
-    // back as the generic "Something went wrong. Please try again.",
-    // which reads like a server problem rather than a missing
-    // connection.
+
     if (NetworkService.isOfflineNotifier.value) {
       errorMessage = "You're offline. Connect to the internet to log in.";
       notifyListeners();
