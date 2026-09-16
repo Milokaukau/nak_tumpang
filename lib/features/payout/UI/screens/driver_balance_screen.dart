@@ -7,6 +7,23 @@ import 'package:nak_tumpang/features/payout/UI/components/payout_history_detail_
 import 'package:nak_tumpang/features/payout/UI/components/trip_detail_dialog.dart';
 import 'package:nak_tumpang/features/payout/view_models/payout_view_model.dart';
 
+// Also enforced server-side in request_payout() (see kMinPayoutAmount usage
+// in the dialog). This only gates whether the button is tappable — it does
+// NOT gate whether the "not enough points" message shows. See
+// _claimButtonEnabled below for why those are now two separate questions.
+bool _canClaimPayout(PayoutViewModel vm) => vm.availableBalance >= kMinPayoutAmount;
+
+// When the wallet numbers on screen came from the SQLite cache (walletNotice
+// set — see PayoutViewModel.load()/refreshWallet()), we can't trust
+// availableBalance as current, so keep the old behavior of graying the
+// button out below threshold rather than letting the driver open a claim
+// dialog against a possibly-stale balance. Once we have a live Supabase
+// read (walletNotice null), the button stays tappable regardless of
+// balance, and _onClaimPayout below is what shows the
+// "not enough points" message instead of a disabled button.
+bool _claimButtonEnabled(PayoutViewModel vm) =>
+    vm.walletNotice != null ? _canClaimPayout(vm) : true;
+
 class DriverBalanceScreen extends StatelessWidget {
   const DriverBalanceScreen({super.key});
 
@@ -45,6 +62,20 @@ class _DriverBalanceView extends StatelessWidget {
                   ? _WalletTab(vm: vm)
                   : _HistoryTab(vm: vm),
             ),
+            // Pinned outside the scroll view so it's always reachable
+            // without scrolling past the transaction list, instead of
+            // living at the end of the SingleChildScrollView.
+            if (vm.currentView == PayoutView.wallet)
+              SafeArea(
+                top: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                  child: BaseButton(
+                    text: 'Claim payout',
+                    onPressed: _claimButtonEnabled(vm) ? () => _onClaimPayout(context, vm) : null,
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -202,37 +233,38 @@ class _WalletTab extends StatelessWidget {
                   builder: (_) => TripDetailDialog(trip: trip),
                 ),
               )),
-            const SizedBox(height: 24),
-            BaseButton(
-              text: 'Claim payout',
-              onPressed: () => _onClaimPayout(context, vm),
-            ),
+            // Claim payout now lives pinned below this scroll view (see
+            // _DriverBalanceView) instead of at the end of this list.
           ],
         ),
       ),
     );
   }
+}
 
-  void _onClaimPayout(BuildContext context, PayoutViewModel vm) {
-    if (vm.availableBalance <= 0) {
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          const SnackBar(content: Text('You have no points to claim yet.')),
-        );
-      return;
-    }
-
-    // reset all data so dialog appear clean each time
-    vm.resetDetailsFields();
-    showDialog(
-      context: context,
-      builder: (_) => ChangeNotifierProvider.value(
-        value: vm,
-        child: const ClaimPayoutDialog(),
-      ),
-    );
+void _onClaimPayout(BuildContext context, PayoutViewModel vm) {
+  if (!_canClaimPayout(vm)) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            "You don't have enough points to claim payout.",
+          ),
+        ),
+      );
+    return;
   }
+
+  // reset all data so dialog appear clean each time
+  vm.resetDetailsFields();
+  showDialog(
+    context: context,
+    builder: (_) => ChangeNotifierProvider.value(
+      value: vm,
+      child: const ClaimPayoutDialog(),
+    ),
+  );
 }
 
 // all payout history for the specific driver, most recent first

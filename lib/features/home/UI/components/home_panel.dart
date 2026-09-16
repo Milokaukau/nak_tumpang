@@ -550,7 +550,9 @@ class HomePanel extends StatelessWidget {
           dropoffLocation: dropoffStr,
           time: leg['pickup_time'],
           exceptionButtonText: "Can't fetch at...",
-          onCallPressed: () => UrlUtils.makePhoneCall(leg['phone']),
+          onCallPressed: (leg['phone'] as String?)?.isNotEmpty == true
+              ? () => UrlUtils.makePhoneCall(leg['phone'])
+              : null,
           onDetailsPressed: () => _openSubscriptionDetails(context, viewModel, leg),
           onExceptionPressed: () => viewModel.openCantFetchPanel(leg),
           isCompletedToday: leg['is_completed_today'] ?? false,
@@ -680,7 +682,9 @@ class HomePanel extends StatelessWidget {
         dropoffLocation: dropoffStr,
         time: leg['pickup_time'],
         exceptionButtonText: 'No need tumpang at...',
-        onCallPressed: () => UrlUtils.makePhoneCall(leg['phone']),
+        onCallPressed: (leg['phone'] as String?)?.isNotEmpty == true
+            ? () => UrlUtils.makePhoneCall(leg['phone'])
+            : null,
         onDetailsPressed: () => _openSubscriptionDetails(context, viewModel, leg),
         onExceptionPressed: () => viewModel.openNoNeedFetchPanel(leg),
         isCompletedToday: false, // Passengers don't complete trips, drivers do

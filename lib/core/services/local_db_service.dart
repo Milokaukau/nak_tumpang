@@ -25,6 +25,31 @@ class LocalDbService {
       version: 10,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
+        // Busy timeout must be set BEFORE the WAL transition below — the
+        // transition itself can hit SQLITE_BUSY if another connection is
+        // mid-checkpoint, and with no busy handler installed yet that
+        // failure surfaces immediately instead of being retried.
+        await db.rawQuery('PRAGMA busy_timeout = 3000');
+        // WAL lets the separate read-only connection below read
+        // concurrently while this connection writes, instead of the
+        // default rollback-journal mode where a write locks the whole
+        // file and any other connection touching it gets rejected with
+        // "database is locked" rather than waiting.
+        final walResult = await db.rawQuery('PRAGMA journal_mode = WAL');
+        final mode = walResult.isNotEmpty
+            ? walResult.first.values.first.toString().toLowerCase()
+            : null;
+        if (mode != 'wal') {
+          // The pragma didn't actually take (e.g. this platform/driver
+          // silently falling back to the default rollback journal).
+          // The read-only connection below assumes WAL is active, so
+          // fail loudly here instead of limping along in a mode nothing
+          // was designed or tested for.
+          throw StateError(
+            'Failed to enable WAL journal mode (got "$mode" instead) — '
+                'the read-only connection depends on WAL for concurrent reads.',
+          );
+        }
       },
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
@@ -63,6 +88,10 @@ class LocalDbService {
     // readOnly: true, so without this the "read-only" handle could
     // write just fine.
     _readOnlyDatabase = await openDatabase(path, readOnly: true, singleInstance: false);
+    // Same reasoning as the writable connection's onConfigure above —
+    // this connection also needs to not choke instantly if it lands on
+    // the file during a brief write, now that WAL is enabled there.
+    await _readOnlyDatabase!.rawQuery('PRAGMA busy_timeout = 3000');
     return _readOnlyDatabase!;
   }
 
