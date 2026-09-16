@@ -5,12 +5,10 @@ import 'package:geolocator/geolocator.dart';
 import 'package:nak_tumpang/core/components/map_pin.dart';
 import 'package:nak_tumpang/core/services/network_service.dart';
 import 'package:provider/provider.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nak_tumpang/core/components/app_sidebar.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/features/home/UI/components/home_panel.dart';
 import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
-import 'package:nak_tumpang/features/subscriptions/data/services/subscription_supabase_service.dart';
 import 'package:nak_tumpang/features/subscriptions/UI/screens/subscription_detail_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -186,7 +184,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
-    overlay.insert(entry!);
+    overlay.insert(entry);
 
     Future.delayed(const Duration(seconds: 15), () {
       if (entry?.mounted ?? false) {
