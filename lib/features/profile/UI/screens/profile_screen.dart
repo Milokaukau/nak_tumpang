@@ -338,10 +338,10 @@ class _ProfileViewState extends State<_ProfileView> {
                     // Driving license - drivers only
                     if (vm.role == 'driver') ...[
                       const SizedBox(height: 18),
-                      Text('Driving License Number', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
+                      Text('Car Plate Number', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
                       const SizedBox(height: 6),
                       TextField(
-                          controller: vm.licenseNumberController,
+                          controller: vm.carPlateNumberController,
                           enabled: !locked,
                           textCapitalization: TextCapitalization.characters,
                           inputFormatters: [
@@ -354,7 +354,7 @@ class _ProfileViewState extends State<_ProfileView> {
                             vm.revalidateIfNeeded();
                           }
                       ),
-                      _errorText(vm.licenseNumberError),
+                      _errorText(vm.carPlateNumberError),
                       const SizedBox(height: 18),
 
                       Text('Driving License Photo', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
