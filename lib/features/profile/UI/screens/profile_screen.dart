@@ -106,8 +106,8 @@ class _ProfileViewState extends State<_ProfileView> {
                         cursor: (vm.isUploadingAvatar || locked)
                             ? SystemMouseCursors.basic
                             : SystemMouseCursors.click,
-                        onEnter: (_) => setState(() => _isHoveringAvatar = true),
-                        onExit: (_) => setState(() => _isHoveringAvatar = false),
+                        onEnter: locked ? null : (_) => setState(() => _isHoveringAvatar = true),
+                        onExit: locked ? null : (_) => setState(() => _isHoveringAvatar = false),
                         child: GestureDetector(
                           onTap: (vm.isUploadingAvatar || locked) ? null : vm.pickAvatar,
                           child: Stack(
@@ -157,7 +157,7 @@ class _ProfileViewState extends State<_ProfileView> {
                               Positioned.fill(
                                 child: IgnorePointer(
                                   child: AnimatedOpacity(
-                                    opacity: _isHoveringAvatar ? 1 : 0,
+                                    opacity: (_isHoveringAvatar && !locked) ? 1 : 0,
                                     duration: const Duration(milliseconds: 150),
                                     child: CircleAvatar(
                                       radius: 44,
