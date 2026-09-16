@@ -3,6 +3,7 @@ import 'package:nak_tumpang/core/components/base_button.dart';
 import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/components/base_filter_options.dart';
+import 'package:nak_tumpang/core/components/offline_dialog.dart';
 import 'package:nak_tumpang/core/services/network_service.dart';
 import 'package:nak_tumpang/features/home/UI/components/direct_route_option_card.dart';
 import 'package:nak_tumpang/features/home/UI/components/mixed_route_option_card.dart';
@@ -510,6 +511,15 @@ class HomePanel extends StatelessWidget {
           const SizedBox(height: 4),
           GestureDetector(
             onTap: () {
+              // Same guard as the other two "add trip" entry points.
+              if (NetworkService.isOfflineNotifier.value) {
+                showOfflineDialog(
+                  context,
+                  message: "You can't create a trip while offline. "
+                      'Reconnect and try again.',
+                );
+                return;
+              }
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const AddEditTripScreen()),

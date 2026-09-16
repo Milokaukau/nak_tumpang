@@ -22,7 +22,7 @@ class LocalDbService {
 
     return await openDatabase(
       path,
-      version: 10,
+      version: 11,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
         // Busy timeout must be set BEFORE the WAL transition below — the
@@ -270,6 +270,17 @@ class LocalDbService {
       // "table payments has no column named credited_to_driver_at". Kept
       // nullable for the same reason: unsettled rows never have it.
       await db.execute('ALTER TABLE payments ADD COLUMN credited_to_driver_at TEXT');
+    }
+
+    if (oldVersion < 11) {
+      // The Wallet tab's "Recent transactions" list and its two stat
+      // boxes were the only part of the payout module with no local
+      // cache at all: PayoutViewModel.load()'s offline fallback restored
+      // the balance columns from driver_profiles and stopped there, so
+      // the list came back empty offline even though the History tab
+      // (which does cache, see payout_history) filled in fine. This is
+      // the missing cache — see _createDriverWalletTripsTable.
+      await _createDriverWalletTripsTable(db);
     }
   }
 
@@ -564,6 +575,54 @@ class LocalDbService {
 
     // 17. pending_payout_reconciliation
     await _createPendingPayoutReconciliationTable(db);
+
+    // 18. driver_wallet_trips
+    await _createDriverWalletTripsTable(db);
+  }
+
+  /// Read cache behind the Wallet tab's "Recent transactions" list and
+  /// its "This month" / "Payments this month" stat boxes.
+  ///
+  /// Deliberately denormalised rather than reusing `payments` +
+  /// `tumpang_subscription` + `driver_trips` + `users`: the rows the
+  /// wallet shows come from one joined Supabase query
+  /// (PayoutService.fetchRecentCompletedTrips), and reassembling them
+  /// from four cache tables would mean every one of those parent rows
+  /// has to already be cached by some *other* module first — with
+  /// foreign keys ON, a missing passenger/subscription row makes the
+  /// whole write throw, which is exactly the class of failure that
+  /// broke payout_history before (see the v4 migration above). Storing
+  /// the display fields flat keeps this table self-contained: it can
+  /// always be written straight after a successful fetch, and it's a
+  /// pure read cache that refills itself, never a source of truth.
+  ///
+  /// `in_month` marks rows inside the current-month window (the stat
+  /// boxes) and `is_recent` marks the last-10 list — a row can be in
+  /// both, so they're separate flags rather than one "kind" column.
+  Future<void> _createDriverWalletTripsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS driver_wallet_trips (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        passenger_name TEXT,
+        trip_name TEXT,
+        pickup_name TEXT,
+        dropoff_name TEXT,
+        points REAL,
+        gross_amount REAL,
+        platform_fee REAL,
+        daily_fee REAL,
+        cycle_start_date TEXT,
+        cycle_end_date TEXT,
+        paid_at TEXT,
+        in_month INTEGER NOT NULL DEFAULT 0,
+        is_recent INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_driver_wallet_trips_user '
+          'ON driver_wallet_trips (user_id, paid_at DESC)',
+    );
   }
 
   // A payout whose terminal status ('completed'/'failed') was decided

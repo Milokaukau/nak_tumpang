@@ -4,6 +4,8 @@ import 'package:nak_tumpang/features/home/UI/screens/home_screen.dart';
 import 'package:nak_tumpang/features/profile/UI/components/role_selection_dialog.dart';
 import 'package:nak_tumpang/features/profile/UI/screens/register_screen.dart';
 import 'package:nak_tumpang/features/auth/view_models/login_view_model.dart';
+import 'package:nak_tumpang/core/components/offline_dialog.dart';
+import 'package:nak_tumpang/core/services/network_service.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 
 class LoginScreen extends StatelessWidget {
@@ -62,6 +64,19 @@ class _LoginViewState extends State<_LoginView> {
   }
 
   void _startRegister() async {
+    // Stop at the entry point rather than letting someone pick a role,
+    // fill in the whole form and upload a license only to be told at
+    // submit that registration needs a connection (RegisterViewModel
+    // refuses there too, as the last line of defence).
+    if (NetworkService.isOfflineNotifier.value) {
+      await showOfflineDialog(
+        context,
+        message: 'You need an internet connection to create an account. '
+            'Reconnect and try again.',
+      );
+      return;
+    }
+
     final role = await RoleSelectionDialog.show(context, dismissible: true);
     if (!mounted || role == null) return; // canceled — stay on login
     Navigator.of(context).push(

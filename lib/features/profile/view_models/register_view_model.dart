@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:nak_tumpang/core/services/network_service.dart';
 import 'package:nak_tumpang/core/utils/validators.dart';
 import 'package:nak_tumpang/features/profile/data/services/profile_local_service.dart';
 import 'package:nak_tumpang/features/profile/data/services/profile_storage_service.dart';
@@ -148,6 +149,17 @@ class RegisterViewModel extends ChangeNotifier {
         confirmError != null ||
         licenseNumberError != null ||
         licenseError != null) {
+      return false;
+    }
+
+    // Creating an account means an auth signUp, a Storage upload (for
+    // drivers) and two table writes — none of which can be queued
+    // locally, and a half-created account is exactly what the self-heal
+    // in LoginViewModel exists to clean up. Refuse up front rather than
+    // letting signUp() fail with a network error.
+    if (NetworkService.isOfflineNotifier.value) {
+      errorMessage = "You're offline. You need an internet connection to create an account.";
+      notifyListeners();
       return false;
     }
 
