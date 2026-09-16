@@ -36,10 +36,6 @@ class PaymentViewModel extends ChangeNotifier {
     _authSubscription = _supabase.auth.onAuthStateChange.listen((data) async {
       final newUserId = data.session?.user.id;
 
-      // An explicit sign-out, or a DIFFERENT account signing in without an
-      // app restart in between — either way the SQLite payments cache
-      // still holds the PREVIOUS account's invoices/history and must not
-      // leak into the new session.
       final isAccountChange = data.event == AuthChangeEvent.signedOut ||
           (data.event == AuthChangeEvent.signedIn && _currentUserId != null && newUserId != _currentUserId);
 
@@ -59,9 +55,6 @@ class PaymentViewModel extends ChangeNotifier {
     });
   }
 
-  /// Call this from your auth/logout flow as an extra safeguard so the
-  /// cache is cleared immediately, without waiting for the
-  /// onAuthStateChange event to round-trip.
   Future<void> clearLocalCacheOnLogout() async {
     try {
       await _localService.clearPaymentsCache();
@@ -100,6 +93,36 @@ class PaymentViewModel extends ChangeNotifier {
         .fold(0.0, (sum, item) => sum + item.amount);
   }
 
+  // FIX: Added method to instantly fetch a payment for notifications/deep links offline
+  Future<Payment?> getPaymentById(String paymentId) async {
+    final allMem = [...pendingPayments, ...paymentHistory];
+    for (final p in allMem) {
+      if (p.id == paymentId) return p;
+    }
+
+    if (isOffline) {
+      final row = await _localService.getOfflinePaymentById(paymentId);
+      if (row != null) {
+        return Payment.fromJson(row);
+      }
+      return null;
+    }
+
+    try {
+      final response = await _supabase
+          .from('payments')
+          .select('*, tumpang_subscription(pickup_location, dropoff_location)')
+          .eq('id', paymentId)
+          .maybeSingle();
+      if (response != null) {
+        return Payment.fromJson(response);
+      }
+    } catch (e) {
+      debugPrint('Error fetching single payment: $e');
+    }
+    return null;
+  }
+
   Future<void> fetchAllPayments() async {
     isLoading = true;
     errorMessage = null;
@@ -114,27 +137,18 @@ class PaymentViewModel extends ChangeNotifier {
       }
 
       if (isOffline) {
-        // SQLite: Retrieve pending and completed payment records from local database
         final pRows = await _localService.getOfflinePayments(isCompleted: false);
         final cRows = await _localService.getOfflinePayments(isCompleted: true);
 
         pendingPayments = pRows.map((r) => Payment.fromJson(r)).toList();
         paymentHistory = cRows.map((r) => Payment.fromJson(r)).toList();
       } else {
-        // Fetch from Supabase
         await _service.generateDueInvoicesForUser(userId);
 
-        // fetchPendingPayments also repairs/cleans up invalid invoices
-        // remotely (premature bills, zeroed-out amounts) and hands back
-        // which invoice ids it deleted so the offline cache can be kept
-        // in sync.
         final pendingResult = await _service.fetchPendingPayments(userId);
         pendingPayments = pendingResult.payments;
         paymentHistory = await _service.fetchPaymentHistory(userId);
 
-        // Purge any zombie invoices the service just deleted server-side so
-        // they don't resurface from the offline cache next time the app is
-        // opened without a network connection.
         if (pendingResult.deletedInvoiceIds.isNotEmpty) {
           try {
             await _localService.deletePaymentsByIds(pendingResult.deletedInvoiceIds);
@@ -143,7 +157,6 @@ class PaymentViewModel extends ChangeNotifier {
           }
         }
 
-        // SQLite: Save fetched records to local database
         try {
           final allPayments = [...pendingPayments, ...paymentHistory].map((p) => p.toJson()).toList();
           await _localService.cachePayments(allPayments);
@@ -208,7 +221,6 @@ class PaymentViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Processes selected invoice payments via Stripe
   Future<bool> paySelectedWithStripe() async {
     if (isOffline) {
       paymentErrorMessage = 'Payment cannot be processed offline.';
@@ -226,8 +238,6 @@ class PaymentViewModel extends ChangeNotifier {
       String paymentIntentId;
       String? clientSecret;
 
-      // If Stripe already confirmed this exact selection but settlement
-      // failed, retry settlement instead of creating a second charge.
       if (_confirmedPaymentIntentId != null && _confirmedPaymentIds.length == selectedIds.length && _confirmedPaymentIds.containsAll(selectedIds)) {
         paymentIntentId = _confirmedPaymentIntentId!;
       } else {
@@ -251,22 +261,22 @@ class PaymentViewModel extends ChangeNotifier {
 
       if (clientSecret != null) {
         await Stripe.instance.initPaymentSheet(
-        paymentSheetParameters: SetupPaymentSheetParameters(
-          paymentIntentClientSecret: clientSecret,
-          merchantDisplayName: 'Nak Tumpang',
-          style: ThemeMode.light,
-          billingDetails: const BillingDetails(
-            address: Address(
-              country: 'MY',
-              city: '',
-              line1: '',
-              line2: '',
-              postalCode: '',
-              state: '',
+          paymentSheetParameters: SetupPaymentSheetParameters(
+            paymentIntentClientSecret: clientSecret,
+            merchantDisplayName: 'Nak Tumpang',
+            style: ThemeMode.light,
+            billingDetails: const BillingDetails(
+              address: Address(
+                country: 'MY',
+                city: '',
+                line1: '',
+                line2: '',
+                postalCode: '',
+                state: '',
+              ),
             ),
           ),
-        ),
-      );
+        );
 
         await Stripe.instance.presentPaymentSheet();
         _confirmedPaymentIntentId = paymentIntentId;
@@ -298,12 +308,6 @@ class PaymentViewModel extends ChangeNotifier {
     return clientSecret.substring(0, separator);
   }
 
-  // =========================================================================
-  // CANCELLATION BILLING
-  // =========================================================================
-
-  /// Returns the breakdown of actual fetched days and exact fees owed/refundable.
-  /// Perfect for powering the cancellation confirmation screen UI.
   Future<Map<String, dynamic>?> getCancellationSummary(String subscriptionId) async {
     if (isOffline) {
       paymentErrorMessage = 'Cannot calculate exact cancellation fees while offline.';
@@ -311,7 +315,6 @@ class PaymentViewModel extends ChangeNotifier {
       return null;
     }
 
-    // Supabase: Calculate cancellation fee
     try {
       return await _service.calculateCancellationFee(subscriptionId);
     } catch (e) {
@@ -320,7 +323,6 @@ class PaymentViewModel extends ChangeNotifier {
     }
   }
 
-  /// Executes the final bill generation upon successful cancellation.
   Future<bool> processCancellationBill(String subscriptionId) async {
     if (isOffline) {
       paymentErrorMessage = 'Cannot process cancellations while offline.';
@@ -332,10 +334,9 @@ class PaymentViewModel extends ChangeNotifier {
     paymentErrorMessage = null;
     notifyListeners();
 
-    // Supabase: Generate cancellation invoice
     try {
       await _service.generateCancellationInvoice(subscriptionId);
-      await fetchAllPayments(); // Refresh list to instantly show the final bill
+      await fetchAllPayments();
       return true;
     } catch (e) {
       paymentErrorMessage = 'Failed to generate final cancellation bill: $e';

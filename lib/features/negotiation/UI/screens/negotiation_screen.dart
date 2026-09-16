@@ -362,7 +362,6 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                 final bool isRejected = request.status == 'rejected';
                 final bool isCancelled = request.status == 'cancelled';
 
-                // Removed `|| isOffline` so the layout stays normal
                 final bool isFinalized = isCompleted || isRejected || isCancelled;
                 final bool fieldsReadOnly = isFinalized;
 
@@ -376,149 +375,171 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                 return FutureBuilder<Map<String, dynamic>?>(
                   future: controller.getUserProfileByTripId(targetTripId, isDriverTrip: !isDriver),
                   builder: (context, userSnapshot) {
-                    final userData = userSnapshot.data;
-                    final displayName = userData?['name'] ?? userData?['full_name'] ?? 'User';
-                    final avatarUrl = userData?['avatar_url'] as String?;
+                    // NEW FIX: Wrap the UI to explicitly fetch and apply passenger's schedule
+                    return FutureBuilder<Map<String, dynamic>?>(
+                        future: controller.getPassengerSchedule(request.passengerTripId),
+                        builder: (context, scheduleSnapshot) {
+                          final userData = userSnapshot.data;
+                          final displayName = userData?['name'] ?? userData?['full_name'] ?? 'User';
+                          final avatarUrl = userData?['avatar_url'] as String?;
 
-                    final tripName = controller.getCachedTripName(myTripId);
+                          final tripName = controller.getCachedTripName(myTripId);
 
-                    return SingleChildScrollView(
-                      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 20.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          Text(
-                            tripName,
-                            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppColors.black),
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: 24),
+                          // NEW FIX: Dynamically calculate true billable days based on passenger's schedule
+                          final schedule = scheduleSnapshot.data;
+                          int activeDays = request.subscriptionDays; // fallback if schedule fails
+                          double actualTotalFee = request.totalFee;  // fallback if schedule fails
 
-                          Container(
-                            width: 80, height: 80,
-                            decoration: BoxDecoration(
-                              color: AppColors.white,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: AppColors.greyBorder, width: 1),
-                            ),
-                            child: avatarUrl != null && avatarUrl.isNotEmpty
-                                ? ClipRRect(
-                              borderRadius: BorderRadius.circular(11), // 12 - the 1px border
-                              child: Image.network(
-                                avatarUrl,
-                                width: 78,
-                                height: 78,
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => const Icon(Icons.person, size: 50, color: Colors.grey),
-                              ),
-                            )
-                                : const Icon(Icons.person, size: 50, color: Colors.grey),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(displayName, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                          const SizedBox(height: 24),
+                          if (schedule != null) {
+                            final start = DateTime.tryParse(request.subscriptionStartDate.value);
+                            final end = DateTime.tryParse(request.subscriptionEndDate.value);
+                            if (start != null && end != null) {
+                              activeDays = NegotiationViewModel.countActiveDays(start, end, schedule);
+                              actualTotalFee = request.fee.value * activeDays;
+                            }
+                          }
 
-                          NegotiationFieldRow(
-                            title: 'Pickup Location',
-                            value: request.pickupLocation.name,
-                            isAccepted: request.pickupLocation.isAccepted,
-                            isRequestedByMe: request.pickupLocation.requestedBy == controller.currentUserId,
-                            isReadOnly: fieldsReadOnly,
-                            isOffline: isOffline, // Passed to control button grey-out
-                            topWidget: RouteMapHeader(label: request.pickupLocation.name, lat: request.pickupLocation.lat, lng: request.pickupLocation.lng),
-                            onPropose: () => _openLocationPicker(context, controller, 'Pickup Location', 'pickup', request.pickupLocation.name, request.pickupLocation.lat, request.pickupLocation.lng),
-                            onAccept: () => _runNegotiationAction(() => controller.acceptTerm(widget.requestId, 'pickup')),
-                          ),
-
-                          NegotiationFieldRow(
-                            title: 'Dropoff Location',
-                            value: request.dropoffLocation.name,
-                            isAccepted: request.dropoffLocation.isAccepted,
-                            isRequestedByMe: request.dropoffLocation.requestedBy == controller.currentUserId,
-                            isReadOnly: fieldsReadOnly,
-                            isOffline: isOffline, // Passed to control button grey-out
-                            topWidget: RouteMapHeader(label: request.dropoffLocation.name, lat: request.dropoffLocation.lat, lng: request.dropoffLocation.lng),
-                            onPropose: () => _openLocationPicker(context, controller, 'Dropoff Location', 'dropoff', request.dropoffLocation.name, request.dropoffLocation.lat, request.dropoffLocation.lng),
-                            onAccept: () => _runNegotiationAction(() => controller.acceptTerm(widget.requestId, 'dropoff')),
-                          ),
-
-                          NegotiationFieldRow(
-                            title: 'Tumpang Dates',
-                            value: '${_formatDate(request.subscriptionStartDate.value)} to ${_formatDate(request.subscriptionEndDate.value)}',
-                            isAccepted: request.subscriptionStartDate.isAccepted && request.subscriptionEndDate.isAccepted,
-                            isRequestedByMe: request.subscriptionStartDate.requestedBy == controller.currentUserId,
-                            isReadOnly: fieldsReadOnly,
-                            isOffline: isOffline, // Passed to control button grey-out
-                            onPropose: () => _openDateRangeProposalSheet(context, controller, request.subscriptionStartDate.value, request.subscriptionEndDate.value),
-                            onAccept: () => _runNegotiationAction(() => controller.acceptTumpangDateRange(widget.requestId)),
-                          ),
-
-                          NegotiationFieldRow(
-                            title: 'Pickup Time',
-                            value: _formatAmPm(request.pickupTime.value),
-                            isAccepted: request.pickupTime.isAccepted,
-                            isRequestedByMe: request.pickupTime.requestedBy == controller.currentUserId,
-                            isReadOnly: fieldsReadOnly,
-                            isOffline: isOffline, // Passed to control button grey-out
-                            onPropose: () => _openTimeProposalSheet(context, controller, request.pickupTime.value),
-                            onAccept: () => _runNegotiationAction(() => controller.acceptTerm(widget.requestId, 'pickup_time')),
-                          ),
-
-                          NegotiationFieldRow(
-                            title: 'Tumpang Fee',
-                            value: 'RM ${request.fee.value.toStringAsFixed(2)}',
-                            isAccepted: request.fee.isAccepted,
-                            isRequestedByMe: request.fee.requestedBy == controller.currentUserId,
-                            isReadOnly: fieldsReadOnly,
-                            isOffline: isOffline, // Passed to control button grey-out
-                            topWidget: Column(
+                          return SingleChildScrollView(
+                            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 20.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.center,
                               children: [
                                 Text(
-                                  'RM ${request.fee.value.toStringAsFixed(2)}/day  x  ${request.subscriptionDays} day${request.subscriptionDays == 1 ? '' : 's'}',
-                                  style: const TextStyle(fontSize: 13, color: AppColors.black),
+                                  tripName,
+                                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppColors.black),
+                                  textAlign: TextAlign.center,
                                 ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Total: RM ${request.totalFee.toStringAsFixed(2)}',
-                                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.black),
+                                const SizedBox(height: 24),
+
+                                Container(
+                                  width: 80, height: 80,
+                                  decoration: BoxDecoration(
+                                    color: AppColors.white,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: AppColors.greyBorder, width: 1),
+                                  ),
+                                  child: avatarUrl != null && avatarUrl.isNotEmpty
+                                      ? ClipRRect(
+                                    borderRadius: BorderRadius.circular(11),
+                                    child: Image.network(
+                                      avatarUrl,
+                                      width: 78,
+                                      height: 78,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (_, __, ___) => const Icon(Icons.person, size: 50, color: Colors.grey),
+                                    ),
+                                  )
+                                      : const Icon(Icons.person, size: 50, color: Colors.grey),
                                 ),
+                                const SizedBox(height: 8),
+                                Text(displayName, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                                const SizedBox(height: 24),
+
+                                NegotiationFieldRow(
+                                  title: 'Pickup Location',
+                                  value: request.pickupLocation.name,
+                                  isAccepted: request.pickupLocation.isAccepted,
+                                  isRequestedByMe: request.pickupLocation.requestedBy == controller.currentUserId,
+                                  isReadOnly: fieldsReadOnly,
+                                  isOffline: isOffline,
+                                  topWidget: RouteMapHeader(label: request.pickupLocation.name, lat: request.pickupLocation.lat, lng: request.pickupLocation.lng),
+                                  onPropose: () => _openLocationPicker(context, controller, 'Pickup Location', 'pickup', request.pickupLocation.name, request.pickupLocation.lat, request.pickupLocation.lng),
+                                  onAccept: () => _runNegotiationAction(() => controller.acceptTerm(widget.requestId, 'pickup')),
+                                ),
+
+                                NegotiationFieldRow(
+                                  title: 'Dropoff Location',
+                                  value: request.dropoffLocation.name,
+                                  isAccepted: request.dropoffLocation.isAccepted,
+                                  isRequestedByMe: request.dropoffLocation.requestedBy == controller.currentUserId,
+                                  isReadOnly: fieldsReadOnly,
+                                  isOffline: isOffline,
+                                  topWidget: RouteMapHeader(label: request.dropoffLocation.name, lat: request.dropoffLocation.lat, lng: request.dropoffLocation.lng),
+                                  onPropose: () => _openLocationPicker(context, controller, 'Dropoff Location', 'dropoff', request.dropoffLocation.name, request.dropoffLocation.lat, request.dropoffLocation.lng),
+                                  onAccept: () => _runNegotiationAction(() => controller.acceptTerm(widget.requestId, 'dropoff')),
+                                ),
+
+                                NegotiationFieldRow(
+                                  title: 'Tumpang Dates',
+                                  value: '${_formatDate(request.subscriptionStartDate.value)} to ${_formatDate(request.subscriptionEndDate.value)}',
+                                  isAccepted: request.subscriptionStartDate.isAccepted && request.subscriptionEndDate.isAccepted,
+                                  isRequestedByMe: request.subscriptionStartDate.requestedBy == controller.currentUserId,
+                                  isReadOnly: fieldsReadOnly,
+                                  isOffline: isOffline,
+                                  onPropose: () => _openDateRangeProposalSheet(context, controller, request.subscriptionStartDate.value, request.subscriptionEndDate.value),
+                                  onAccept: () => _runNegotiationAction(() => controller.acceptTumpangDateRange(widget.requestId)),
+                                ),
+
+                                NegotiationFieldRow(
+                                  title: 'Pickup Time',
+                                  value: _formatAmPm(request.pickupTime.value),
+                                  isAccepted: request.pickupTime.isAccepted,
+                                  isRequestedByMe: request.pickupTime.requestedBy == controller.currentUserId,
+                                  isReadOnly: fieldsReadOnly,
+                                  isOffline: isOffline,
+                                  onPropose: () => _openTimeProposalSheet(context, controller, request.pickupTime.value),
+                                  onAccept: () => _runNegotiationAction(() => controller.acceptTerm(widget.requestId, 'pickup_time')),
+                                ),
+
+                                NegotiationFieldRow(
+                                  title: 'Tumpang Fee',
+                                  value: 'RM ${request.fee.value.toStringAsFixed(2)}',
+                                  isAccepted: request.fee.isAccepted,
+                                  isRequestedByMe: request.fee.requestedBy == controller.currentUserId,
+                                  isReadOnly: fieldsReadOnly,
+                                  isOffline: isOffline,
+                                  topWidget: Column(
+                                    children: [
+                                      // NEW FIX: Shows actual billable active days instead of raw calendar days
+                                      Text(
+                                        'RM ${request.fee.value.toStringAsFixed(2)}/day  x  $activeDays day${activeDays == 1 ? '' : 's'}',
+                                        style: const TextStyle(fontSize: 13, color: AppColors.black),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      // NEW FIX: Shows strictly calculated bill based on schedule
+                                      Text(
+                                        'Total: RM ${actualTotalFee.toStringAsFixed(2)}',
+                                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.black),
+                                      ),
+                                    ],
+                                  ),
+                                  onPropose: () => _openProposalSheet(context, controller, 'Fee (per day)', request.fee.value.toString(), 'fee'),
+                                  onAccept: () => _runNegotiationAction(() => controller.acceptTerm(widget.requestId, 'fee')),
+                                ),
+
+                                NegotiationSummaryCard(
+                                  request: request,
+                                  isFullyAgreed: isFullyAgreed,
+                                  isDriver: isDriver,
+                                  isReadOnly: isCompleted,
+                                  isRejected: isRejected || isCancelled,
+                                  isOffline: isOffline,
+                                  onReject: () => _confirmReject(context, controller),
+                                  onCancelRequest: () => _confirmCancel(context, controller),
+                                  onCancelSubscription: () => _confirmCancel(context, controller),
+                                  onRenew: () => _openExtendScreen(context, request.subscriptionId),
+                                  onRenegotiate: () => _openExtendScreen(context, request.subscriptionId),
+                                  onProceedToSummary: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) => TumpangSummaryScreen(requestId: request.id),
+                                      ),
+                                    );
+                                  },
+                                ),
+                                if (isCompleted)
+                                  _buildSubscriptionLinkCard(
+                                    request.subscriptionId,
+                                    isDriver,
+                                    controller.currentUserId ?? '',
+                                  ),
+
+                                const SizedBox(height: 40),
                               ],
                             ),
-                            onPropose: () => _openProposalSheet(context, controller, 'Fee (per day)', request.fee.value.toString(), 'fee'),
-                            onAccept: () => _runNegotiationAction(() => controller.acceptTerm(widget.requestId, 'fee')),
-                          ),
-
-                          NegotiationSummaryCard(
-                            request: request,
-                            isFullyAgreed: isFullyAgreed,
-                            isDriver: isDriver,
-                            isReadOnly: isCompleted,
-                            isRejected: isRejected || isCancelled,
-                            isOffline: isOffline,
-                            onReject: () => _confirmReject(context, controller),
-                            onCancelRequest: () => _confirmCancel(context, controller),
-                            onCancelSubscription: () => _confirmCancel(context, controller),
-                            onRenew: () => _openExtendScreen(context, request.subscriptionId),
-                            onRenegotiate: () => _openExtendScreen(context, request.subscriptionId),
-                            onProceedToSummary: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => TumpangSummaryScreen(requestId: request.id),
-                                ),
-                              );
-                            },
-                          ),
-                          if (isCompleted)
-                            _buildSubscriptionLinkCard(
-                              request.subscriptionId,
-                              isDriver,
-                              controller.currentUserId ?? '',
-                            ),
-
-                          const SizedBox(height: 40),
-                        ],
-                      ),
+                          );
+                        }
                     );
                   },
                 );
