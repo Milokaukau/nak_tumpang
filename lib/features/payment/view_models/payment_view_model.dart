@@ -112,7 +112,7 @@ class PaymentViewModel extends ChangeNotifier {
       }
 
       if (isOffline) {
-        // Read from SQLite
+        // SQLite: Retrieve pending and completed payment records from local database
         final pRows = await _localService.getOfflinePayments(isCompleted: false);
         final cRows = await _localService.getOfflinePayments(isCompleted: true);
 
@@ -141,7 +141,7 @@ class PaymentViewModel extends ChangeNotifier {
           }
         }
 
-        // Safely cache to SQLite without crashing UI on foreign key violations
+        // SQLite: Save fetched records to local database
         try {
           final allPayments = [...pendingPayments, ...paymentHistory].map((p) => p.toJson()).toList();
           await _localService.cachePayments(allPayments);
@@ -164,7 +164,6 @@ class PaymentViewModel extends ChangeNotifier {
     DateTime? cycleStart,
     DateTime? cycleEnd,
   }) async {
-    // NEW FIX: Fail fast if offline to prevent the 30-second Supabase timeout freeze
     if (isOffline) {
       proformaErrorMessage = 'Cannot load detailed breakdown while offline.';
       notifyListeners();
@@ -207,6 +206,7 @@ class PaymentViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Processes selected invoice payments via Stripe
   Future<bool> paySelectedWithStripe() async {
     if (isOffline) {
       paymentErrorMessage = 'Payment cannot be processed offline.';
@@ -220,6 +220,7 @@ class PaymentViewModel extends ChangeNotifier {
     notifyListeners();
 
     try {
+      // Supabase Edge Function: Create payment intent on server
       final response = await _supabase.functions.invoke(
         'create-payment-intent',
         body: {
@@ -240,6 +241,7 @@ class PaymentViewModel extends ChangeNotifier {
         throw Exception('No client_secret returned from server');
       }
 
+      // Initialize and present Stripe payment sheet
       await Stripe.instance.initPaymentSheet(
         paymentSheetParameters: SetupPaymentSheetParameters(
           paymentIntentClientSecret: clientSecret,
@@ -260,6 +262,7 @@ class PaymentViewModel extends ChangeNotifier {
 
       await Stripe.instance.presentPaymentSheet();
 
+      // Supabase: Finalize batch payment
       await _service.completePaymentBatch(selectedPaymentIds.toList());
       selectedPaymentIds.clear();
       await fetchAllPayments();
@@ -290,6 +293,7 @@ class PaymentViewModel extends ChangeNotifier {
       return null;
     }
 
+    // Supabase: Calculate cancellation fee
     try {
       return await _service.calculateCancellationFee(subscriptionId);
     } catch (e) {
@@ -310,6 +314,7 @@ class PaymentViewModel extends ChangeNotifier {
     paymentErrorMessage = null;
     notifyListeners();
 
+    // Supabase: Generate cancellation invoice
     try {
       await _service.generateCancellationInvoice(subscriptionId);
       await fetchAllPayments(); // Refresh list to instantly show the final bill
