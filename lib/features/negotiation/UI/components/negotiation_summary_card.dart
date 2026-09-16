@@ -119,8 +119,7 @@ class NegotiationSummaryCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 16),
 
-                    if (!isOffline) ...[
-                      ElevatedButton.icon(
+                    ElevatedButton.icon(
                         icon: const Icon(Icons.autorenew, color: AppColors.black),
                         label: const Text('Continue Subscription', style: TextStyle(fontWeight: FontWeight.bold)),
                         style: ElevatedButton.styleFrom(
@@ -130,11 +129,11 @@ class NegotiationSummaryCard extends StatelessWidget {
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
                           elevation: 0,
                         ),
-                        onPressed: onRenew,
+                        onPressed: isOffline ? null : onRenew,
                       ),
                       const SizedBox(height: 10),
 
-                      OutlinedButton.icon(
+                    OutlinedButton.icon(
                         icon: const Icon(Icons.edit_note, color: AppColors.black),
                         label: const Text('Edit / Propose New Terms'),
                         style: OutlinedButton.styleFrom(
@@ -143,16 +142,15 @@ class NegotiationSummaryCard extends StatelessWidget {
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
                         ),
-                        onPressed: onRenegotiate,
+                        onPressed: isOffline ? null : onRenegotiate,
                       ),
                       const SizedBox(height: 6),
 
-                      TextButton(
-                        onPressed: onCancelSubscription,
+                    TextButton(
+                         onPressed: isOffline ? null : onCancelSubscription,
                         style: TextButton.styleFrom(foregroundColor: Colors.red),
                         child: const Text('Cancel & Refund Deposit', style: TextStyle(fontWeight: FontWeight.bold)),
-                      ),
-                    ]
+                    ),
                   ] else if (isExpired) ...[
                     const Row(
                       children: [
@@ -195,8 +193,7 @@ class NegotiationSummaryCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 16),
 
-                  if (!isOffline) ...[
-                    if (!isDriver)
+                  if (!isDriver)
                       Column(
                         children: [
                           SizedBox(
@@ -209,7 +206,7 @@ class NegotiationSummaryCard extends StatelessWidget {
                                 elevation: 0,
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                               ),
-                              onPressed: onProceedToSummary,
+                               onPressed: isOffline ? null : onProceedToSummary,
                               child: const Text('View Tumpang Summary', style: TextStyle(fontWeight: FontWeight.bold)),
                             ),
                           ),
@@ -223,7 +220,7 @@ class NegotiationSummaryCard extends StatelessWidget {
                                 side: const BorderSide(color: Colors.redAccent),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                               ),
-                              onPressed: onCancelRequest,
+                               onPressed: isOffline ? null : onCancelRequest,
                               child: const Text('Cancel Request', style: TextStyle(fontWeight: FontWeight.bold)),
                             ),
                           ),
@@ -242,8 +239,7 @@ class NegotiationSummaryCard extends StatelessWidget {
                           textAlign: TextAlign.center,
                           style: TextStyle(color: Colors.grey, fontSize: 13),
                         ),
-                      ),
-                  ]
+                       ),
                 ] else ...[
                   Container(
                     width: double.infinity,
@@ -261,7 +257,7 @@ class NegotiationSummaryCard extends StatelessWidget {
                   const SizedBox(height: 12),
                 ],
 
-                if (!isReadOnly && !isRejected && !isOffline && !isFullyAgreed) ...[
+                if (!isReadOnly && !isRejected && !isFullyAgreed) ...[
                   const SizedBox(height: 4),
                   SizedBox(
                     width: double.infinity,
@@ -272,7 +268,7 @@ class NegotiationSummaryCard extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
                       ),
-                      onPressed: isDriver ? onReject : onCancelRequest,
+                       onPressed: isOffline ? null : (isDriver ? onReject : onCancelRequest),
                       child: Text(
                         isDriver ? 'Reject Request' : 'Cancel Request',
                         style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),

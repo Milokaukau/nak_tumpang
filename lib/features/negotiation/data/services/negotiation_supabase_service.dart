@@ -28,9 +28,9 @@ class NegotiationSupabaseService {
     final response = await _supabase.functions.invoke(
       'create-payment-intent',
       body: {
-        'amount': amount,
-        'currency': 'myr',
-        'description': 'Nak Tumpang deposit for request $requestId',
+        // The edge function derives this amount from the accepted request.
+        // Never make the client-calculated amount the payment source of truth.
+        'request_id': requestId,
       },
     );
     if (response.status != 200 || response.data == null) {
@@ -57,16 +57,19 @@ class NegotiationSupabaseService {
     required double deposit,
     required String paymentIntentId,
   }) async {
-    final response = await _supabase.rpc(
-      'finalize_tumpang_payment',
-      params: {
-        'p_request_id': request.id,
-        'p_payment_intent_id': paymentIntentId,
-        'p_deposit': deposit,
+    final response = await _supabase.functions.invoke(
+      'finalize-deposit-payment',
+      body: {
+        'request_id': request.id,
+        'payment_intent_id': paymentIntentId,
       },
     );
 
-    final subscriptionId = response?.toString();
+    if (response.status != 200 || response.data == null) {
+      final error = response.data is Map ? response.data['error'] : null;
+      throw StateError(error?.toString() ?? 'Could not finalize deposit payment');
+    }
+    final subscriptionId = (response.data as Map)['subscription_id']?.toString();
     if (subscriptionId == null || subscriptionId.isEmpty) {
       throw StateError('finalize_tumpang_payment did not return a subscription id');
     }
@@ -222,16 +225,19 @@ class NegotiationSupabaseService {
         double additionalDeposit = 0.0,
         required String paymentIntentId,
       }) async {
-    final response = await _supabase.rpc(
-      'finalize_tumpang_payment',
-      params: {
-        'p_request_id': extensionRequestId,
-        'p_payment_intent_id': paymentIntentId,
-        'p_deposit': additionalDeposit,
+    final response = await _supabase.functions.invoke(
+      'finalize-deposit-payment',
+      body: {
+        'request_id': extensionRequestId,
+        'payment_intent_id': paymentIntentId,
       },
     );
 
-    final subscriptionId = response?.toString();
+    if (response.status != 200 || response.data == null) {
+      final error = response.data is Map ? response.data['error'] : null;
+      throw StateError(error?.toString() ?? 'Could not finalize deposit payment');
+    }
+    final subscriptionId = (response.data as Map)['subscription_id']?.toString();
     if (subscriptionId == null || subscriptionId.isEmpty) {
       throw StateError('finalize_tumpang_payment did not return a subscription id');
     }

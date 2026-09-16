@@ -25,6 +25,8 @@ class PaymentViewModel extends ChangeNotifier {
   String? proformaErrorMessage;
 
   String? _currentUserId;
+  String? _confirmedPaymentIntentId;
+  Set<String> _confirmedPaymentIds = {};
 
   bool get isOffline => NetworkService.isOfflineNotifier.value;
 
@@ -220,29 +222,35 @@ class PaymentViewModel extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // Supabase Edge Function: Create payment intent on server
-      final response = await _supabase.functions.invoke(
-        'create-payment-intent',
-        body: {
-          'amount': totalSelectedAmount,
-          'currency': 'myr',
-          'description': 'Nak Tumpang Invoice Settlement (${selectedPaymentIds.length} items)',
-        },
-      );
+      final selectedIds = selectedPaymentIds.toSet();
+      String paymentIntentId;
+      String? clientSecret;
 
-      if (response.status != 200 || response.data == null) {
-        final err = response.data is Map ? response.data['error'] : null;
-        throw Exception(err ?? 'Stripe PaymentIntent failure.');
+      // If Stripe already confirmed this exact selection but settlement
+      // failed, retry settlement instead of creating a second charge.
+      if (_confirmedPaymentIntentId != null && _confirmedPaymentIds.length == selectedIds.length && _confirmedPaymentIds.containsAll(selectedIds)) {
+        paymentIntentId = _confirmedPaymentIntentId!;
+      } else {
+        final response = await _supabase.functions.invoke(
+          'create-payment-intent',
+          body: {'payment_ids': selectedIds.toList()},
+        );
+
+        if (response.status != 200 || response.data == null) {
+          final err = response.data is Map ? response.data['error'] : null;
+          throw Exception(err ?? 'Stripe PaymentIntent failure.');
+        }
+
+        final paymentIntent = response.data as Map;
+        clientSecret = paymentIntent['client_secret']?.toString();
+        if (clientSecret == null || clientSecret.isEmpty) {
+          throw Exception('No client_secret returned from server');
+        }
+        paymentIntentId = _extractPaymentIntentId(clientSecret);
       }
 
-      final paymentIntent = response.data as Map;
-      final clientSecret = paymentIntent['client_secret'];
-      if (clientSecret == null) {
-        throw Exception('No client_secret returned from server');
-      }
-
-      // Initialize and present Stripe payment sheet
-      await Stripe.instance.initPaymentSheet(
+      if (clientSecret != null) {
+        await Stripe.instance.initPaymentSheet(
         paymentSheetParameters: SetupPaymentSheetParameters(
           paymentIntentClientSecret: clientSecret,
           merchantDisplayName: 'Nak Tumpang',
@@ -260,11 +268,15 @@ class PaymentViewModel extends ChangeNotifier {
         ),
       );
 
-      await Stripe.instance.presentPaymentSheet();
+        await Stripe.instance.presentPaymentSheet();
+        _confirmedPaymentIntentId = paymentIntentId;
+        _confirmedPaymentIds = selectedIds;
+      }
 
-      // Supabase: Finalize batch payment
-      await _service.completePaymentBatch(selectedPaymentIds.toList());
+      await _service.completePaymentBatch(selectedIds.toList(), paymentIntentId: paymentIntentId);
       selectedPaymentIds.clear();
+      _confirmedPaymentIntentId = null;
+      _confirmedPaymentIds = {};
       await fetchAllPayments();
       return true;
     } on StripeException catch (e) {
@@ -278,6 +290,12 @@ class PaymentViewModel extends ChangeNotifier {
       isProcessingPayment = false;
       notifyListeners();
     }
+  }
+
+  String _extractPaymentIntentId(String clientSecret) {
+    final separator = clientSecret.indexOf('_secret_');
+    if (separator < 1) throw StateError('Unexpected PaymentIntent client secret format.');
+    return clientSecret.substring(0, separator);
   }
 
   // =========================================================================

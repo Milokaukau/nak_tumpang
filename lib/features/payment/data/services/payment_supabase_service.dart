@@ -494,8 +494,18 @@ class PaymentSupabaseService {
   // that marking a payment paid and crediting the responsible driver's
   // payout balance (net of the platform fee) happen atomically — see
   // supabase/migrations/settle_payments.sql.
-  Future<void> completePaymentBatch(List<String> paymentIds) async {
-    await _supabase.rpc('settle_payments', params: {'p_payment_ids': paymentIds});
+  Future<void> completePaymentBatch(List<String> paymentIds, {required String paymentIntentId}) async {
+    final response = await _supabase.functions.invoke(
+      'settle-payment-batch',
+      body: {
+        'payment_ids': paymentIds,
+        'payment_intent_id': paymentIntentId,
+      },
+    );
+    if (response.status != 200) {
+      final error = response.data is Map ? response.data['error'] : null;
+      throw StateError(error?.toString() ?? 'Could not settle payment.');
+    }
   }
 
   // =========================================================================

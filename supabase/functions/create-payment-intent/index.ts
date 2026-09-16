@@ -48,16 +48,81 @@ serve(async (req) => {
       });
     }
 
-    // 2. Parse and validate the request body.
-    const { amount, currency, description } = await req.json();
-    if (typeof amount !== "number" || amount <= 0) {
-      return new Response(JSON.stringify({ error: "Invalid amount" }), {
+    // 2. Derive the charge from server-side records. The app must never
+    // decide the amount it can charge, nor create a generic arbitrary amount.
+    const { request_id, payment_ids } = await req.json();
+    const serviceClient = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    );
+    let amountInCents: number;
+    let metadata: Record<string, string>;
+    let description: string;
+
+    if (typeof request_id === "string" && request_id) {
+      const { data: request, error: requestError } = await serviceClient
+        .from("tumpang_request")
+        .select("passenger_trip_id, fee, sub_start_date, sub_end_date, pickup_is_accepted, dropoff_is_accepted, pickup_time_is_accepted, fee_is_accepted, sub_start_is_accepted, sub_end_is_accepted")
+        .eq("id", request_id)
+        .maybeSingle();
+      if (requestError || !request) throw new Error("Request not found.");
+      if (![request.pickup_is_accepted, request.dropoff_is_accepted, request.pickup_time_is_accepted,
+          request.fee_is_accepted, request.sub_start_is_accepted, request.sub_end_is_accepted].every(Boolean)) {
+        throw new Error("All negotiation terms must be accepted before payment.");
+      }
+
+      const { data: trip, error: tripError } = await serviceClient
+        .from("passenger_trips")
+        .select("user_id, active_monday, active_tuesday, active_wednesday, active_thursday, active_friday, active_saturday, active_sunday")
+        .eq("id", request.passenger_trip_id)
+        .maybeSingle();
+      if (tripError || !trip || trip.user_id !== userData.user.id) throw new Error("Request does not belong to the signed-in passenger.");
+
+      const start = new Date(`${request.sub_start_date}T00:00:00Z`);
+      const end = new Date(`${request.sub_end_date}T00:00:00Z`);
+      if (Number.isNaN(start.valueOf()) || Number.isNaN(end.valueOf()) || end < start) throw new Error("Invalid subscription dates.");
+      const depositEnd = new Date(Math.min(end.valueOf(), Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate() + 59)));
+      const activeKeys = ["active_sunday", "active_monday", "active_tuesday", "active_wednesday", "active_thursday", "active_friday", "active_saturday"];
+      let activeDays = 0;
+      for (let day = new Date(start); day <= depositEnd; day.setUTCDate(day.getUTCDate() + 1)) {
+        if (trip[activeKeys[day.getUTCDay()]]) activeDays++;
+      }
+      amountInCents = Math.round(Number(request.fee) * activeDays * 100);
+      if (!Number.isSafeInteger(amountInCents) || amountInCents <= 0) throw new Error("Deposit amount must be greater than zero.");
+      metadata = { payment_kind: "deposit", request_id };
+      description = `Nak Tumpang deposit for request ${request_id}`;
+    } else if (Array.isArray(payment_ids) && payment_ids.length > 0 &&
+        payment_ids.every((id) => typeof id === "string" && id) && new Set(payment_ids).size === payment_ids.length) {
+      const { data: payments, error: paymentsError } = await serviceClient
+        .from("payments")
+        .select("id, amount, tumpang_subscription_id")
+        .in("id", payment_ids)
+        .is("paid_at", null);
+      if (paymentsError || !payments || payments.length !== payment_ids.length) throw new Error("One or more invoices are no longer payable.");
+      const subscriptionIds = [...new Set(payments.map((payment) => payment.tumpang_subscription_id))];
+      const { data: subscriptions, error: subscriptionsError } = await serviceClient
+        .from("tumpang_subscription")
+        .select("id, passenger_trip_id")
+        .in("id", subscriptionIds);
+      if (subscriptionsError || !subscriptions || subscriptions.length !== subscriptionIds.length) throw new Error("Subscription not found.");
+      const tripIds = [...new Set(subscriptions.map((subscription) => subscription.passenger_trip_id))];
+      const { data: trips, error: tripsError } = await serviceClient
+        .from("passenger_trips")
+        .select("id")
+        .eq("user_id", userData.user.id)
+        .in("id", tripIds);
+      if (tripsError || !trips || trips.length !== tripIds.length) throw new Error("Invoices do not belong to the signed-in passenger.");
+      amountInCents = Math.round(payments.reduce((total, payment) => total + Number(payment.amount), 0) * 100);
+      if (!Number.isSafeInteger(amountInCents) || amountInCents <= 0) throw new Error("Invalid invoice amount.");
+      const paymentKey = [...payment_ids].sort().join(",");
+      metadata = { payment_kind: "invoice_batch", payment_ids: paymentKey };
+      description = `Nak Tumpang invoice settlement (${payment_ids.length} items)`;
+    } else {
+      return new Response(JSON.stringify({ error: "A request or invoice list is required" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-
-    const amountInCents = Math.round(amount * 100);
 
     // 3. Create the PaymentIntent with Stripe, using the secret key that
     //    only exists in this server-side environment.
@@ -77,9 +142,10 @@ serve(async (req) => {
       },
       body: new URLSearchParams({
         amount: amountInCents.toString(),
-        currency: currency ?? "myr",
+        currency: "myr",
         "payment_method_types[]": "card",
-        description: description ?? `Nak Tumpang payment (user ${userData.user.id})`,
+        description,
+        ...Object.fromEntries(Object.entries(metadata).map(([key, value]) => [`metadata[${key}]`, value])),
       }),
     });
 

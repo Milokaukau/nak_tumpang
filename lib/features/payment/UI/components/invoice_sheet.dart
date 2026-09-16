@@ -79,7 +79,9 @@ class _InvoiceSheetState extends State<InvoiceSheet> {
       _driverTripName = details['driverTripName'] as String?;
       final schedule = details['schedule'] as Map<String, dynamic>;
       if (start != null && end != null) {
-        for (var date = start; !date.isAfter(end); date = date.add(const Duration(days: 1))) {
+        for (var date = DateTime(start.year, start.month, start.day);
+            !date.isAfter(end);
+            date = DateTime(date.year, date.month, date.day + 1)) {
           if (_isDayActive(date, schedule)) _activeCycleDays++;
         }
 
@@ -89,7 +91,9 @@ class _InvoiceSheetState extends State<InvoiceSheet> {
           final e = DateTime.parse(row['end_date'].toString());
           final overlapStart = s.isBefore(start) ? start : s;
           final overlapEnd = e.isAfter(end) ? end : e;
-          for (DateTime d = overlapStart; !d.isAfter(overlapEnd); d = d.add(const Duration(days: 1))) {
+          for (DateTime d = overlapStart;
+              !d.isAfter(overlapEnd);
+              d = DateTime(d.year, d.month, d.day + 1)) {
             if (_isDayActive(d, schedule)) {
               dates.add(d.toIso8601String().split('T').first);
             }
