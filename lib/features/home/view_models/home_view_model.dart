@@ -206,6 +206,74 @@ class HomeViewModel extends ChangeNotifier {
     }
   }
 
+  /// Submits one combined exception across every driver leg of a
+  /// multi-driver ("mixed") trip -- a first-mile driver + a last-mile
+  /// driver are two separate `tumpang_subscription` rows under the hood.
+  /// Excepting only one of them left the other driver un-notified while
+  /// `_loadPassengerData`'s passenger_trip_id-level grouping already hid
+  /// the whole card as "paused" -- so this always excepts every leg
+  /// together, from one confirmation, so both drivers actually know.
+  Future<bool> submitExceptionForTrip({
+    required List<String> tumpangSubscriptionIds,
+    required String initiatedBy,
+    required String initiatedByRole,
+  }) async {
+    if (tumpangSubscriptionIds.isEmpty) return false;
+    if (exceptionStartDate == null || exceptionEndDate == null || exceptionReason == null) {
+      return false;
+    }
+
+    isSubmittingException = true;
+    exceptionFormError = null;
+    notifyListeners();
+
+    final reasonText = exceptionReason == 'Others'
+        ? exceptionCustomReasonController.text.trim()
+        : exceptionReason!;
+
+    try {
+      var successCount = 0;
+      for (final subId in tumpangSubscriptionIds) {
+        try {
+          final success = await _homeService.createException(
+            tumpangSubscriptionId: subId,
+            initiatedBy: initiatedBy,
+            initiatedByRole: initiatedByRole,
+            startDate: exceptionStartDate!,
+            endDate: exceptionEndDate!,
+            reason: reasonText,
+          );
+          if (success) successCount++;
+        } on ExceptionConflictError catch (e) {
+          // One leg already has an overlapping exception -- keep trying
+          // the remaining leg(s) instead of aborting the whole batch; the
+          // goal is "every driver notified", not "all-or-nothing".
+          exceptionFormError ??= e.message;
+        }
+      }
+
+      final allSucceeded = successCount == tumpangSubscriptionIds.length;
+      if (successCount > 0) {
+        // At least one driver was notified -- close and refresh even on
+        // partial success. Re-opening the panel would resubmit a
+        // duplicate exception for the leg(s) that already succeeded.
+        closeExceptionPanel();
+        await refreshHome();
+      }
+      if (!allSucceeded) {
+        exceptionFormError ??= 'Could not notify every driver on this trip. Please try again.';
+      }
+      return allSucceeded;
+    } catch (e) {
+      debugPrint('⚠️ Error submitting trip exception: $e');
+      exceptionFormError = 'Something went wrong. Please try again.';
+      return false;
+    } finally {
+      isSubmittingException = false;
+      notifyListeners();
+    }
+  }
+
   void _onNetworkChange() {
     if (!NetworkService.isOfflineNotifier.value) {
       _hasFoundDirect = false;

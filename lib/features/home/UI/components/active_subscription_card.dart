@@ -40,6 +40,7 @@ class ActiveSubscriptionCard extends StatelessWidget {
   final List<ActiveSubscriptionLeg> legs;
   final bool isSelected;
   final VoidCallback? onTap;
+  final Widget? bottomAction; // <-- NEW: Added to accept the combined button
 
   const ActiveSubscriptionCard({
     super.key,
@@ -47,6 +48,7 @@ class ActiveSubscriptionCard extends StatelessWidget {
     required this.legs,
     this.isSelected = false,
     this.onTap,
+    this.bottomAction, // <-- NEW
   }) : assert(legs.length > 0, 'ActiveSubscriptionCard needs at least one leg');
 
   @override
@@ -84,6 +86,15 @@ class ActiveSubscriptionCard extends StatelessWidget {
               for (int i = 0; i < legs.length; i++) ...[
                 _buildLeg(legs[i]),
                 if (i != legs.length - 1) _buildLegConnector(),
+              ],
+
+              // --- NEW: Renders the combined button safely inside the border ---
+              if (bottomAction != null) ...[
+                const SizedBox(height: 4),
+                Padding(
+                  padding: const EdgeInsets.only(left: 10, right: 10, bottom: 10),
+                  child: bottomAction!,
+                ),
               ],
             ],
           ),
