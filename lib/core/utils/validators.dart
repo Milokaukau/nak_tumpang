@@ -46,24 +46,19 @@ class Validators {
     return null;
   }
 
-  // Driving license numbers don't follow one official public format the
-  // way the IC does, so this is a light sanity check rather than a
-  // strict pattern: letters, digits, spaces and dashes only, no
-  // emoji/junk paste, at least 4 characters, and — since every real
-  // license number Malaysia issues contains digits — at least one digit,
-  // so a value like "AAAA" (all letters, clearly not a real number) no
-  // longer sails through just for being non-empty and long enough.
-  static final RegExp licenseNumberRegex = RegExp(r'^[A-Z0-9](?:[A-Z0-9\s-]*[A-Z0-9])?$');
+  // Malaysian car plate validation: letters, numbers, and spaces only (NO DASHES)
+  static final RegExp carPlateRegex = RegExp(r'^[A-Za-z0-9\s]+$');
 
-  static String? licenseNumber(String? v) {
+  static String? carPlateNumber(String? v) {
     final trimmed = v?.trim() ?? '';
-    if (trimmed.isEmpty) return 'Driving license number is required';
-    if (trimmed.length < 4) return 'Please enter a valid driver license number';
-    if (!licenseNumberRegex.hasMatch(trimmed)) {
-      return 'Letters, numbers, spaces and dashes only';
+    if (trimmed.isEmpty) return 'Car plate number is required';
+    if (trimmed.contains('-')) return 'Dashes are not allowed (e.g. W1234A)';
+    if (trimmed.length < 2) return 'Please enter a valid car plate number';
+    if (!carPlateRegex.hasMatch(trimmed)) {
+      return 'Letters, numbers, and spaces only (no dashes or special characters)';
     }
     if (!RegExp(r'[0-9]').hasMatch(trimmed)) {
-      return 'License number must include at least one digit';
+      return 'Car plate number must include at least one digit';
     }
     return null;
   }
@@ -100,8 +95,6 @@ class Validators {
     } else if (cleaned.startsWith('60')) {
       cleaned = cleaned.substring(2);
     } else if (cleaned.startsWith('0')) {
-      // Handles data saved before the leading '0' was dropped from the
-      // stored format.
       cleaned = cleaned.substring(1);
     }
     return cleaned;

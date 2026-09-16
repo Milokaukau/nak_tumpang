@@ -244,10 +244,10 @@ class _RegisterViewState extends State<_RegisterView> {
 
               if (vm.role == 'driver') ...[
                 const SizedBox(height: 18),
-                Text('Driving License Number', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
+                Text('Carplate Number', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
                 const SizedBox(height: 6),
                 TextField(
-                  controller: vm.licenseNumberController,
+                  controller: vm.carPlateNumberController,
                   textCapitalization: TextCapitalization.characters,
                   inputFormatters: [
                     UpperCaseTextFormatter(),

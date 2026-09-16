@@ -25,7 +25,7 @@ class RegisterViewModel extends ChangeNotifier {
   final phoneFocusNode = FocusNode();
 
   // driver fields
-  final licenseNumberController = TextEditingController();
+  final carPlateNumberController = TextEditingController();
   Uint8List? licenseBytes;
   bool isUploadingLicense = false;
   String? licenseNumberError;
@@ -62,7 +62,7 @@ class RegisterViewModel extends ChangeNotifier {
 
   String get trimmedName => nameController.text.trim();
   String get trimmedEmail => emailController.text.trim();
-  String get trimmedLicenseNumber => licenseNumberController.text.trim();
+  String get trimmedCarPlateNumber => carPlateNumberController.text.trim();
   String get storedPhone => Validators.toStoredPhone(phoneController.text);
 
   void setRole(String newRole) {
@@ -95,7 +95,7 @@ class RegisterViewModel extends ChangeNotifier {
     emailController.dispose();
     passwordController.dispose();
     confirmPasswordController.dispose();
-    licenseNumberController.dispose();
+    carPlateNumberController.dispose();
     super.dispose();
   }
 
@@ -117,7 +117,7 @@ class RegisterViewModel extends ChangeNotifier {
     confirmError = Validators.confirmPassword(confirmPasswordController.text, passwordController.text);
 
     if (role == 'driver') {
-      licenseNumberError = Validators.licenseNumber(licenseNumberController.text);
+      licenseNumberError = Validators.carPlateNumber(carPlateNumberController.text);
       licenseError = licenseBytes == null ? 'Please upload your driving license' : null;
     } else {
       licenseNumberError = null;
@@ -250,7 +250,7 @@ class RegisterViewModel extends ChangeNotifier {
             'total_earnings': 0,
             'available_balance': 0,
             'total_withdrawn': 0,
-            'license_number': trimmedLicenseNumber,
+            'license_number': trimmedCarPlateNumber,
             'license_url': licenseStoragePath,
           });
         }
@@ -283,7 +283,7 @@ class RegisterViewModel extends ChangeNotifier {
         if (role == 'driver') {
           await _localService.cacheDriverLicense(
             userId: newUserId,
-            licenseNumber: trimmedLicenseNumber,
+            licenseNumber: trimmedCarPlateNumber,
             licenseUrl: licenseStoragePath,
           );
         }
