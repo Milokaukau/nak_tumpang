@@ -107,21 +107,17 @@ class HomePanel extends StatelessWidget {
                 )
               else if (viewModel.panelMode == HomePanelMode.noNeedFetch && viewModel.selectedSubscription != null)
                 NoNeedFetchPanel(
+                  tumpangSubscriptionId: viewModel.selectedSubscription!['sub_id'] ?? viewModel.selectedSubscription!['id'] ?? '',
                   passengerId: viewModel.currentUserId ?? '',
-                  drivers: _resolveExceptionLegs(viewModel.selectedSubscription!).map((leg) {
-                    return NoNeedFetchDriverInfo(
-                      tumpangSubscriptionId: (leg['sub_id'] ?? leg['id'] ?? '').toString(),
-                      driverId: leg['driver_id'] ?? '',
-                      driverName: leg['name'] ?? '',
-                      driverImageUrl: leg['imageUrl'],
-                      pickupName: leg['pickup_location'] ?? '',
-                      dropoffName: leg['dropoff_location'] ?? '',
-                      pickupTime: leg['pickup_time'] ?? '',
-                      driverPhone: leg['phone'] ?? '',
-                      minDate: DateTime.tryParse(leg['subscription_start_date'] ?? ''),
-                      maxDate: DateTime.tryParse(leg['subscription_end_date'] ?? ''),
-                    );
-                  }).toList(),
+                  driverId: viewModel.selectedSubscription!['driver_id'] ?? '',
+                  driverName: viewModel.selectedSubscription!['name'] ?? '',
+                  driverImageUrl: viewModel.selectedSubscription!['imageUrl'],
+                  pickupName: viewModel.selectedSubscription!['pickup_location'] ?? '',
+                  dropoffName: viewModel.selectedSubscription!['dropoff_location'] ?? '',
+                  pickupTime: viewModel.selectedSubscription!['pickup_time'] ?? '',
+                  driverPhone: viewModel.selectedSubscription!['phone'] ?? '',
+                  minDate: DateTime.tryParse(viewModel.selectedSubscription!['subscription_start_date'] ?? ''),
+                  maxDate: DateTime.tryParse(viewModel.selectedSubscription!['subscription_end_date'] ?? ''),
                 )
               else if (viewModel.isScreenLoading)
                   const Padding(
@@ -499,19 +495,6 @@ class HomePanel extends StatelessWidget {
     ];
   }
 
-  /// `viewModel.selectedSubscription` is either a single leg map (opened
-  /// via a single-driver trip's per-leg button -- no `legs` key) or the
-  /// whole grouped card for a mixed trip (opened via the combined button
-  /// -- has a `legs` key holding one map per driver). Normalize both into
-  /// a flat list so the call site doesn't need to care which one it got.
-  List<Map<String, dynamic>> _resolveExceptionLegs(Map<String, dynamic> selected) {
-    final legs = selected['legs'];
-    if (legs is List) {
-      return legs.cast<Map<String, dynamic>>();
-    }
-    return [selected];
-  }
-
   Widget _buildEmptyStatePrompt(BuildContext context, HomeViewModel viewModel) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 24),
@@ -519,7 +502,7 @@ class HomePanel extends StatelessWidget {
         children: [
           Text(
             viewModel.availableTrips.isEmpty
-                ? 'You have no trips to match.'
+                ? (viewModel.hasExceptedTripsToday ? 'Your active trip is paused for today.' : 'You have no trips to match.')
                 : 'No trip is selected.\nSelect one from the dropdown, or',
             textAlign: TextAlign.center,
             style: const TextStyle(color: AppColors.greyText, fontSize: 14, height: 1.4),
@@ -553,7 +536,6 @@ class HomePanel extends StatelessWidget {
     return List.generate(viewModel.activeSubscriptions.length, (index) {
       final sub = viewModel.activeSubscriptions[index];
       final legs = _buildJourneyLegs(context, viewModel, sub, isDriver: isDriver);
-      final isMixedPassengerTrip = !isDriver && sub['is_mixed'] == true;
 
       return Column(
         children: [
@@ -562,20 +544,6 @@ class HomePanel extends StatelessWidget {
             isSelected: viewModel.selectedSubscriptionId == sub['id'],
             onTap: () => viewModel.selectSubscription(sub['id']),
             legs: legs,
-
-            // --- NEW: Pass the button directly into the card here ---
-            bottomAction: isMixedPassengerTrip ? SizedBox(
-              width: double.infinity,
-              child: BaseButton(
-                text: 'No need tumpang at...',
-                onPressed: () => viewModel.openNoNeedFetchPanel(sub),
-                isOutlined: true,
-                height: 36,
-                textStyle: const TextStyle(fontWeight: FontWeight.normal, fontSize: 12),
-              ),
-            ) : null,
-            // --------------------------------------------------------
-
           ),
           if (index != viewModel.activeSubscriptions.length - 1)
             const SizedBox(height: 12),
@@ -703,8 +671,6 @@ class HomePanel extends StatelessWidget {
       }
     }
 
-    final isMixedTrip = (sub['is_mixed'] == true);
-
     for (int i = 0; i < driverLegsData.length; i++) {
       final leg = driverLegsData[i];
       final currentLat = FormatUtils.parseDouble(leg['pickup_lat']);
@@ -738,18 +704,12 @@ class HomePanel extends StatelessWidget {
         pickupLocation: pickupStr,
         dropoffLocation: dropoffStr,
         time: leg['pickup_time'],
-        // A trip with two drivers (first-mile + last-mile) is two separate
-        // tumpang_subscription rows. Excepting just one here used to
-        // notify only that one driver while the whole card still
-        // disappeared as "paused" for both -- so mixed trips no longer
-        // get a per-leg button at all; see the combined button rendered
-        // below the whole card in _buildSubscriptionList instead.
-        exceptionButtonText: isMixedTrip ? null : 'No need tumpang at...',
+        exceptionButtonText: 'No need tumpang at...',
         onCallPressed: (leg['phone'] as String?)?.isNotEmpty == true
             ? () => UrlUtils.makePhoneCall(leg['phone'])
             : null,
         onDetailsPressed: () => _openSubscriptionDetails(context, viewModel, leg),
-        onExceptionPressed: isMixedTrip ? null : () => viewModel.openNoNeedFetchPanel(leg),
+        onExceptionPressed: () => viewModel.openNoNeedFetchPanel(leg),
         isCompletedToday: false, // Passengers don't complete trips, drivers do
         onCompleteTripPressed: null,
       ));

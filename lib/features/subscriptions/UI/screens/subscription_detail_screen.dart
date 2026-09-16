@@ -245,14 +245,10 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
 
     final driverId = widget.subscription['driver_id'] ?? (widget.role == 'driver' ? widget.currentUserId : (driverUser?['id'] ?? ''));
     final passengerId = widget.subscription['passenger_id'] ?? (widget.role == 'passenger' ? widget.currentUserId : (passengerUser?['id'] ?? ''));
+    final driverName = widget.subscription['driver_name'] ?? driverUser?['name'] ?? widget.subscription['name'] ?? 'Driver';
     final passengerName = widget.subscription['passenger_name'] ?? passengerUser?['name'] ?? widget.subscription['name'] ?? 'Passenger';
+    final driverPhone = widget.subscription['driver_phone'] ?? driverUser?['phone'] ?? widget.subscription['phone'] ?? '';
     final passengerPhone = widget.subscription['passenger_phone'] ?? passengerUser?['phone'] ?? '';
-
-    // Extract all legs for the NoNeedFetchPanel if it's a mixed trip
-    final rawLegs = widget.subscription['legs'];
-    final List<Map<String, dynamic>> exceptionLegs = rawLegs is List
-        ? rawLegs.cast<Map<String, dynamic>>()
-        : [widget.subscription];
 
     showModalBottomSheet(
       context: context,
@@ -304,25 +300,25 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
                   )
                 else
                   NoNeedFetchPanel(
-                    passengerId: passengerId ?? '',
-                    drivers: exceptionLegs.map((leg) {
-                      return NoNeedFetchDriverInfo(
-                        tumpangSubscriptionId: (leg['sub_id'] ?? leg['id'] ?? '').toString(),
-                        driverId: leg['driver_id'] ?? '',
-                        driverName: leg['name'] ?? '',
-                        driverImageUrl: leg['imageUrl'],
-                        pickupName: leg['pickup_location'] ?? '',
-                        dropoffName: leg['dropoff_location'] ?? '',
-                        pickupTime: leg['pickup_time'] ?? '',
-                        driverPhone: leg['phone'] ?? '',
-                        minDate: DateTime.tryParse(leg['subscription_start_date'] ?? ''),
-                        maxDate: DateTime.tryParse(leg['subscription_end_date'] ?? ''),
-                      );
-                    }).toList(),
-                    onSubmitted: () {
+                    tumpangSubscriptionId: widget.subscription['id'],
+                    passengerId: passengerId,
+                    driverId: driverId,
+                    driverName: driverName,
+                    pickupName: widget.subscription['pickup_location'] ?? '',
+                    dropoffName: widget.subscription['dropoff_location'] ?? '',
+                    pickupTime: widget.subscription['pickup_time'] ?? '',
+                    driverPhone: driverPhone,
+                    minDate: DateTime.tryParse(widget.subscription['subscription_start_date'] ?? ''),
+                    maxDate: DateTime.tryParse(widget.subscription['subscription_end_date'] ?? ''),
+                    onSubmitted: () async {
                       Navigator.of(context).pop();
                       _refreshExceptions();
-                      // Notification is handled internally by NoNeedFetchPanel for all drivers
+                      await context.read<HomeViewModel>().sendExceptionNotification(
+                        targetUserId: driverId ?? '',
+                        title: 'New Schedule Exception Request',
+                        message: 'Passenger submitted a schedule exception request.',
+                        subscriptionId: widget.subscription['id'],
+                      );
                     },
                   ),
               ],
