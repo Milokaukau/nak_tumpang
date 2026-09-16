@@ -33,15 +33,7 @@ class ProfileViewModel extends ChangeNotifier {
 
   final nameController = TextEditingController();
   final phoneController = TextEditingController();
-  final licenseNumberController = TextEditingController();
-
-  /// The license number as loaded from driver_profiles, before any edits.
-  /// Legacy values (e.g. containing dashes, like "AB-1234") were accepted
-  /// under the old, more lenient license validator. We keep this around so
-  /// an unmodified legacy value isn't forced through the newer, stricter
-  /// carPlateNumber format on every unrelated profile save — see
-  /// _validateLicenseNumber below.
-  String? _originalLicenseNumber;
+  final carPlateNumberController = TextEditingController();
   final currentPasswordController = TextEditingController();
   final newPasswordController = TextEditingController();
   final confirmPasswordController = TextEditingController();
@@ -100,7 +92,7 @@ class ProfileViewModel extends ChangeNotifier {
   bool _autoValidate = false;
   String? nameError;
   String? phoneError;
-  String? licenseNumberError;
+  String? carPlateNumberError;
   String? currentPasswordError;
   String? newPasswordError;
   String? confirmPasswordError;
@@ -110,7 +102,7 @@ class ProfileViewModel extends ChangeNotifier {
     nameController.dispose();
     phoneController.dispose();
     phoneFocusNode.dispose();
-    licenseNumberController.dispose();
+    carPlateNumberController.dispose();
     currentPasswordController.dispose();
     newPasswordController.dispose();
     confirmPasswordController.dispose();
@@ -167,8 +159,7 @@ class ProfileViewModel extends ChangeNotifier {
             .select('license_number, license_url')
             .eq('user_id', userId)
             .maybeSingle();
-        licenseNumberController.text = driverData?['license_number'] as String? ?? '';
-        _originalLicenseNumber = licenseNumberController.text;
+        carPlateNumberController.text = driverData?['license_number'] as String? ?? '';
         _licensePath = driverData?['license_url'] as String?;
         if (_licensePath != null) {
           licenseUrl = await _storageService.getSignedUrl(
@@ -178,7 +169,7 @@ class ProfileViewModel extends ChangeNotifier {
         }
         await _localService.cacheDriverLicense(
           userId: userId,
-          licenseNumber: licenseNumberController.text,
+          licenseNumber: carPlateNumberController.text,
           licenseUrl: _licensePath,
         );
       }
@@ -210,8 +201,7 @@ class ProfileViewModel extends ChangeNotifier {
 
         if (_role == 'driver') {
           final cachedLicense = await _localService.getCachedDriverLicense(userId);
-          licenseNumberController.text = cachedLicense?['license_number'] as String? ?? '';
-          _originalLicenseNumber = licenseNumberController.text;
+          carPlateNumberController.text = cachedLicense?['license_number'] as String? ?? '';
           _licensePath = cachedLicense?['license_url'] as String?;
           // Signed URLs are short-lived and Storage isn't reachable
           // right now anyway, so there's no photo to show offline —
@@ -257,19 +247,6 @@ class ProfileViewModel extends ChangeNotifier {
 
   String? _validateLicenseNumber(String? v) {
     if (_role != 'driver') return null;
-    final trimmed = v?.trim() ?? '';
-    // An untouched legacy value (e.g. "AB-1234") was accepted under the
-    // old license-number format and may not satisfy the newer, stricter
-    // car-plate format (no dashes). Only enforce carPlateNumber on values
-    // the driver has actually entered/changed here, so unrelated profile
-    // edits (name, phone, avatar, etc.) don't fail because of a legacy
-    // value that was never touched — and that value never gets silently
-    // overwritten with a reformatted car-plate value either, since it's
-    // saved back exactly as-is.
-    final isUnchangedLegacyValue = _originalLicenseNumber != null &&
-        _originalLicenseNumber!.isNotEmpty &&
-        trimmed == _originalLicenseNumber;
-    if (isUnchangedLegacyValue) return null;
     return Validators.carPlateNumber(v);
   }
 
@@ -297,7 +274,7 @@ class ProfileViewModel extends ChangeNotifier {
   void _runValidation() {
     nameError = Validators.name(nameController.text);
     phoneError = Validators.phoneLocal(phoneController.text);
-    licenseNumberError = _validateLicenseNumber(licenseNumberController.text);
+    carPlateNumberError = _validateLicenseNumber(carPlateNumberController.text);
     currentPasswordError = _validateCurrentPassword();
 
     if (!showChangePassword || !_touchingPasswordChange) {
@@ -397,7 +374,7 @@ class ProfileViewModel extends ChangeNotifier {
 
     if (nameError != null ||
         phoneError != null ||
-        licenseNumberError != null ||
+        carPlateNumberError != null ||
         currentPasswordError != null ||
         newPasswordError != null ||
         confirmPasswordError != null) {
@@ -536,7 +513,7 @@ class ProfileViewModel extends ChangeNotifier {
         if (roleToSave == 'driver') {
           await supabase.from('driver_profiles').upsert({
             'user_id': userId,
-            'license_number': licenseNumberController.text.trim(),
+            'license_number': carPlateNumberController.text.trim(),
             'license_url': _licensePath,
           });
         }
@@ -581,7 +558,7 @@ class ProfileViewModel extends ChangeNotifier {
         if (roleToSave == 'driver') {
           await _localService.cacheDriverLicense(
             userId: userId,
-            licenseNumber: licenseNumberController.text.trim(),
+            licenseNumber: carPlateNumberController.text.trim(),
             licenseUrl: _licensePath,
           );
         }
