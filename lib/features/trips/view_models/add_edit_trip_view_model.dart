@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'package:nak_tumpang/core/entities/geocoded_place.dart';
+import 'package:nak_tumpang/core/services/network_service.dart';
 import 'package:nak_tumpang/core/utils/matching_utils.dart';
 import 'package:nak_tumpang/features/trips/data/services/trip_supabase_service.dart';
 
@@ -207,6 +208,18 @@ class AddEditTripViewModel extends ChangeNotifier {
 
   Future<Map<String, dynamic>?> submit() async {
     if (!_validate()) return null;
+
+    // Last line of defence behind the three entry-point guards (My
+    // Trips' New Trip button, the home dropdown's "+ Add New Trip", and
+    // the home panel's "Add one now."): this is the only check that
+    // still holds if the connection drops while the form is open, or on
+    // the Edit path, which opens an existing trip rather than going
+    // through one of those.
+    if (NetworkService.isOfflineNotifier.value) {
+      errorMessage = "You're offline — this trip can't be saved until you reconnect.";
+      notifyListeners();
+      return null;
+    }
 
     isSubmitting = true;
     errorMessage = null;

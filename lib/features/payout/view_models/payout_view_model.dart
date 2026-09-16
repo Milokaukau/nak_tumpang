@@ -539,6 +539,17 @@ class PayoutViewModel extends ChangeNotifier {
         totalWithdrawn = (cached['total_withdrawn'] as num?)?.toDouble() ?? 0;
         final cachedFee = await _localService.getCachedBankTransferFee();
         if (cachedFee != null) bankTransferFee = cachedFee;
+        // The balance alone isn't the whole Wallet tab — "Recent
+        // transactions" and the two stat boxes sit right under it and
+        // used to come back empty offline because nothing restored them
+        // here. Best-effort: a cache miss just leaves the list empty,
+        // exactly as before, rather than turning a usable offline
+        // wallet into the no-cache error branch below.
+        try {
+          await _loadWalletDataFromCache(userId);
+        } catch (cacheError) {
+          debugPrint('load(): failed to restore wallet trips from cache: $cacheError');
+        }
         // Cached data exists, so this is informational, not fatal (the wallet, toggle, and refresh all stay usable).
         walletNotice = _fetchFailureMessage(
           e,
@@ -658,6 +669,59 @@ class PayoutViewModel extends ChangeNotifier {
         grossAmount: (trip['amount'] as num?)?.toDouble() ?? 0,
         platformFee: (trip['platform_fee'] as num?)?.toDouble() ?? 0,
         dailyFee: double.tryParse(subscription?['fee']?.toString() ?? '') ?? 0,
+        cycleStartDate: cycleStartStr != null ? DateTime.tryParse(cycleStartStr) : null,
+        cycleEndDate: cycleEndStr != null ? DateTime.tryParse(cycleEndStr) : null,
+        monthLabel: date != null ? _monthName(date.month) : '-',
+        tripDate: date,
+      );
+    }).toList();
+
+    // Mirror both result sets into SQLite so an offline load() can
+    // restore the "Recent transactions" list and the stat boxes, the
+    // same way the History tab already restores from payout_history.
+    // Best-effort and last: a cache write failing must never make an
+    // otherwise-successful wallet load look broken.
+    try {
+      await _localService.cacheDriverWalletTrips(
+        userId: userId,
+        monthRows: monthTrips,
+        recentRows: recent,
+      );
+    } catch (e) {
+      debugPrint('_loadWalletData: failed to cache wallet trips: $e');
+    }
+  }
+
+  /// Rebuilds [recentTrips] and the two stat-box values from SQLite.
+  /// Used by the offline fallback in [load] — the rows were flattened on
+  /// the way in (see PayoutLocalService.cacheDriverWalletTrips), so this
+  /// reads the display columns directly instead of re-walking the
+  /// Supabase join shape.
+  Future<void> _loadWalletDataFromCache(String userId) async {
+    final monthRows = await _localService.getCachedMonthWalletTrips(userId);
+    thisMonthPoints = 0;
+    tripsCompletedCount = 0;
+    for (final row in monthRows) {
+      thisMonthPoints += (row['points'] as num?)?.toDouble() ?? 0;
+      tripsCompletedCount++;
+    }
+
+    final recentRows = await _localService.getCachedRecentWalletTrips(userId);
+    recentTrips = recentRows.map((row) {
+      final dateStr = row['paid_at'] as String?;
+      final date = dateStr != null ? DateTime.tryParse(dateStr) : null;
+      final cycleStartStr = row['cycle_start_date'] as String?;
+      final cycleEndStr = row['cycle_end_date'] as String?;
+      return RecentTripDisplay(
+        tripId: row['id']?.toString() ?? '-',
+        passengerName: row['passenger_name'] as String? ?? 'Passenger',
+        tripName: row['trip_name'] as String? ?? '-',
+        pickupName: row['pickup_name'] as String? ?? '-',
+        dropoffName: row['dropoff_name'] as String? ?? '-',
+        points: (row['points'] as num?)?.toDouble() ?? 0,
+        grossAmount: (row['gross_amount'] as num?)?.toDouble() ?? 0,
+        platformFee: (row['platform_fee'] as num?)?.toDouble() ?? 0,
+        dailyFee: (row['daily_fee'] as num?)?.toDouble() ?? 0,
         cycleStartDate: cycleStartStr != null ? DateTime.tryParse(cycleStartStr) : null,
         cycleEndDate: cycleEndStr != null ? DateTime.tryParse(cycleEndStr) : null,
         monthLabel: date != null ? _monthName(date.month) : '-',

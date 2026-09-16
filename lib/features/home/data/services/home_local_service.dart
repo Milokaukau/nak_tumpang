@@ -1,4 +1,5 @@
 import 'package:sqflite/sqflite.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nak_tumpang/core/services/local_db_service.dart';
 
 class HomeLocalService {
@@ -34,14 +35,38 @@ class HomeLocalService {
       batch.delete(table, where: 'user_id = ?', whereArgs: [currentUserId]);
 
       // 2. Insert Current user
+      //
+      // `users.email` is NOT NULL UNIQUE, so this row needs *some*
+      // address — but it used to always be "<uuid>@placeholder.com",
+      // and since home data is cached before the profile screen is ever
+      // opened, that placeholder is what the profile screen ended up
+      // displaying offline (the signed-in user seeing their own user id
+      // where their email should be). The real address is available
+      // right here from the auth session, so use it, and only fall back
+      // to the synthetic one when there's genuinely no session email.
+      final authEmail = Supabase.instance.client.auth.currentUser?.email;
       batch.insert('users', {
         'id': currentUserId,
         'name': 'Me',
-        'email': '$currentUserId@placeholder.com',
+        'email': authEmail ?? '$currentUserId@placeholder.com',
         'phone': 'N/A',
         'role': isForPassenger ? 'passenger' : 'driver',
         'status': 'active',
       }, conflictAlgorithm: ConflictAlgorithm.ignore);
+
+      // The insert above is `ignore`, so it does nothing once the row
+      // exists — which means an install that already cached the
+      // placeholder would keep showing it forever. Repair it here, but
+      // only ever *onto* a real address and only over a placeholder, so
+      // this can't clobber a good email cached by ProfileLocalService.
+      if (authEmail != null) {
+        batch.update(
+          'users',
+          {'email': authEmail},
+          where: 'id = ? AND email LIKE ?',
+          whereArgs: [currentUserId, '%@placeholder.com'],
+        );
+      }
 
       // 3. Insert User's own trips (FIXED: Separated columns based on role)
       for (final t in trips) {

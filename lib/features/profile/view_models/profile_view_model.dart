@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:nak_tumpang/core/services/network_service.dart';
 import 'package:nak_tumpang/core/utils/validators.dart';
 import 'package:nak_tumpang/features/profile/data/services/profile_local_service.dart';
 import 'package:nak_tumpang/features/profile/data/services/profile_storage_service.dart';
@@ -58,6 +59,16 @@ class ProfileViewModel extends ChangeNotifier {
   /// confirmation flow needs its own dedicated screen), so it's just
   /// displayed as text under the avatar instead of an editable field.
   String? get email => _email;
+
+  /// True while the device has no connection. Every field on the profile
+  /// screen is read-only in that state: saving needs Supabase (the
+  /// `users`/`driver_profiles` upserts, Storage uploads, and the
+  /// re-authentication a password change does), and there's no
+  /// write-behind queue here — so letting someone type a new name or
+  /// pick a new avatar offline would only ever end in a failed save with
+  /// their edits silently lost against the cached values reloaded next
+  /// time. Locking the inputs makes that obvious up front instead.
+  bool get isOffline => NetworkService.isOfflineNotifier.value;
 
   Uint8List? avatarBytes;
   String? avatarUrl;
@@ -175,7 +186,18 @@ class ProfileViewModel extends ChangeNotifier {
         _role = cached['role'] as String? ?? 'passenger';
         _originalRole = _role;
         avatarUrl = cached['avatar_url'] as String?;
-        _email = cached['email'] as String?;
+        // The signed-in session (and its email) is persisted by
+        // supabase_flutter and readable offline, so prefer it over the
+        // cached `users.email`: HomeLocalService has to write *some*
+        // address into that NOT NULL column when it seeds the row, and
+        // older installs have a synthetic "<uuid>@placeholder.com"
+        // sitting there — which is what made the profile screen show a
+        // user id instead of an email offline.
+        final cachedEmail = cached['email'] as String?;
+        final sessionEmail = supabase.auth.currentUser?.email;
+        _email = (cachedEmail == null || cachedEmail.endsWith('@placeholder.com'))
+            ? sessionEmail ?? cachedEmail
+            : cachedEmail;
 
         if (_role == 'driver') {
           final cachedLicense = await _localService.getCachedDriverLicense(userId);
@@ -281,6 +303,7 @@ class ProfileViewModel extends ChangeNotifier {
   void notifyUiOnly() => notifyListeners();
 
   Future<void> pickAvatar() async {
+    if (isOffline) return; // locked — see [isOffline]
     final bytes = await _storageService.pickImage(source: ImageSource.gallery);
     if (bytes != null) {
       avatarBytes = bytes;
@@ -289,6 +312,7 @@ class ProfileViewModel extends ChangeNotifier {
   }
 
   Future<void> pickLicense() async {
+    if (isOffline) return; // locked — see [isOffline]
     final bytes = await _storageService.pickImage(source: ImageSource.gallery);
     if (bytes == null) return;
 
@@ -332,6 +356,17 @@ class ProfileViewModel extends ChangeNotifier {
     // disabling the button) — this can upload files and touch two
     // tables, so don't rely on the button's disabled state alone.
     if (isSaving) return ProfileSaveResult.failure;
+
+    // Same reasoning as [isOffline], enforced here as well as in the UI:
+    // the screen disables its fields and button, but this is the only
+    // check that still holds if the connection drops between the tap
+    // and this call.
+    if (isOffline) {
+      errorMessage = "You're offline — profile changes can't be saved until you reconnect.";
+      successMessage = null;
+      notifyListeners();
+      return ProfileSaveResult.failure;
+    }
 
     _autoValidate = true;
     _runValidation();

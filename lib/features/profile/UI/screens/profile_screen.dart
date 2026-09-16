@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/components/base_button.dart';
+import 'package:nak_tumpang/core/services/network_service.dart';
 import 'package:nak_tumpang/features/auth/UI/screens/login_screen.dart';
 import 'package:nak_tumpang/features/profile/view_models/profile_view_model.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
@@ -68,6 +69,16 @@ class _ProfileViewState extends State<_ProfileView> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
+    // Rebuilds the whole form the moment connectivity flips, so the
+    // fields lock/unlock immediately instead of only after the next
+    // notifyListeners() from the view model.
+    return ValueListenableBuilder<bool>(
+      valueListenable: NetworkService.isOfflineNotifier,
+      builder: (context, isOffline, _) => _buildForm(context, vm, isOffline),
+    );
+  }
+
+  Widget _buildForm(BuildContext context, ProfileViewModel vm, bool locked) {
     return Scaffold(
       backgroundColor: AppColors.white,
       appBar: AppBar(
@@ -92,13 +103,13 @@ class _ProfileViewState extends State<_ProfileView> {
                     // Avatar - tap to pick a photo, falls back to initials
                     Center(
                       child: MouseRegion(
-                        cursor: vm.isUploadingAvatar
+                        cursor: (vm.isUploadingAvatar || locked)
                             ? SystemMouseCursors.basic
                             : SystemMouseCursors.click,
                         onEnter: (_) => setState(() => _isHoveringAvatar = true),
                         onExit: (_) => setState(() => _isHoveringAvatar = false),
                         child: GestureDetector(
-                          onTap: vm.isUploadingAvatar ? null : vm.pickAvatar,
+                          onTap: (vm.isUploadingAvatar || locked) ? null : vm.pickAvatar,
                           child: Stack(
                             children: [
                               Builder(builder: (context) {
@@ -178,6 +189,30 @@ class _ProfileViewState extends State<_ProfileView> {
                         ),
                       ),
                     ],
+                    if (locked) ...[
+                      const SizedBox(height: 16),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: AppColors.greyBorder),
+                          color: AppColors.lightYellow.withValues(alpha: 0.5),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.wifi_off, size: 16, color: AppColors.greyText),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                "You're offline. This is your last saved profile — editing is "
+                                    'locked until you reconnect.',
+                                style: TextStyle(color: AppColors.greyText, fontSize: 12),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 28),
 
                     // Name
@@ -185,7 +220,8 @@ class _ProfileViewState extends State<_ProfileView> {
                     const SizedBox(height: 6),
                     TextField(
                       controller: vm.nameController,
-                      decoration: _fieldDecoration(),
+                      enabled: !locked,
+                      decoration: _fieldDecoration(locked: locked),
                       onChanged: (_) {
                         vm.notifyUiOnly(); // updates avatar initials live
                         vm.revalidateIfNeeded();
@@ -206,6 +242,11 @@ class _ProfileViewState extends State<_ProfileView> {
                         return Container(
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(8),
+                            // Matches the greyed fill the other fields
+                            // get from _fieldDecoration when locked —
+                            // this one draws its own border/background
+                            // because of the fixed "+60" prefix.
+                            color: locked ? AppColors.greyBorder.withValues(alpha: 0.18) : null,
                             border: Border.all(
                               color: vm.phoneError != null
                                   ? Colors.red
@@ -232,6 +273,7 @@ class _ProfileViewState extends State<_ProfileView> {
                             child: TextField(
                               controller: vm.phoneController,
                               focusNode: vm.phoneFocusNode,
+                              enabled: !locked,
                               keyboardType: TextInputType.phone,
                               inputFormatters: [
                                 FilteringTextInputFormatter.digitsOnly,
@@ -300,12 +342,13 @@ class _ProfileViewState extends State<_ProfileView> {
                       const SizedBox(height: 6),
                       TextField(
                           controller: vm.licenseNumberController,
+                          enabled: !locked,
                           textCapitalization: TextCapitalization.characters,
                           inputFormatters: [
                             UpperCaseTextFormatter(),
                             LengthLimitingTextInputFormatter(20),
                           ],
-                          decoration: _fieldDecoration(hint: 'e.g. D1234567', hintColor: Colors.grey),
+                          decoration: _fieldDecoration(hint: 'e.g. D1234567', hintColor: Colors.grey, locked: locked),
                           onChanged: (_) {
                             vm.notifyUiOnly();
                             vm.revalidateIfNeeded();
@@ -317,7 +360,7 @@ class _ProfileViewState extends State<_ProfileView> {
                       Text('Driving License Photo', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
                       const SizedBox(height: 6),
                       InkWell(
-                        onTap: vm.isUploadingLicense ? null : vm.pickLicense,
+                        onTap: (vm.isUploadingLicense || locked) ? null : vm.pickLicense,
                         borderRadius: BorderRadius.circular(8),
                         child: Container(
                           height: 140,
@@ -390,7 +433,7 @@ class _ProfileViewState extends State<_ProfileView> {
                     const SizedBox(height: 18),
                     if (!vm.showChangePassword)
                       InkWell(
-                        onTap: vm.toggleChangePassword,
+                        onTap: locked ? null : vm.toggleChangePassword,
                         borderRadius: BorderRadius.circular(4),
                         child: Row(
                           children: [
@@ -430,8 +473,9 @@ class _ProfileViewState extends State<_ProfileView> {
                       const SizedBox(height: 4),
                       TextField(
                         controller: vm.currentPasswordController,
+                        enabled: !locked,
                         obscureText: vm.obscureCurrentPassword,
-                        decoration: _fieldDecoration(hint: 'Your current password').copyWith(
+                        decoration: _fieldDecoration(hint: 'Your current password', locked: locked).copyWith(
                           suffixIcon: IconButton(
                             icon: Icon(vm.obscureCurrentPassword ? Icons.visibility_off : Icons.visibility),
                             onPressed: vm.toggleObscureCurrentPassword,
@@ -446,8 +490,9 @@ class _ProfileViewState extends State<_ProfileView> {
                       const SizedBox(height: 4),
                       TextField(
                         controller: vm.newPasswordController,
+                        enabled: !locked,
                         obscureText: vm.obscureNewPassword,
-                        decoration: _fieldDecoration(hint: 'New password').copyWith(
+                        decoration: _fieldDecoration(hint: 'New password', locked: locked).copyWith(
                           suffixIcon: IconButton(
                             icon: Icon(vm.obscureNewPassword ? Icons.visibility_off : Icons.visibility),
                             onPressed: vm.toggleObscureNewPassword,
@@ -469,8 +514,9 @@ class _ProfileViewState extends State<_ProfileView> {
                       const SizedBox(height: 4),
                       TextField(
                         controller: vm.confirmPasswordController,
+                        enabled: !locked,
                         obscureText: vm.obscureConfirmPassword,
-                        decoration: _fieldDecoration(hint: 'Re-enter new password').copyWith(
+                        decoration: _fieldDecoration(hint: 'Re-enter new password', locked: locked).copyWith(
                           suffixIcon: IconButton(
                             icon: Icon(vm.obscureConfirmPassword ? Icons.visibility_off : Icons.visibility),
                             onPressed: vm.toggleObscureConfirmPassword,
@@ -492,11 +538,13 @@ class _ProfileViewState extends State<_ProfileView> {
 
                     const SizedBox(height: 28),
                     BaseButton(
-                      text: 'Save Changes',
+                      text: locked ? 'Offline — editing locked' : 'Save Changes',
                       height: 48,
                       isLoading: vm.isSaving,
                       textStyle: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
-                      onPressed: () => _save(vm),
+                      // Null disables the button outright rather than
+                      // letting a tap through to a save that can only fail.
+                      onPressed: locked ? null : () => _save(vm),
                     ),
                   ],
                 ),
@@ -508,9 +556,17 @@ class _ProfileViewState extends State<_ProfileView> {
     );
   }
 
-  InputDecoration _fieldDecoration({String? hint, Color? hintColor}) {
+  InputDecoration _fieldDecoration({String? hint, Color? hintColor, bool locked = false}) {
     return InputDecoration(
       hintText: hint,
+      // Greyed fill while offline, so a locked field reads as locked at a
+      // glance and not just as an ordinary field that won't accept taps.
+      filled: locked,
+      fillColor: locked ? AppColors.greyBorder.withValues(alpha: 0.18) : null,
+      disabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: BorderSide(color: AppColors.greyBorder),
+      ),
       hintStyle: TextStyle(color: hintColor ?? AppColors.greyText.withValues(alpha: 0.6)),
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       border: OutlineInputBorder(

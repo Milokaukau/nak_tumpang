@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/components/base_button.dart';
+import 'package:nak_tumpang/core/components/offline_dialog.dart';
 import 'package:nak_tumpang/core/services/network_service.dart';
 import 'package:nak_tumpang/features/trips/view_models/my_trips_view_model.dart';
 import 'package:nak_tumpang/features/trips/UI/add_edit_trip_screen.dart';
@@ -157,8 +158,12 @@ class _MyTripsScreenState extends State<MyTripsScreen> {
         backgroundColor: AppColors.primaryYellow,
         onPressed: () {
           if (NetworkService.isOfflineNotifier.value) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Cannot create trips while offline.'), backgroundColor: Colors.red),
+            // Dialog, not a SnackBar — see showOfflineDialog for why a
+            // SnackBar raised while offline never actually appears.
+            showOfflineDialog(
+              context,
+              message: "You can't create or edit a trip while offline. "
+                  'Reconnect and try again.',
             );
             return;
           }
@@ -283,8 +288,12 @@ class _MyTripsScreenState extends State<MyTripsScreen> {
                       return;
                     }
                     if (NetworkService.isOfflineNotifier.value) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Cannot edit trips while offline.'), backgroundColor: Colors.red),
+                      // Dialog rather than a SnackBar for the same reason
+                      // as the New Trip guard above — see showOfflineDialog.
+                      showOfflineDialog(
+                        context,
+                        message: "You can't edit a trip while offline. "
+                            'Reconnect and try again.',
                       );
                       return;
                     }

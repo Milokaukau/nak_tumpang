@@ -44,6 +44,94 @@ class PayoutLocalService {
     return rows.isEmpty ? null : rows.first;
   }
 
+  // ---------------- driver_wallet_trips ----------------
+  // Backs the Wallet tab's "Recent transactions" list and its two stat
+  // boxes offline. Written only after a successful _loadWalletData()
+  // round-trip, same rule as every other cache method here.
+
+  /// Replaces this driver's cached wallet rows wholesale. A full replace
+  /// (inside one transaction) rather than an upsert: `in_month` and
+  /// `is_recent` are both relative to *when the fetch ran*, so a row
+  /// that has since dropped out of the last-10 or out of the current
+  /// month has to lose its flag — upserting would leave stale rows
+  /// flagged forever and inflate the stat boxes month after month.
+  Future<void> cacheDriverWalletTrips({
+    required String userId,
+    required List<Map<String, dynamic>> monthRows,
+    required List<Map<String, dynamic>> recentRows,
+  }) async {
+    final db = await _dbService.database;
+
+    // Merge by payment id first — a row can legitimately be both in the
+    // current month and in the last 10, and it should only be stored once.
+    final merged = <String, Map<String, dynamic>>{};
+
+    void put(Map<String, dynamic> row, {required bool inMonth, required bool isRecent}) {
+      final id = row['id']?.toString();
+      if (id == null) return;
+      final subscription = row['tumpang_subscription'] as Map<String, dynamic>?;
+      final driverTrip = subscription?['driver_trips'] as Map<String, dynamic>?;
+      final existing = merged[id];
+      merged[id] = {
+        'id': id,
+        'user_id': userId,
+        // The month query selects fewer columns than the recent one, so
+        // when the same payment arrives from both, keep whichever pass
+        // supplied a real value instead of letting the leaner row blank
+        // the display fields out.
+        'passenger_name': subscription?['passenger_trips']?['users']?['name'] as String? ??
+            existing?['passenger_name'],
+        'trip_name': driverTrip?['trip_name'] as String? ?? existing?['trip_name'],
+        'pickup_name': subscription?['pickup_location'] as String? ?? existing?['pickup_name'],
+        'dropoff_name': subscription?['dropoff_location'] as String? ?? existing?['dropoff_name'],
+        'points': (row['driver_net_amount'] as num?)?.toDouble() ?? existing?['points'],
+        'gross_amount': (row['amount'] as num?)?.toDouble() ?? existing?['gross_amount'],
+        'platform_fee': (row['platform_fee'] as num?)?.toDouble() ?? existing?['platform_fee'],
+        'daily_fee': double.tryParse(subscription?['fee']?.toString() ?? '') ?? existing?['daily_fee'],
+        'cycle_start_date': row['cycle_start_date'] as String? ?? existing?['cycle_start_date'],
+        'cycle_end_date': row['cycle_end_date'] as String? ?? existing?['cycle_end_date'],
+        'paid_at': row['paid_at'] as String? ?? existing?['paid_at'],
+        'in_month': (inMonth || existing?['in_month'] == 1) ? 1 : 0,
+        'is_recent': (isRecent || existing?['is_recent'] == 1) ? 1 : 0,
+      };
+    }
+
+    for (final row in monthRows) {
+      put(row, inMonth: true, isRecent: false);
+    }
+    for (final row in recentRows) {
+      put(row, inMonth: false, isRecent: true);
+    }
+
+    await db.transaction((txn) async {
+      await txn.delete('driver_wallet_trips', where: 'user_id = ?', whereArgs: [userId]);
+      final batch = txn.batch();
+      for (final row in merged.values) {
+        batch.insert('driver_wallet_trips', row, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+      await batch.commit(noResult: true);
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> getCachedRecentWalletTrips(String userId) async {
+    final db = await _dbService.readOnlyDatabase;
+    return db.query(
+      'driver_wallet_trips',
+      where: 'user_id = ? AND is_recent = 1',
+      whereArgs: [userId],
+      orderBy: 'paid_at DESC',
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> getCachedMonthWalletTrips(String userId) async {
+    final db = await _dbService.readOnlyDatabase;
+    return db.query(
+      'driver_wallet_trips',
+      where: 'user_id = ? AND in_month = 1',
+      whereArgs: [userId],
+    );
+  }
+
   // ---------------- payout_history ----------------
 
   // payout_history rows are always fetched as a full `select()`
