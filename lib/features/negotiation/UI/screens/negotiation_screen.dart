@@ -82,8 +82,8 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
           currentValue: currentValue,
           onSubmit: (newValue) async {
             final parsedFee = double.tryParse(newValue);
-            if (fieldPrefix == 'fee' && (parsedFee == null || !parsedFee.isFinite || parsedFee <= 0)) {
-              throw NegotiationException('Please enter a valid fee amount.');
+            if (fieldPrefix == 'fee' && (parsedFee == null || !parsedFee.isFinite || parsedFee < 1.0 || parsedFee > 100.0)) {
+              throw NegotiationException('Please enter a valid fee amount between RM 1 and RM 100.');
             }
             final dynamic valueToSubmit = fieldPrefix == 'fee' ? parsedFee! : newValue;
             await controller.proposeNewTerm(requestId: widget.requestId, fieldPrefix: fieldPrefix, value: valueToSubmit);
@@ -362,8 +362,9 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                 final bool isRejected = request.status == 'rejected';
                 final bool isCancelled = request.status == 'cancelled';
 
+                // Removed `|| isOffline` so the layout stays normal
                 final bool isFinalized = isCompleted || isRejected || isCancelled;
-                final bool fieldsReadOnly = isFinalized || isOffline;
+                final bool fieldsReadOnly = isFinalized;
 
                 final bool isFullyAgreed = request.fee.isAccepted &&
                     request.pickupTime.isAccepted &&
@@ -423,6 +424,7 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                             isAccepted: request.pickupLocation.isAccepted,
                             isRequestedByMe: request.pickupLocation.requestedBy == controller.currentUserId,
                             isReadOnly: fieldsReadOnly,
+                            isOffline: isOffline, // Passed to control button grey-out
                             topWidget: RouteMapHeader(label: request.pickupLocation.name, lat: request.pickupLocation.lat, lng: request.pickupLocation.lng),
                             onPropose: () => _openLocationPicker(context, controller, 'Pickup Location', 'pickup', request.pickupLocation.name, request.pickupLocation.lat, request.pickupLocation.lng),
                             onAccept: () => _runNegotiationAction(() => controller.acceptTerm(widget.requestId, 'pickup')),
@@ -434,6 +436,7 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                             isAccepted: request.dropoffLocation.isAccepted,
                             isRequestedByMe: request.dropoffLocation.requestedBy == controller.currentUserId,
                             isReadOnly: fieldsReadOnly,
+                            isOffline: isOffline, // Passed to control button grey-out
                             topWidget: RouteMapHeader(label: request.dropoffLocation.name, lat: request.dropoffLocation.lat, lng: request.dropoffLocation.lng),
                             onPropose: () => _openLocationPicker(context, controller, 'Dropoff Location', 'dropoff', request.dropoffLocation.name, request.dropoffLocation.lat, request.dropoffLocation.lng),
                             onAccept: () => _runNegotiationAction(() => controller.acceptTerm(widget.requestId, 'dropoff')),
@@ -445,6 +448,7 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                             isAccepted: request.subscriptionStartDate.isAccepted && request.subscriptionEndDate.isAccepted,
                             isRequestedByMe: request.subscriptionStartDate.requestedBy == controller.currentUserId,
                             isReadOnly: fieldsReadOnly,
+                            isOffline: isOffline, // Passed to control button grey-out
                             onPropose: () => _openDateRangeProposalSheet(context, controller, request.subscriptionStartDate.value, request.subscriptionEndDate.value),
                             onAccept: () => _runNegotiationAction(() => controller.acceptTumpangDateRange(widget.requestId)),
                           ),
@@ -455,6 +459,7 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                             isAccepted: request.pickupTime.isAccepted,
                             isRequestedByMe: request.pickupTime.requestedBy == controller.currentUserId,
                             isReadOnly: fieldsReadOnly,
+                            isOffline: isOffline, // Passed to control button grey-out
                             onPropose: () => _openTimeProposalSheet(context, controller, request.pickupTime.value),
                             onAccept: () => _runNegotiationAction(() => controller.acceptTerm(widget.requestId, 'pickup_time')),
                           ),
@@ -465,6 +470,7 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                             isAccepted: request.fee.isAccepted,
                             isRequestedByMe: request.fee.requestedBy == controller.currentUserId,
                             isReadOnly: fieldsReadOnly,
+                            isOffline: isOffline, // Passed to control button grey-out
                             topWidget: Column(
                               children: [
                                 Text(

@@ -81,6 +81,7 @@ class NegotiationViewModel extends ChangeNotifier {
     }
   }
 
+  // SharePreferences: saves the user's role as a string using their user ID as the unique key
   Future<void> _persistRole(String userId, String role) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -90,6 +91,7 @@ class NegotiationViewModel extends ChangeNotifier {
     }
   }
 
+  // SharePreferences: retrieves the previously saved role so the app remembers it even if the app was closed and restarted
   Future<String?> _readCachedRole(String userId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -136,6 +138,7 @@ class NegotiationViewModel extends ChangeNotifier {
 
       if (generation != _sessionGeneration || _supabase.auth.currentUser?.id != sessionUserId) return;
 
+      // Default to passenger if null, then fetch their negotiation lists
       currentUserRole ??= 'passenger';
       await fetchRequests();
     } else {
@@ -196,6 +199,7 @@ class NegotiationViewModel extends ChangeNotifier {
       currentUserRole ??= 'passenger';
 
       final isDriver = currentUserRole == 'driver';
+      // Select correct trip table
       final tripTable = isDriver ? 'driver_trips' : 'passenger_trips';
       final tripIdColumn = isDriver ? 'driver_trip_id' : 'passenger_trip_id';
 
@@ -209,6 +213,7 @@ class NegotiationViewModel extends ChangeNotifier {
         final x = await _localService.getOfflineRequests('cancelled');
 
         if (!isCurrentSessionValid()) return;
+        // Spread operator: takes all the items from the 5 different status lists and combines them into one single list
         rows = [...p, ...n, ...c, ...r, ...x];
 
         if (rows.isNotEmpty) {
@@ -242,6 +247,7 @@ class NegotiationViewModel extends ChangeNotifier {
 
         currentTripId = tripIds.first;
 
+        // Fetch matching requests from database
         rows = await _supabase
             .from('tumpang_request')
             .select()
@@ -294,6 +300,7 @@ class NegotiationViewModel extends ChangeNotifier {
   }
 
   Future<TumpangRequest?> getSingleRequest(String requestId) async {
+    // Search local cache if offline
     if (isOffline) {
       final all = [...pendingRequests, ...completedRequests];
       for (final r in all) {
@@ -302,6 +309,7 @@ class NegotiationViewModel extends ChangeNotifier {
       return null;
     }
 
+    // Fetch from remote if online
     final activeUser = _supabase.auth.currentUser;
     if (activeUser == null) return null;
 
@@ -312,8 +320,10 @@ class NegotiationViewModel extends ChangeNotifier {
     if (_userCache.containsKey(tripId)) return _userCache[tripId];
     if (isOffline) return null;
 
+    // Select target trip table
     final tableName = isDriverTrip ? 'driver_trips' : 'passenger_trips';
     try {
+      // Return one row if it exists, or return null if it doesn't: prevent crash
       final res = await _supabase.from(tableName).select('users(*)').eq('id', tripId).maybeSingle();
       if (res != null && res['users'] != null) {
         final user = res['users'] as Map<String, dynamic>;
@@ -339,6 +349,7 @@ class NegotiationViewModel extends ChangeNotifier {
     return 'Your Trip';
   }
 
+  // Safely executes database actions with session validation and error wrapping.
   Future<T> runNegotiationAction<T>(
       Future<T> Function() action, {
         String fallbackMessage = 'An error occurred during negotiation.',
@@ -349,6 +360,7 @@ class NegotiationViewModel extends ChangeNotifier {
     try {
       final result = await action();
 
+      // Stop if account was switched
       if (startGeneration != _sessionGeneration || startUserId != currentUserId) {
         throw NegotiationException('Session changed. Request discarded.');
       }
@@ -362,9 +374,11 @@ class NegotiationViewModel extends ChangeNotifier {
     }
   }
 
+  // Accepts a specific negotiation term
   Future<void> acceptTerm(String requestId, String fieldPrefix) {
     if (isOffline) throw NegotiationException('You cannot accept terms while offline.');
     return runNegotiationAction(() async {
+      // Update term status in database
       await _service.acceptNegotiationField(requestId: requestId, fieldPrefix: fieldPrefix);
       await refreshRequests();
     });
@@ -377,11 +391,14 @@ class NegotiationViewModel extends ChangeNotifier {
     double? lat,
     double? lng,
   }) {
+    // Validate network connection
     if (isOffline) throw NegotiationException('You cannot propose terms while offline.');
     final activeUserId = _supabase.auth.currentUser?.id;
+    // Validate user is logged in
     if (activeUserId == null) throw NegotiationException('You must be signed in to propose terms.');
 
     return runNegotiationAction(() async {
+      // Save new term to database
       await _service.updateNegotiationField(
         requestId: requestId,
         fieldPrefix: fieldPrefix,
@@ -389,7 +406,7 @@ class NegotiationViewModel extends ChangeNotifier {
         lat: lat,
         lng: lng,
         requestedById: activeUserId,
-        isAccepted: false,
+        isAccepted: false, // Mark as unaccepted proposal
       );
       await refreshRequests();
     });
@@ -407,10 +424,12 @@ class NegotiationViewModel extends ChangeNotifier {
     return runNegotiationAction(() async {
       final start = DateTime.tryParse(startDate);
       final end = DateTime.tryParse(endDate);
+      // Validate dates parsed successfully
       if (start == null || end == null) {
         throw NegotiationException('Please choose a valid date range.');
       }
 
+      // Apply business rules for dates
       final validationError = DateRangeRules.validate(start, end);
       if (validationError != null) {
         throw NegotiationException(validationError);
@@ -466,6 +485,7 @@ class NegotiationViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Fetches unpaid subscription invoices
   Future<List<Map<String, dynamic>>> getOpenInvoices(String subscriptionId) async {
     if (isOffline) return [];
     final rows = await _supabase
@@ -476,6 +496,7 @@ class NegotiationViewModel extends ChangeNotifier {
     return (rows as List).cast<Map<String, dynamic>>();
   }
 
+  // Fetches a specific subscription record
   Future<Map<String, dynamic>?> getSubscriptionById(String subscriptionId) async {
     if (isOffline) return null;
     try {
@@ -491,6 +512,7 @@ class NegotiationViewModel extends ChangeNotifier {
     }
   }
 
+  // Submits subscription extension request
   Future<String> submitExtensionRequest({
     required Map<String, dynamic> subscription,
     required DateTime newEndDate,
@@ -511,6 +533,7 @@ class NegotiationViewModel extends ChangeNotifier {
 
     return runNegotiationAction<String>(
           () async {
+        // Create extension in database
         final requestId = await _service.createExtensionRequest(
           subscription: subscription,
           requestedById: liveUserId,
@@ -532,6 +555,7 @@ class NegotiationViewModel extends ChangeNotifier {
     );
   }
 
+  // Gathers data for request summary
   Future<Map<String, dynamic>?> getSummaryData(String requestId) async {
     final req = await getSingleRequest(requestId);
     if (req == null) return null;
@@ -551,6 +575,7 @@ class NegotiationViewModel extends ChangeNotifier {
     }
 
     double oldDeposit = 0.0;
+    // Check if extending subscription
     if (req.isExtension && req.extendsSubscriptionId != null) {
       final oldSub = await getSubscriptionById(req.extendsSubscriptionId!);
       oldDeposit = double.tryParse(oldSub?['deposit']?.toString() ?? '') ?? 0.0;
@@ -563,6 +588,7 @@ class NegotiationViewModel extends ChangeNotifier {
     };
   }
 
+  // Finalizes a subscription extension request
   Future<void> finalizeExtensionRequest({
     required String extensionRequestId,
     required double additionalDeposit,
@@ -601,10 +627,12 @@ class NegotiationViewModel extends ChangeNotifier {
     }
   }
 
+  // Prepares deposit payment transaction
   Future<String> createDepositPaymentIntent({
     required double amount,
     required String requestId,
   }) async {
+    // Validate amount is positive
     if (amount <= 0) throw NegotiationException('Deposit amount must be greater than RM 0.');
     if (isOffline) throw NegotiationException('You cannot process a payment while offline.');
 
@@ -612,6 +640,7 @@ class NegotiationViewModel extends ChangeNotifier {
     errorMessage = null;
     notifyListeners();
     try {
+      // Request payment intent from service
       return await _service.createDepositPaymentIntent(amount: amount, requestId: requestId);
     } catch (e) {
       errorMessage = 'Unable to prepare the deposit payment.';
@@ -622,6 +651,7 @@ class NegotiationViewModel extends ChangeNotifier {
     }
   }
 
+  // Finalizes subscription after deposit payment
   Future<void> createSubscriptionAfterDeposit({
     required TumpangRequest request,
     required double deposit,
@@ -657,6 +687,7 @@ class NegotiationViewModel extends ChangeNotifier {
     return count;
   }
 
+  // Calculates future subscription invoice cycles
   static List<Map<String, dynamic>> calculateInvoicePeriods({
     required DateTime startDate,
     required DateTime endDate,
