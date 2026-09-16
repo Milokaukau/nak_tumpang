@@ -228,7 +228,8 @@ class ActiveSubscriptionCard extends StatelessWidget {
       ),
       actionButtons: Column(
         children: [
-          if (leg.onCallPressed != null)
+          // FIX: The SizedBox is now correctly scoped inside the condition
+          if (leg.onCallPressed != null) ...[
             BaseButton(
               text: 'Call',
               onPressed: leg.onCallPressed!,
@@ -236,7 +237,8 @@ class ActiveSubscriptionCard extends StatelessWidget {
               foregroundColor: AppColors.white,
               textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
             ),
-          const SizedBox(height: 12),
+            const SizedBox(height: 12),
+          ],
           if (leg.onCompleteTripPressed != null || leg.isCompletedToday) ...[
             BaseButton(
               text: leg.isCompletedToday ? 'Trip Today Completed' : 'Complete Trip Today',
