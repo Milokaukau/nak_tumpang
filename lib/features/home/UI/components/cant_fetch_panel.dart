@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/components/base_profile_card.dart';
-import 'package:nak_tumpang/features/home/UI/components/exception_request_form/exception_request_form.dart';
+import 'package:nak_tumpang/features/home/UI/components/exception_request_form.dart';
 import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
 
 class CantFetchPanel extends StatelessWidget {
