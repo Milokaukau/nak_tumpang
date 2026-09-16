@@ -127,7 +127,9 @@ class HomePanel extends StatelessWidget {
                 else if (viewModel.currentUserRole == 'driver')
                     ..._buildDriverView(context, viewModel)
                   else ...[
-                      if (viewModel.activeSubscriptions.isNotEmpty && !viewModel.showMatchingUI)
+                      if ((viewModel.activeSubscriptions.isNotEmpty ||
+                          (viewModel.hasExceptedTripsToday && viewModel.availableTrips.isEmpty)) &&
+                          !viewModel.showMatchingUI)
                         ..._buildPassengerSubscriptionView(context, viewModel)
                       else
                         ..._buildPassengerMatchingView(context, viewModel),
@@ -179,13 +181,33 @@ class HomePanel extends StatelessWidget {
   }
 
   List<Widget> _buildPassengerSubscriptionView(BuildContext context, HomeViewModel viewModel) {
+    // Reached here either with genuinely active subscriptions, or with none
+    // active today because they're all excepted (paused) — same heading
+    // either way, just swap the body between the card list and the paused
+    // message. The divider only makes sense when there's a card list above
+    // it to separate from.
+    final isPaused = viewModel.activeSubscriptions.isEmpty;
+
     return [
       const Text('My Active Tumpang Trips', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
       const SizedBox(height: 12),
-      ..._buildSubscriptionList(context, viewModel, isDriver: false),
-      const SizedBox(height: 16),
-      const Divider(height: 1, thickness: 1, color: AppColors.greyBorder),
-      const SizedBox(height: 12),
+      if (isPaused)
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: 24),
+          child: Center(
+            child: Text(
+              'Your active trip is paused for today.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: AppColors.greyText, fontSize: 14, height: 1.4),
+            ),
+          ),
+        )
+      else ...[
+        ..._buildSubscriptionList(context, viewModel, isDriver: false),
+        const SizedBox(height: 16),
+        const Divider(height: 1, thickness: 1, color: AppColors.greyBorder),
+        const SizedBox(height: 12),
+      ],
       BaseButton(
         text: 'Find Tumpang for Another Trip',
         onPressed: () => viewModel.toggleMatchingUI(true),
@@ -199,7 +221,8 @@ class HomePanel extends StatelessWidget {
 
   List<Widget> _buildPassengerMatchingView(BuildContext context, HomeViewModel viewModel) {
     return [
-      if (viewModel.activeSubscriptions.isNotEmpty)
+      if (viewModel.activeSubscriptions.isNotEmpty ||
+          (viewModel.hasExceptedTripsToday && viewModel.availableTrips.isEmpty))
         Padding(
           padding: const EdgeInsets.only(bottom: 12),
           child: Align(

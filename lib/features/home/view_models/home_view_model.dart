@@ -628,8 +628,13 @@ class HomeViewModel extends ChangeNotifier {
         showMatchingUI = false;
         selectedSubscriptionId = activeSubscriptions.first['id'];
       }
-    } else {
+    } else if (rawSubs.isEmpty) {
+      // No subscriptions at all -> default to the search/matching UI.
       showMatchingUI = true;
+    } else {
+      // Has a subscription, it's just excepted (paused) for today -> stay
+      // off the matching UI.
+      showMatchingUI = false;
     }
 
     updateMapRoute();
@@ -693,8 +698,15 @@ class HomeViewModel extends ChangeNotifier {
         showMatchingUI = false;
         selectedSubscriptionId = activeSubscriptions.first['id'];
       }
-    } else {
+    } else if (rawSubs.isEmpty) {
+      // No subscriptions at all -> nothing to show under "My Active Tumpang
+      // Trips", default to the search/matching UI.
       showMatchingUI = true;
+    } else {
+      // Has a subscription, it's just excepted (paused) for today -> stay
+      // off the matching UI so the paused state renders under "My Active
+      // Tumpang Trips" instead of routing into Direct/Mixed search.
+      showMatchingUI = false;
     }
 
     updateMapRoute();

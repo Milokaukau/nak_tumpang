@@ -165,60 +165,64 @@ class _AppSidebarState extends State<AppSidebar> {
             left: Radius.circular(28),
           ),
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 48),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 16),
-            CircleAvatar(
-              radius: 40,
-              backgroundColor: AppColors.primaryYellow,
-              backgroundImage: widget.profileImageUrl != null
-                  ? NetworkImage(widget.profileImageUrl!)
-                  : null,
-              child: widget.profileImageUrl == null
-                  ? const Icon(Icons.person, size: 50, color: AppColors.white)
-                  : null,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              widget.userName,
-              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppColors.black),
-            ),
-            Text(
-              widget.userRole,
-              style: const TextStyle(fontSize: 15, color: AppColors.greyText),
-            ),
-            const SizedBox(height: 16),
-            const Divider(color: AppColors.greyBorder, thickness: 1),
-            const SizedBox(height: 20),
+        // Wrap the Column in a SingleChildScrollView and apply the padding here
+        // so the content can be scrolled on smaller screens.
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 48),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 16),
+              CircleAvatar(
+                radius: 40,
+                backgroundColor: AppColors.primaryYellow,
+                backgroundImage: widget.profileImageUrl != null
+                    ? NetworkImage(widget.profileImageUrl!)
+                    : null,
+                child: widget.profileImageUrl == null
+                    ? const Icon(Icons.person, size: 50, color: AppColors.white)
+                    : null,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                widget.userName,
+                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppColors.black),
+              ),
+              Text(
+                widget.userRole,
+                style: const TextStyle(fontSize: 15, color: AppColors.greyText),
+              ),
+              const SizedBox(height: 16),
+              const Divider(color: AppColors.greyBorder, thickness: 1),
+              const SizedBox(height: 20),
 
-            _buildMenuItem(context, index: 0, title: 'View Profile'),
-            _buildMenuItem(context, index: 1, title: 'My Trips'),
-            _buildMenuItem(context, index: 2, title: 'View Subscriptions'),
-            _buildMenuItem(
-              context,
-              index: 3,
-              title: 'View Requests',
-              badgeCount: requestsBadge,
-            ),
-            _buildMenuItem(
-              context,
-              index: 4,
-              title: _isDriver ? 'My Earnings' : 'Payment',
-              badgeCount: _isDriver ? 0 : paymentsBadge,
-            ),
-            _buildMenuItem(context, index: 5, title: 'My Rewards'),
+              _buildMenuItem(context, index: 0, title: 'View Profile'),
+              _buildMenuItem(context, index: 1, title: 'My Trips'),
+              _buildMenuItem(context, index: 2, title: 'View Subscriptions'),
+              _buildMenuItem(
+                context,
+                index: 3,
+                title: 'View Requests',
+                badgeCount: requestsBadge,
+              ),
+              _buildMenuItem(
+                context,
+                index: 4,
+                title: _isDriver ? 'My Earnings' : 'Payment',
+                badgeCount: _isDriver ? 0 : paymentsBadge,
+              ),
+              _buildMenuItem(context, index: 5, title: 'My Rewards'),
 
-            const SizedBox(height: 8),
+              const SizedBox(height: 8),
 
-            _buildMenuItem(
-              context,
-              index: 6,
-              title: 'Sign Out',
-              textColor: const Color(0xFFEF4444),
-            ),
-          ],
+              _buildMenuItem(
+                context,
+                index: 6,
+                title: 'Sign Out',
+                textColor: const Color(0xFFEF4444),
+              ),
+            ],
+          ),
         ),
       ),
     );
