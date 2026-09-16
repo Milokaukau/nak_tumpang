@@ -34,6 +34,14 @@ class ProfileViewModel extends ChangeNotifier {
   final nameController = TextEditingController();
   final phoneController = TextEditingController();
   final licenseNumberController = TextEditingController();
+
+  /// The license number as loaded from driver_profiles, before any edits.
+  /// Legacy values (e.g. containing dashes, like "AB-1234") were accepted
+  /// under the old, more lenient license validator. We keep this around so
+  /// an unmodified legacy value isn't forced through the newer, stricter
+  /// carPlateNumber format on every unrelated profile save — see
+  /// _validateLicenseNumber below.
+  String? _originalLicenseNumber;
   final currentPasswordController = TextEditingController();
   final newPasswordController = TextEditingController();
   final confirmPasswordController = TextEditingController();
@@ -160,6 +168,7 @@ class ProfileViewModel extends ChangeNotifier {
             .eq('user_id', userId)
             .maybeSingle();
         licenseNumberController.text = driverData?['license_number'] as String? ?? '';
+        _originalLicenseNumber = licenseNumberController.text;
         _licensePath = driverData?['license_url'] as String?;
         if (_licensePath != null) {
           licenseUrl = await _storageService.getSignedUrl(
@@ -202,6 +211,7 @@ class ProfileViewModel extends ChangeNotifier {
         if (_role == 'driver') {
           final cachedLicense = await _localService.getCachedDriverLicense(userId);
           licenseNumberController.text = cachedLicense?['license_number'] as String? ?? '';
+          _originalLicenseNumber = licenseNumberController.text;
           _licensePath = cachedLicense?['license_url'] as String?;
           // Signed URLs are short-lived and Storage isn't reachable
           // right now anyway, so there's no photo to show offline —
@@ -247,6 +257,19 @@ class ProfileViewModel extends ChangeNotifier {
 
   String? _validateLicenseNumber(String? v) {
     if (_role != 'driver') return null;
+    final trimmed = v?.trim() ?? '';
+    // An untouched legacy value (e.g. "AB-1234") was accepted under the
+    // old license-number format and may not satisfy the newer, stricter
+    // car-plate format (no dashes). Only enforce carPlateNumber on values
+    // the driver has actually entered/changed here, so unrelated profile
+    // edits (name, phone, avatar, etc.) don't fail because of a legacy
+    // value that was never touched — and that value never gets silently
+    // overwritten with a reformatted car-plate value either, since it's
+    // saved back exactly as-is.
+    final isUnchangedLegacyValue = _originalLicenseNumber != null &&
+        _originalLicenseNumber!.isNotEmpty &&
+        trimmed == _originalLicenseNumber;
+    if (isUnchangedLegacyValue) return null;
     return Validators.carPlateNumber(v);
   }
 
