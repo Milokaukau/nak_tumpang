@@ -46,7 +46,7 @@ class Validators {
     return null;
   }
 
-  // Malaysian car plate validation: letters, numbers, and spaces only (NO DASHES)
+  // Malaysian car plate validation: letters, numbers, and spaces only
   static final RegExp carPlateRegex = RegExp(r'^[A-Za-z0-9\s]+$');
 
   static String? carPlateNumber(String? v) {

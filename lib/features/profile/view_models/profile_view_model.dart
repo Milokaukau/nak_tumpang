@@ -467,7 +467,7 @@ class ProfileViewModel extends ChangeNotifier {
         _pendingAvatarFileName = 'avatar_${DateTime.now().millisecondsSinceEpoch}.jpg';
         avatarUrl = await _storageService.uploadUserFile(
           bytes: avatarBytes!,
-          bucket: 'avatars',
+          bucket: 'profile-photos',
           userId: userId,
           fileName: _pendingAvatarFileName!,
         );
@@ -526,7 +526,7 @@ class ProfileViewModel extends ChangeNotifier {
         // the (unsaved) DB row points to.
         if (_pendingAvatarFileName != null) {
           await _storageService.deleteUserFile(
-            bucket: 'avatars',
+            bucket: 'profile-photos',
             path: '$userId/$_pendingAvatarFileName',
           );
           _pendingAvatarFileName = null;
@@ -587,9 +587,9 @@ class ProfileViewModel extends ChangeNotifier {
       // the rollback above, a failure here just leaves one harmless
       // unreferenced old file instead of risking new data.
       if (didUploadAvatar) {
-        final oldAvatarPath = _storagePathFromPublicUrl(previousAvatarUrl, 'avatars');
+        final oldAvatarPath = _storagePathFromPublicUrl(previousAvatarUrl, 'profile-photos');
         if (oldAvatarPath != null) {
-          await _storageService.deleteUserFile(bucket: 'avatars', path: oldAvatarPath);
+          await _storageService.deleteUserFile(bucket: 'profile-photos', path: oldAvatarPath);
         }
       }
       if (pendingLicensePath != null &&

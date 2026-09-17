@@ -7,20 +7,8 @@ import 'package:nak_tumpang/features/payout/UI/components/payout_history_detail_
 import 'package:nak_tumpang/features/payout/UI/components/trip_detail_dialog.dart';
 import 'package:nak_tumpang/features/payout/view_models/payout_view_model.dart';
 
-// Also enforced server-side in request_payout() (see kMinPayoutAmount usage
-// in the dialog). This only gates whether the button is tappable — it does
-// NOT gate whether the "not enough points" message shows. See
-// _claimButtonEnabled below for why those are now two separate questions.
 bool _canClaimPayout(PayoutViewModel vm) => vm.availableBalance >= kMinPayoutAmount;
 
-// When the wallet numbers on screen came from the SQLite cache (walletNotice
-// set — see PayoutViewModel.load()/refreshWallet()), we can't trust
-// availableBalance as current, so keep the old behavior of graying the
-// button out below threshold rather than letting the driver open a claim
-// dialog against a possibly-stale balance. Once we have a live Supabase
-// read (walletNotice null), the button stays tappable regardless of
-// balance, and _onClaimPayout below is what shows the
-// "not enough points" message instead of a disabled button.
 bool _claimButtonEnabled(PayoutViewModel vm) =>
     vm.walletNotice != null ? _canClaimPayout(vm) : true;
 
