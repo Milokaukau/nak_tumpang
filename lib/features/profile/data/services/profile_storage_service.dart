@@ -24,16 +24,9 @@ class ProfileStorageService {
   final _supabase = Supabase.instance.client;
   final _picker = ImagePicker();
 
-  /// Smallest file size a genuine photo (not a blank/corrupt file)
-  /// realistically compresses down to.
+
   static const int _minBytes = 5 * 1024; // 5 KB
-  /// Generous cap — image_picker already downsizes to maxWidth 1280 /
-  /// quality 85 below, so a file this large is almost certainly not
-  /// what was actually picked (e.g. a raw/HEIC passthrough).
-  static const int _maxBytes = 8 * 1024 * 1024; // 8 MB
-  /// A license photo needs to be legible; anything smaller than this on
-  /// its longest side won't have readable text regardless of what it's
-  /// a photo of.
+  static const int _maxBytes = 8 * 1024 * 1024; // 8 MB - catches raw/HEIC passthrough
   static const int _minDimension = 400;
 
   Future<Uint8List?> pickImage({required ImageSource source}) async {

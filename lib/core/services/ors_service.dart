@@ -10,11 +10,6 @@ import 'package:nak_tumpang/core/entities/geocoded_place.dart';
 class ORSService {
   final _apiKey = dotenv.env['ORS_API_KEY'] ?? '';
 
-  /// Resolves free-typed text (e.g. "KLCC", "TARUMT") into real,
-  /// selectable places with coordinates, biased to Malaysia. Meant to be
-  /// called as the user types (debounce on the caller's side) — this is
-  /// the ORS `/geocode/autocomplete` endpoint, which is built for partial
-  /// queries, not the heavier `/geocode/search`.
   Future<List<GeocodedPlace>> geocodeAutocomplete(String query) async {
     if (_apiKey.isEmpty) {
       print('❌ Error: ORS_API_KEY is missing from .env');

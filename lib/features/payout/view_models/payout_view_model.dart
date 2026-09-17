@@ -44,7 +44,6 @@ Color payoutStatusColor(String status) => switch (status) {
 };
 
 // points shown as whole number
-// floored, not rounded
 // driver cant see a point figure bigger than the RM value
 String pointsLabel(double amount) => amount.floor().toString();
 
@@ -164,7 +163,6 @@ class PayoutViewModel extends ChangeNotifier {
 
   final _service = PayoutService();
   final _localService = PayoutLocalService();
-  // Whatever actually processes the payout after it's recorded
   final PayoutGateway _gateway;
 
   bool isLoading = true;
@@ -192,9 +190,6 @@ class PayoutViewModel extends ChangeNotifier {
   bool isLoadingMoreHistory = false;
   bool hasMoreHistory = true;
   String? historyError;
-  // Non-fatal notice for the History tab (stale cache while offline) —
-  // same reasoning as walletNotice: historyError means "nothing to
-  // show", this means "showing something, but it's not fresh".
   String? historyNotice;
   List<PayoutHistoryDisplay> payoutHistory = [];
 
