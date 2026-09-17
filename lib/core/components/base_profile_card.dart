@@ -34,7 +34,6 @@ class BaseProfileCard extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Profile Picture Placeholder
               ClipRRect(
                 borderRadius: BorderRadius.circular(8),
                 child: profileImageUrl != null
@@ -48,7 +47,6 @@ class BaseProfileCard extends StatelessWidget {
               ),
               const SizedBox(width: 12),
 
-              // Title and Description wrapper
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -62,7 +60,6 @@ class BaseProfileCard extends StatelessWidget {
             ],
           ),
 
-          // Render buttons only if they are provided
           if (actionButtons != null) ...[
             const SizedBox(height: 10),
             actionButtons!,

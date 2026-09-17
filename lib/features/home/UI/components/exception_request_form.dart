@@ -24,8 +24,6 @@ class ExceptionRequestForm extends StatelessWidget {
   final ValueChanged<String> onDateError;
   final String? errorText;
 
-  /// Reasons that allow requesting an exception starting TODAY. Any
-  /// reason not in this list requires at least 1 day of lead time.
   final List<String> emergencyReasons;
 
   const ExceptionRequestForm({
@@ -113,9 +111,6 @@ class ExceptionRequestForm extends StatelessWidget {
     }
   }
 
-  /// Final gate at submission time — catches the case where a date was
-  /// picked while an emergency reason was selected, then the reason was
-  /// changed afterward to a non-emergency one without re-touching the date.
   void _handleConfirm() {
     if (startDate != null) {
       final pureStart = DateTime(startDate!.year, startDate!.month, startDate!.day);

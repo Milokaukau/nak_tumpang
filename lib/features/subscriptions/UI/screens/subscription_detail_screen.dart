@@ -15,7 +15,7 @@ import 'package:nak_tumpang/features/subscriptions/data/services/subscription_lo
 class SubscriptionDetailScreen extends StatefulWidget {
   final Map<String, dynamic> subscription;
   final String currentUserId;
-  final String role; // 'passenger' or 'driver'
+  final String role;
   final int initialTabIndex;
 
   const SubscriptionDetailScreen({
@@ -76,9 +76,6 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
       final vm = context.read<SubscriptionViewModel>();
       final fetched = await vm.fetchAllExceptions(subscriptionId);
 
-      // Populate the local cache so this still shows if we go offline
-      // later. A caching failure shouldn't block showing the (successfully
-      // fetched) online data.
       try {
         await _subscriptionLocalService.cacheExceptions(
           subscriptionId: subscriptionId,
@@ -124,9 +121,6 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
     return daysPastExpiry >= 0 && daysPastExpiry <= 7;
   }
 
-  /// The counterpart's user id — driver's id if I'm the passenger, and vice
-  /// versa. Used to target notifications (exception submitted/edited, etc.)
-  /// at the correct person.
   String _otherUserId() {
     final driverTrips = widget.subscription['driver_trips'] as Map<String, dynamic>?;
     final passengerTrips = widget.subscription['passenger_trips'] as Map<String, dynamic>?;
@@ -220,9 +214,6 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
       final reasonText = selectedReason == 'Others' ? customReasonController.text.trim() : selectedReason;
       final vm = context.read<SubscriptionViewModel>();
 
-      // Notification to the other party is handled inside
-      // SubscriptionSupabaseService.cancelSubscription (target_user_id) —
-      // no need to send a second one manually here.
       final success = await vm.cancelSubscription(
         subscriptionId: widget.subscription['id'],
         cancelledByRole: widget.role,
@@ -462,7 +453,6 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
               ),
             ),
 
-          // Profile Header
           Container(
             width: 80, height: 80,
             decoration: BoxDecoration(
@@ -473,7 +463,7 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
             ),
             child: otherImageUrl != null && otherImageUrl.isNotEmpty
                 ? ClipRRect(
-              borderRadius: BorderRadius.circular(15), // 16 - the 1px border
+              borderRadius: BorderRadius.circular(15),
               child: Image.network(
                 otherImageUrl,
                 width: 78,
@@ -488,7 +478,6 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
           Text(otherUserName, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
           const SizedBox(height: 20),
 
-          // Stacked Locked Cards
           _buildReadOnlyField(
             title: 'Pickup Location',
             value: pickupName,
@@ -541,7 +530,6 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
 
           const SizedBox(height: 20),
 
-          // Action Buttons
           if (isActive) ...[
             SizedBox(
               width: double.infinity,
@@ -585,7 +573,6 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
     );
   }
 
-  // Schedule Changes Tab Split into Two Sub-Tabs (My Changes & Other Side Changes)
   Widget _buildScheduleChangesTab(bool isActive) {
     if (_isLoadingExceptions) {
       return const Center(child: CircularProgressIndicator(color: AppColors.primaryYellow));
@@ -594,7 +581,6 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
     final myUserId = widget.currentUserId.toString();
     final myRole = widget.role.toLowerCase();
 
-    // Filter strictly based on roles / initiator
     final driverChanges = _exceptions.where((e) {
       final role = e['initiated_by_role']?.toString().toLowerCase();
       final userId = e['initiated_by']?.toString();
@@ -607,7 +593,6 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
       return role == 'passenger' || (myRole == 'passenger' && userId == myUserId);
     }).toList();
 
-    // Determine which list belongs to "me" based on my role
     final isDriver = myRole == 'driver';
     final myItems = isDriver ? driverChanges : passengerChanges;
     final otherItems = isDriver ? passengerChanges : driverChanges;
@@ -682,8 +667,6 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
             ? '$startDate → $endDate'
             : startDate;
 
-        // Treat a past end_date as "PAST" regardless of what the DB status
-        // column says — this is purely a display-time check, no schema change.
         final parsedEndDate = DateTime.tryParse(endDate);
         final isPast = parsedEndDate != null && parsedEndDate.isBefore(todayDateOnly);
 
@@ -774,8 +757,6 @@ class _SubscriptionDetailScreenState extends State<SubscriptionDetailScreen>
                 ),
               ],
 
-              // Edit is now hidden once the exception is in the past, in
-              // addition to the existing checks.
               if (isMyChanges && status == 'active' && isActive && !isPast) ...[
                 const SizedBox(height: 16),
                 Row(

@@ -10,7 +10,6 @@ import 'package:nak_tumpang/core/constants/api_constants.dart';
 import 'package:csv/csv.dart';
 
 class GtfsService {
-  // --- UPDATED to use ApiConstants ---
   final String _apiUrl = ApiConstants.gtfsPrasaranaEndpoint;
   final String _cacheKey = 'cached_train_stations';
   final String _dateKey = 'gtfs_last_updated';
@@ -71,10 +70,6 @@ class GtfsService {
       SharedPreferences prefs) async {
 
     final converter = CsvToListConverter(eol: '\n', shouldParseNumbers: false);
-
-    // ==========================================
-    // 1. PARSE ROUTES
-    // ==========================================
     final routeDetails = <String, ({String name, Color color, String shortName})>{};
     final routeRows = converter.convert(routesCsv.replaceAll('\r', ''));
 
@@ -95,7 +90,7 @@ class GtfsService {
             final colorHex = colorIdx != -1 && row.length > colorIdx ? row[colorIdx].toString().trim() : '';
 
             if (routeId.isNotEmpty) {
-              Color color = Colors.pink; // Default fallback
+              Color color = Colors.pink;
               if (colorHex.isNotEmpty) {
                 try {
                   color = Color(int.parse('FF$colorHex', radix: 16));
@@ -112,9 +107,6 @@ class GtfsService {
       }
     }
 
-    // ==========================================
-    // 2. PARSE STOP TIMES (For Sequence)
-    // ==========================================
     final stopSequences = <String, int>{};
     final stRows = converter.convert(stopTimesCsv.replaceAll('\r', ''));
 
@@ -136,9 +128,6 @@ class GtfsService {
       }
     }
 
-    // ==========================================
-    // 3. PARSE STOPS
-    // ==========================================
     final parsedStations = <TrainStation>[];
     final stopRows = converter.convert(stopsCsv.replaceAll('\r', ''));
 

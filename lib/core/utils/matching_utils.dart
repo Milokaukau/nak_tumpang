@@ -46,7 +46,6 @@ class MatchingUtils {
     double minDropDist = double.infinity;
     int dropIndex = -1;
 
-    // Find the closest point on the driver's route for both pickup and dropoff
     for (int i = 0; i < driverRoute.length; i++) {
       final point = driverRoute[i];
 
@@ -63,12 +62,8 @@ class MatchingUtils {
       }
     }
 
-    // 1. Both points must be within the maximum allowed detour distance
     if (minPickDist > maxDetourMeters || minDropDist > maxDetourMeters) return false;
-
-    // 2. Sequence check: Driver must reach pickup before dropoff
     if (pickIndex > dropIndex) return false;
-
     return true;
   }
 }

@@ -53,13 +53,12 @@ class SubscriptionViewModel extends ChangeNotifier {
     required String subscriptionId,
     required String cancelledByRole,
     String? reason,
-    String? otherUserId, // 👈 Optional override if passed directly from UI
+    String? otherUserId,
   }) async {
     try {
       isLoading = true;
       notifyListeners();
 
-      // 1. Resolve the target user ID (from parameter or local list)
       String targetUserId = otherUserId ?? '';
 
       if (targetUserId.isEmpty) {
@@ -73,7 +72,6 @@ class SubscriptionViewModel extends ChangeNotifier {
             : sub['driver_id']) ?? '';
       }
 
-      // 2. Pass it to the service
       final success = await _service.cancelSubscription(
         subscriptionId: subscriptionId,
         cancelledByRole: cancelledByRole,
@@ -98,7 +96,7 @@ class SubscriptionViewModel extends ChangeNotifier {
     required DateTime endDate,
     required String reason,
     required String otherUserId,
-    String? subscriptionId, // NEW
+    String? subscriptionId,
   }) {
     return _service.updateException(
       exceptionId: exceptionId,
@@ -106,7 +104,7 @@ class SubscriptionViewModel extends ChangeNotifier {
       endDate: endDate,
       reason: reason,
       otherUserId: otherUserId,
-      subscriptionId: subscriptionId, // NEW
+      subscriptionId: subscriptionId,
     );
   }
 

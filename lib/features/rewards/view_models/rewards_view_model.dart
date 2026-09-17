@@ -41,9 +41,7 @@ class RewardsViewModel extends ChangeNotifier {
       availableVouchers = await _service.fetchAvailableVouchers(userId);
       myVouchers = await _service.fetchMyVouchers(userId);
 
-      // Populate the local cache so the above still shows if we go
-      // offline later. Caching failures shouldn't block showing the
-      // (successfully fetched) online data.
+
       try {
         await _localService.cacheRewardPoints(userId, rawRewardPoints);
         await _localService.cachePointsLedger(userId, pointsHistory);
@@ -53,9 +51,6 @@ class RewardsViewModel extends ChangeNotifier {
         debugPrint('⚠️ Error caching rewards data locally: $e');
       }
     } catch (e) {
-      // Network call itself failed even though NetworkService thought we
-      // were online (flaky connection, timeout, etc.) — fall back to
-      // whatever's cached rather than showing zeros.
       debugPrint('⚠️ Error loading rewards online, falling back to cache: $e');
       await _loadFromCache(userId);
     }
@@ -74,16 +69,13 @@ class RewardsViewModel extends ChangeNotifier {
   Future<bool> redeemVoucher(String userId, Map<String, dynamic> voucher) async {
     final success = await _service.redeemVoucher(userId: userId, voucher: voucher);
     if (success) {
-      await loadAll(userId); // refresh everything after a successful redemption
+      await loadAll(userId);
     }
     return success;
   }
 
   Future<void> checkGoyangAvailability(String userId) async {
     if (NetworkService.isOfflineNotifier.value) {
-      // Playing Goyang requires a live connection (server-side uniqueness
-      // check) — don't claim it's available offline just because we can't
-      // check.
       isGoyangAvailableToday = false;
       notifyListeners();
       return;
@@ -101,7 +93,7 @@ class RewardsViewModel extends ChangeNotifier {
     final result = await _service.playGoyang(userId);
     if (result['type'] == 'points' || result['type'] == 'voucher') {
       isGoyangAvailableToday = false;
-      await loadAll(userId); // refresh summary + history + vouchers
+      await loadAll(userId);
     }
 
     isClaimingGoyang = false;

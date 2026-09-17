@@ -83,8 +83,8 @@ class _GoyangScreenState extends State<GoyangScreen> {
         actions: [
           TextButton(
             onPressed: () {
-              Navigator.pop(ctx); // close dialog
-              Navigator.pop(context); // back to Rewards screen
+              Navigator.pop(ctx);
+              Navigator.pop(context);
             },
             child: const Text('Done'),
           ),

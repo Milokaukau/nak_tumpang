@@ -10,16 +10,9 @@ import 'package:nak_tumpang/features/rewards/view_models/rewards_view_model.dart
 class AppProviders {
   static List<SingleChildWidget> get providers {
     return [
-      // Registered globally so it survives navigation between screens, but
-      // intentionally NOT fetched here: there's no signed-in user yet at
-      // app startup (AuthGate hasn't resolved), and HomeScreen already
-      // calls fetchCurrentUser() itself once it's actually mounted for a
-      // logged-in user. Fetching here too caused a duplicate, hardcoded
-      // call to race the real one and clobber its data.
       ChangeNotifierProvider(
         create: (_) => HomeViewModel(),
       ),
-      // Registers the ViewModel globally so subscription list/detail screens share state
       ChangeNotifierProvider(
         create: (_) => SubscriptionViewModel(),
       ),
@@ -32,7 +25,6 @@ class AppProviders {
       ChangeNotifierProvider(
         create: (_) => PaymentViewModel(),
       ),
-      // Future providers (e.g., AuthViewModel, MatchingViewModel) will go here
       ChangeNotifierProvider(create: (_) => MyTripsViewModel()),
     ];
   }

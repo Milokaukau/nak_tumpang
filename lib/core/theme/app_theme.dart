@@ -7,10 +7,8 @@ class AppTheme {
     return ThemeData(
       colorScheme: ColorScheme.fromSeed(seedColor: AppColors.primaryYellow),
       scaffoldBackgroundColor: AppColors.white,
-      // full poppins
       textTheme: GoogleFonts.poppinsTextTheme(),
       useMaterial3: true,
-      // every top bar is yellow
       appBarTheme: AppBarTheme(
         backgroundColor: AppColors.primaryYellow,
         foregroundColor: AppColors.white,

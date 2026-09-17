@@ -42,7 +42,6 @@ class AppSidebar extends StatefulWidget {
   final String? profileImageUrl;
   final int selectedIndex;
 
-  /// Optional manual overrides for badge counts
   final int? pendingRequestsCount;
   final int? pendingPaymentsCount;
 
@@ -87,7 +86,6 @@ class _AppSidebarState extends State<AppSidebar> {
     if (user == null) return;
 
     try {
-      // 1. Requests Badge (pending + negotiating)
       if (widget.pendingRequestsCount == null) {
         if (NetworkService.isOfflineNotifier.value) {
           final p = await NegotiationLocalService().getOfflineRequests('pending');
@@ -114,7 +112,6 @@ class _AppSidebarState extends State<AppSidebar> {
         }
       }
 
-      // 2. Payments Badge (unpaid invoices)
       if (widget.pendingPaymentsCount == null && !_isDriver) {
         if (NetworkService.isOfflineNotifier.value) {
           final pRows = await PaymentLocalService().getOfflinePayments(isCompleted: false);
@@ -139,7 +136,6 @@ class _AppSidebarState extends State<AppSidebar> {
     int requestsBadge = widget.pendingRequestsCount ?? _fallbackRequestsCount;
     int paymentsBadge = widget.pendingPaymentsCount ?? _fallbackPaymentsCount;
 
-    // Reactively watch ViewModels if they exist in the Provider tree
     try {
       final negoVm = context.watch<NegotiationViewModel?>();
       if (negoVm != null && widget.pendingRequestsCount == null) {
@@ -165,8 +161,6 @@ class _AppSidebarState extends State<AppSidebar> {
             left: Radius.circular(28),
           ),
         ),
-        // Wrap the Column in a SingleChildScrollView and apply the padding here
-        // so the content can be scrolled on smaller screens.
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 48),
           child: Column(
@@ -229,7 +223,6 @@ class _AppSidebarState extends State<AppSidebar> {
   }
 
   void _handleItemTap(BuildContext context, int index) async {
-    // Capture the ViewModel BEFORE the drawer closes and destroys the context
     final homeViewModel = context.read<HomeViewModel>();
 
     Navigator.pop(context);
@@ -277,7 +270,6 @@ class _AppSidebarState extends State<AppSidebar> {
       MaterialPageRoute(builder: (context) => nextScreen),
     );
 
-    // Safely refresh the Home screen using the captured ViewModel
     try {
       await homeViewModel.refreshHome();
     } catch (e) {

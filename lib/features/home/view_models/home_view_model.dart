@@ -50,7 +50,6 @@ class HomeViewModel extends ChangeNotifier {
   int _userFetchId = 0;
   String? _lastLoadedUserId;
 
-  // --- CAPPED AT 4 ---
   int currentDirectLimit = 4;
   int currentMixedLimit = 4;
   bool hasMoreDirect = false;
@@ -219,7 +218,7 @@ class HomeViewModel extends ChangeNotifier {
 
   void loadMoreDirect() {
     if (isDirectLoadingMore) return;
-    currentDirectLimit += 4; // CAPPED AT 4
+    currentDirectLimit += 4;
     isDirectLoadingMore = true;
     notifyListeners();
     _findDirectDrivers();
@@ -227,7 +226,7 @@ class HomeViewModel extends ChangeNotifier {
 
   void loadMoreMixed() {
     if (isMixedLoadingMore) return;
-    currentMixedLimit += 4; // CAPPED AT 4
+    currentMixedLimit += 4;
     isMixedLoadingMore = true;
     notifyListeners();
     _findMixedRoutes();
@@ -629,11 +628,8 @@ class HomeViewModel extends ChangeNotifier {
         selectedSubscriptionId = activeSubscriptions.first['id'];
       }
     } else if (rawSubs.isEmpty) {
-      // No subscriptions at all -> default to the search/matching UI.
       showMatchingUI = true;
     } else {
-      // Has a subscription, it's just excepted (paused) for today -> stay
-      // off the matching UI.
       showMatchingUI = false;
     }
 
@@ -699,13 +695,8 @@ class HomeViewModel extends ChangeNotifier {
         selectedSubscriptionId = activeSubscriptions.first['id'];
       }
     } else if (rawSubs.isEmpty) {
-      // No subscriptions at all -> nothing to show under "My Active Tumpang
-      // Trips", default to the search/matching UI.
       showMatchingUI = true;
     } else {
-      // Has a subscription, it's just excepted (paused) for today -> stay
-      // off the matching UI so the paused state renders under "My Active
-      // Tumpang Trips" instead of routing into Direct/Mixed search.
       showMatchingUI = false;
     }
 
@@ -775,7 +766,7 @@ class HomeViewModel extends ChangeNotifier {
       List<Map<String, dynamic>> tempMatchedDrivers = [];
       int matchCount = 0;
       bool moreAvailable = false;
-      int orsFailuresThisRun = 0; // Track total full failures
+      int orsFailuresThisRun = 0;
 
       for (int i = 0; i < driverTrips.length; i++) {
         if (_fetchId != currentFetchId) return;
@@ -934,7 +925,7 @@ class HomeViewModel extends ChangeNotifier {
       }
 
       int validDriversFound = 0;
-      int orsFailuresThisRun = 0; // Track total full failures
+      int orsFailuresThisRun = 0;
 
       for (int i = 0; i < driverTrips.length; i++) {
         if (_fetchId != currentFetchId) return;
@@ -1254,7 +1245,6 @@ class HomeViewModel extends ChangeNotifier {
     final isMixedRoute = isMultiDriver || startGapDist > 1500 || endGapDist > 1500;
     final firstLegColor = isMixedRoute ? Colors.blue : Colors.indigo;
 
-    // 1. GAP AT START
     if (startGapDist > 100) {
       if (startGapDist > 1500) {
         final boardStation = TransitUtils.findNearestStation(passStart);
@@ -1277,7 +1267,6 @@ class HomeViewModel extends ChangeNotifier {
       markers.add((point: firstLegStart, color: originColor, isSmallNode: false));
     }
 
-    // 2. DRIVER LEGS
     LatLng? previousEnd;
     for (int i = 0; i < legs.length; i++) {
       final legStart = FormatUtils.latLngFromMap(legs[i], 'pickup_lat', 'pickup_lng');
@@ -1304,7 +1293,6 @@ class HomeViewModel extends ChangeNotifier {
       previousEnd = legEnd;
     }
 
-    // 3. GAP AT END
     if (endGapDist > 100 && previousEnd != null) {
       if (endGapDist > 1500) {
         final alightStation = TransitUtils.findNearestStation(passEnd);
@@ -1405,7 +1393,7 @@ class HomeViewModel extends ChangeNotifier {
   }
 
   int _safeSqlTimeToMinutes(dynamic sqlTime) {
-    if (sqlTime == null) return 1 << 30; // unknown time sorts last
+    if (sqlTime == null) return 1 << 30;
     try {
       return FormatUtils.sqlTimeToMinutes(sqlTime);
     } catch (_) {

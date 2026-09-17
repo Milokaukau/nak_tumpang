@@ -5,13 +5,6 @@ import 'package:sensors_plus/sensors_plus.dart';
 typedef GoyangCallback = void Function();
 typedef MagnitudeCallback = void Function(double gForce);
 
-/// Listens to the accelerometer and fires [onGoyang] when the device is
-/// shaken, with a cooldown so one shake doesn't fire repeatedly.
-///
-/// [onMagnitudeUpdate] is optional and purely for diagnostics — it fires
-/// on every sensor reading (unthrottled) so a debug UI can show the live
-/// motion value and confirm the sensor stream itself is actually working,
-/// independent of whether it's crossing the goyang threshold.
 class GoyangDetector {
   final GoyangCallback onGoyang;
   final MagnitudeCallback? onMagnitudeUpdate;

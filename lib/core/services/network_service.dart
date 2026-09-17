@@ -6,14 +6,10 @@ class NetworkService {
   static final ValueNotifier<bool> isOfflineNotifier = ValueNotifier<bool>(false);
 
   static Future<void> initialize() async {
-    // 1. Instantly check the current status on boot
     final initialResults = await Connectivity().checkConnectivity();
     isOfflineNotifier.value = initialResults.contains(ConnectivityResult.none);
-
-    // Trigger the UI update for the boot state
     _updateUI(isOfflineNotifier.value);
 
-    // 2. Listen for all future changes
     Connectivity().onConnectivityChanged.listen((List<ConnectivityResult> results) {
       final isOffline = results.contains(ConnectivityResult.none);
 
@@ -25,8 +21,6 @@ class NetworkService {
   }
 
   static void _updateUI(bool isOffline) {
-    // If the app just booted, the ScaffoldMessenger isn't attached yet.
-    // We wait 200ms and try again until the UI is ready to receive the Snackbar.
     if (messengerKey.currentState == null) {
       Future.delayed(const Duration(milliseconds: 200), () => _updateUI(isOffline));
       return;
@@ -41,7 +35,6 @@ class NetworkService {
             children: [
               Icon(Icons.wifi_off, color: Colors.white),
               SizedBox(width: 12),
-              // Wrapped in Expanded to allow text wrapping and prevent overflow
               Expanded(
                 child: Text('You are offline. Showing local cache.'),
               ),

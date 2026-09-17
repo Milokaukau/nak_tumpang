@@ -11,10 +11,6 @@ class BaseButton extends StatelessWidget {
   final Color? backgroundColor;
   final Color? foregroundColor;
   final Color? borderColor;
-
-  /// Shows a spinner in place of [text] and disables the button. Lets
-  /// every screen with an async action (login, register, save, ...) rely
-  /// on one loading affordance instead of hand-rolling its own.
   final bool isLoading;
 
   const BaseButton({
@@ -40,7 +36,6 @@ class BaseButton extends StatelessWidget {
         ? (foregroundColor ?? AppColors.black)
         : (foregroundColor ?? Colors.white);
 
-    // Extracted shared Text widget to prevent repeating code
     final buttonText = isLoading
         ? SizedBox(
       height: 20,

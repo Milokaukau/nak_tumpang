@@ -88,12 +88,11 @@ class _RewardsScreenState extends State<RewardsScreen> {
                 if (selectedTab == 0) ..._buildHistoryTab(vm),
                 if (selectedTab == 1) ..._buildRedemptionTab(vm),
                 if (selectedTab == 2) ..._buildMyRewardsTab(vm),
-                const SizedBox(height: 80), // keeps content clear of the bubble
+                const SizedBox(height: 80),
               ],
             ),
           ),
 
-          // Floating "Goyang N Win!" bubble — only visible if not yet played today.
           if (vm.isGoyangAvailableToday)
             Positioned(
               right: 16,
@@ -103,7 +102,6 @@ class _RewardsScreenState extends State<RewardsScreen> {
                   context,
                   MaterialPageRoute(builder: (_) => GoyangScreen(userId: widget.userId)),
                 ).then((_) {
-                  // Re-check in case a play happened and we came back.
                   context.read<RewardsViewModel>().checkGoyangAvailability(widget.userId);
                 }),
                 child: Container(
@@ -234,7 +232,7 @@ class _RewardsScreenState extends State<RewardsScreen> {
           ),
         ),
         onTap: isRedeemed
-            ? () {} // no-op — card is visually disabled via isDisabled, so this shouldn't be reachable anyway, but the callback still needs a value
+            ? () {}
             : () {
           Navigator.push(
             context,

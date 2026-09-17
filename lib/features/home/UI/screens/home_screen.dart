@@ -23,7 +23,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   String? _lastRouteSignature;
 
-  // Added state for user location
   LatLng? _userLocation;
   bool _isLocating = false;
 
@@ -32,7 +31,7 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<HomeViewModel>().fetchCurrentUser();
-      _fetchUserLocation(centerMap: false); // Fetch quietly on load
+      _fetchUserLocation(centerMap: false);
       _initializeNotifications();
     });
   }
@@ -113,7 +112,7 @@ class _HomeScreenState extends State<HomeScreen> {
               );
 
               if (!mounted) return;
-              Navigator.pop(context); // close loading indicator
+              Navigator.pop(context);
 
               if (subscriptionData == null) {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -199,7 +198,6 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
-  // Added function to get GPS and optionally center the camera
   Future<void> _fetchUserLocation({required bool centerMap}) async {
     setState(() => _isLocating = true);
 
@@ -228,20 +226,17 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
 
-      // 1. Instant fallback to last known location
       final lastKnown = await Geolocator.getLastKnownPosition();
       if (lastKnown != null && mounted) {
         final lastLatLng = LatLng(lastKnown.latitude, lastKnown.longitude);
         setState(() => _userLocation = lastLatLng);
 
-        // --- FIX: Center camera if asked OR if there is no active route ---
         final hasRoute = context.read<HomeViewModel>().mapRoutes.isNotEmpty;
         if (centerMap || !hasRoute) {
           _mapController.move(lastLatLng, 15.0);
         }
       }
 
-      // 2. Fetch fresh position with a 5-second limit
       final position = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
@@ -254,7 +249,6 @@ class _HomeScreenState extends State<HomeScreen> {
       final currentLatLng = LatLng(position.latitude, position.longitude);
       setState(() => _userLocation = currentLatLng);
 
-      // --- FIX: Center camera if asked OR if there is no active route ---
       final hasRoute = context.read<HomeViewModel>().mapRoutes.isNotEmpty;
       if (centerMap || !hasRoute) {
         _mapController.move(currentLatLng, 15.0);
@@ -262,7 +256,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
     } catch (e) {
       debugPrint('Location fetch notice: $e');
-      // --- FIX: Show SnackBar if the user tapped the button and it timed out/failed ---
       if (centerMap && mounted) {
         ScaffoldMessenger.of(context)
           ..hideCurrentSnackBar()
@@ -340,7 +333,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 polylines: viewModel.mapRoutes.map((routeData) {
                   return Polyline(
                     points: routeData.points,
-                    // Draw a slightly thinner line for the train transit leg
                     strokeWidth: routeData.isTransit ? 3.5 : 5.0,
                     color: routeData.color,
                     strokeJoin: StrokeJoin.round,
@@ -348,18 +340,15 @@ class _HomeScreenState extends State<HomeScreen> {
                   );
                 }).toList(),
               ),
-              // 2. Pins paint last (on top of the lines)
               MarkerLayer(
                 markers: [
                   ...viewModel.mapMarkers.map((markerData) {
                     return Marker(
                       point: markerData.point,
-                      // Shrink the bounding box if it's a small connection node
                       width: markerData.isSmallNode ? 16.0 : 32.0,
                       height: markerData.isSmallNode ? 16.0 : 40.0,
                       alignment: Alignment.center,
                       child: markerData.isSmallNode
-                      // Draw the small connection circle [-o-] centered exactly on the coordinate
                           ? Container(
                         decoration: BoxDecoration(
                           color: Colors.white,
@@ -367,7 +356,6 @@ class _HomeScreenState extends State<HomeScreen> {
                           border: Border.all(color: markerData.color, width: 4.0),
                         ),
                       )
-                      // Draw the standard large pin, pushed up so its tip hits the coordinate
                           : Transform.translate(
                         offset: const Offset(0, -20),
                         child: MapPin(color: markerData.color),

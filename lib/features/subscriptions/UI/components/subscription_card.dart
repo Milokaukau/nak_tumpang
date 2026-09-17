@@ -65,7 +65,6 @@ class SubscriptionCard extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Profile Image placeholder
               Container(
                 width: 50,
                 height: 50,
@@ -81,7 +80,6 @@ class SubscriptionCard extends StatelessWidget {
                     : null,
               ),
               const SizedBox(width: 12),
-              // Details Column
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
