@@ -7,8 +7,6 @@ import 'package:nak_tumpang/features/payout/UI/components/payout_success_dialog.
 import 'package:nak_tumpang/features/payout/data/constants/malaysian_banks.dart';
 import 'package:nak_tumpang/features/payout/view_models/payout_view_model.dart';
 
-// select payment method
-// bring to payout success dialog
 class PayoutDetailsDialog extends StatelessWidget {
   const PayoutDetailsDialog({super.key});
 
@@ -24,96 +22,93 @@ class PayoutDetailsDialog extends StatelessWidget {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  isBank ? Icons.account_balance : Icons.account_balance_wallet,
-                  color: AppColors.primaryYellow,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    isBank ? 'Bank details' : "Touch 'n Go eWallet details",
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    isBank ? Icons.account_balance : Icons.account_balance_wallet,
+                    color: AppColors.primaryYellow,
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Text(
-              isBank
-                  ? 'RM${netAmount.toStringAsFixed(2)} will be sent here (RM${amount.toStringAsFixed(2)} minus a RM${vm.bankTransferFee.toStringAsFixed(2)} processing fee).'
-                  : 'RM${amount.toStringAsFixed(2)} will be sent here once confirmed.',
-              style: const TextStyle(color: AppColors.greyText, fontSize: 12),
-            ),
-            const SizedBox(height: 16),
-            if (isBank) ...[
-              DropdownButtonFormField<String>(
-                initialValue: vm.selectedBankName,
-                decoration: InputDecoration(
-                  labelText: 'Bank name',
-                  border: const OutlineInputBorder(),
-                  errorText: vm.bankNameError,
-                ),
-                hint: const Text('Select your bank'),
-                items: kMalaysianBanks
-                    .map((bank) => DropdownMenuItem(value: bank, child: Text(bank)))
-                    .toList(),
-                onChanged: vm.selectBank,
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: vm.bankAccNoController,
-                keyboardType: TextInputType.number,
-                inputFormatters: [
-                  FilteringTextInputFormatter.digitsOnly,
-                  LengthLimitingTextInputFormatter(17),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      isBank ? 'Bank details' : "Touch 'n Go eWallet details",
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                    ),
+                  ),
                 ],
-                decoration: InputDecoration(
-                  labelText: 'Bank account number',
-                  border: const OutlineInputBorder(),
-                  errorText: vm.bankAccNoError,
-                ),
-                onChanged: (_) {
-                  if (vm.bankAccNoError != null) vm.clearBankAccNoError();
-                },
               ),
-            ] else
-              _TngPhoneField(vm: vm),
-            const SizedBox(height: 16),
-            if (vm.errorMessage != null) ...[
-              Text(vm.errorMessage!, style: const TextStyle(color: Colors.red)),
-              const SizedBox(height: 12),
-            ],
-            Row(
-              children: [
-                Expanded(
-                  child: BaseButton(
-                    text: 'Back',
-                    isOutlined: true,
-                    onPressed: vm.isSubmitting ? null : () => Navigator.pop(context),
+              const SizedBox(height: 4),
+              Text(
+                isBank
+                    ? 'RM${netAmount.toStringAsFixed(2)} will be sent here (RM${amount.toStringAsFixed(2)} minus a RM${vm.bankTransferFee.toStringAsFixed(2)} processing fee).'
+                    : 'RM${amount.toStringAsFixed(2)} will be sent here once confirmed.',
+                style: const TextStyle(color: AppColors.greyText, fontSize: 12),
+              ),
+              const SizedBox(height: 16),
+              if (isBank) ...[
+                DropdownButtonFormField<String>(
+                  initialValue: vm.selectedBankName,
+                  decoration: InputDecoration(
+                    labelText: 'Bank name',
+                    border: const OutlineInputBorder(),
+                    errorText: vm.bankNameError,
                   ),
+                  hint: const Text('Select your bank'),
+                  items: kMalaysianBanks
+                      .map((bank) => DropdownMenuItem(value: bank, child: Text(bank)))
+                      .toList(),
+                  onChanged: vm.selectBank,
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: BaseButton(
-                    text: 'Confirm',
-                    isLoading: vm.isSubmitting,
-                    // submitPayout() already guards against a second call
-                    // landing while one's in flight, but the button itself
-                    // wasn't visibly locked the same way Back is above —
-                    // this closes that gap so a fast double-tap doesn't
-                    // look like nothing happened.
-                    onPressed: vm.isSubmitting ? null : () => _confirm(context, vm),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: vm.bankAccNoController,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(17),
+                  ],
+                  decoration: InputDecoration(
+                    labelText: 'Bank account number',
+                    border: const OutlineInputBorder(),
+                    errorText: vm.bankAccNoError,
                   ),
+                  onChanged: (_) {
+                    if (vm.bankAccNoError != null) vm.clearBankAccNoError();
+                  },
                 ),
+              ] else
+                _TngPhoneField(vm: vm),
+              const SizedBox(height: 16),
+              if (vm.errorMessage != null) ...[
+                Text(vm.errorMessage!, style: const TextStyle(color: Colors.red)),
+                const SizedBox(height: 12),
               ],
-            ),
-          ],
+              Row(
+                children: [
+                  Expanded(
+                    child: BaseButton(
+                      text: 'Back',
+                      isOutlined: true,
+                      onPressed: vm.isSubmitting ? null : () => Navigator.pop(context),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: BaseButton(
+                      text: 'Confirm',
+                      isLoading: vm.isSubmitting,
+                      onPressed: vm.isSubmitting ? null : () => _confirm(context, vm),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -125,12 +120,9 @@ class PayoutDetailsDialog extends StatelessWidget {
     if (!context.mounted) return;
 
     if (success) {
-      Navigator.pop(context); // close the details dialog
+      Navigator.pop(context);
       await showDialog(
         context: context,
-        // Re-wrap with the same vm — the Provider from ClaimPayoutDialog
-        // only covers the details dialog's subtree, and that subtree is
-        // gone once we pop above, so the success dialog needs its own.
         builder: (_) => ChangeNotifierProvider.value(
           value: vm,
           child: PayoutSuccessDialog(amount: amount),
@@ -140,8 +132,6 @@ class PayoutDetailsDialog extends StatelessWidget {
   }
 }
 
-// tng entry same as register_screen phone field
-// digit only input capped at 9 digits only
 class _TngPhoneField extends StatelessWidget {
   final PayoutViewModel vm;
   const _TngPhoneField({required this.vm});

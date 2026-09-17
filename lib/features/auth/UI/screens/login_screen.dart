@@ -237,9 +237,9 @@ class _LoginViewState extends State<_LoginView> {
     );
   }
 
-  /// Renders a validation error flush-left, aligned with the field's
-  /// label and box edge above it. Returns an empty (zero-height) widget
-  /// when there's no error, so nothing shifts when errors appear/disappear.
+  // Renders a validation error flush-left, aligned with the field's
+  // label and box edge above it. Returns an empty (zero-height) widget
+  // when there's no error, so nothing shifts when errors appear/disappear.
   Widget _errorText(String? error) {
     if (error == null) return const SizedBox.shrink();
     return Padding(

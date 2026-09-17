@@ -1,5 +1,3 @@
-// lib/core/entities/location_node.dart
-
 class LocationNode {
   final double lat;
   final double lng;
