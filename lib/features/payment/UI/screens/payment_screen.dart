@@ -195,11 +195,8 @@ class _PaymentScreenState extends State<PaymentScreen> with SingleTickerProvider
                   totalAmount: viewModel.totalSelectedAmount,
                   selectedCount: viewModel.selectedPaymentIds.length,
                   isProcessing: viewModel.isProcessingPayment,
-                  onPayPressed: isOffline ? () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Internet connection is required to make payments.'), backgroundColor: Colors.red),
-                    );
-                  } : () => _handlePayment(viewModel),
+                  // FIX: Passing null directly to grey out the button when offline
+                  onPayPressed: isOffline ? null : () => _handlePayment(viewModel),
                 );
               },
             ),

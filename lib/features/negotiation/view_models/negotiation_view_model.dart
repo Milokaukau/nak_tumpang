@@ -12,8 +12,18 @@ import 'package:nak_tumpang/features/negotiation/data/services/negotiation_local
 class NegotiationViewModel extends ChangeNotifier {
   final NegotiationSupabaseService _service = NegotiationSupabaseService();
   final SupabaseClient _supabase = Supabase.instance.client;
+
+  // SQLITE: All offline reads/writes for negotiation requests go through this
+  // service, which wraps the on-device SQLite database (via LocalDbService)
+  // and operates on a single table: `tumpang_request`. See
+  // negotiation_local_service.dart for the actual queries.
   final NegotiationLocalService _localService = NegotiationLocalService();
 
+  // SHARED PREFERENCES: key prefix used to cache the current user's role
+  // ('driver' / 'passenger') in on-device key-value storage (shared_preferences
+  // package), so the app still knows the role instantly on next launch/offline
+  // without waiting on a Supabase round trip. Actual key looks like
+  // "nak_tumpang_cached_role_<userId>" - see _persistRole() / _readCachedRole().
   static const String _roleCacheKeyPrefix = 'nak_tumpang_cached_role_';
 
   String? currentUserId;
@@ -29,6 +39,8 @@ class NegotiationViewModel extends ChangeNotifier {
 
   final Map<String, Map<String, dynamic>> _userCache = {};
   final Map<String, String> _tripNameCache = {};
+  final Map<String, Map<String, dynamic>> _scheduleCache = {};
+
   late final StreamSubscription<AuthState> _authSubscription;
 
   bool get isOffline => NetworkService.isOfflineNotifier.value;
@@ -47,12 +59,16 @@ class NegotiationViewModel extends ChangeNotifier {
         completedRequests.clear();
         _userCache.clear();
         _tripNameCache.clear();
+        _scheduleCache.clear();
         currentUserRole = null;
         currentUserId = null;
         isLoading = false;
         notifyListeners();
 
         try {
+          // SQLITE: wipes every row of the local `tumpang_request` table so
+          // the previous account's cached requests can't leak into the new
+          // session. See NegotiationLocalService.clearRequestsCache().
           await _localService.clearRequestsCache();
         } catch (e) {
           debugPrint('Failed to clear local negotiation cache on account change: $e');
@@ -69,19 +85,26 @@ class NegotiationViewModel extends ChangeNotifier {
     completedRequests.clear();
     _userCache.clear();
     _tripNameCache.clear();
+    _scheduleCache.clear();
     currentUserRole = null;
     currentUserId = null;
     isLoading = false;
     notifyListeners();
 
     try {
+      // SQLITE: same table wipe as above, called explicitly from the
+      // logout flow as an extra safeguard (doesn't wait for the
+      // onAuthStateChange listener to fire first).
       await _localService.clearRequestsCache();
     } catch (e) {
       debugPrint('Failed to clear local negotiation cache on logout: $e');
     }
   }
 
-  // SharePreferences: saves the user's role as a string using their user ID as the unique key
+  // SHARED PREFERENCES (write): stores the resolved role for [userId] under
+  // key "nak_tumpang_cached_role_<userId>" in the device's shared_preferences
+  // store, so _readCachedRole() can restore it instantly on the next app
+  // launch or while offline, without hitting Supabase.
   Future<void> _persistRole(String userId, String role) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -91,7 +114,9 @@ class NegotiationViewModel extends ChangeNotifier {
     }
   }
 
-  // SharePreferences: retrieves the previously saved role so the app remembers it even if the app was closed and restarted
+  // SHARED PREFERENCES (read): retrieves the role previously saved by
+  // _persistRole() for [userId] from the same "nak_tumpang_cached_role_<userId>"
+  // key, so the app remembers the user's role across restarts and while offline.
   Future<String?> _readCachedRole(String userId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -115,6 +140,8 @@ class NegotiationViewModel extends ChangeNotifier {
     currentUserId = sessionUserId;
 
     if (user != null && sessionUserId != null) {
+      // SHARED PREFERENCES: fast local read so the UI has a role to show
+      // immediately, before/without the Supabase round trip below.
       final cachedRole = await _readCachedRole(sessionUserId);
 
       if (generation != _sessionGeneration || _supabase.auth.currentUser?.id != sessionUserId) return;
@@ -131,6 +158,8 @@ class NegotiationViewModel extends ChangeNotifier {
 
         final remoteRole = userData?['role']?.toString().replaceAll("'", "") ?? 'passenger';
         currentUserRole = remoteRole;
+        // SHARED PREFERENCES: refresh the cached role now that we have the
+        // authoritative value from Supabase.
         await _persistRole(sessionUserId, remoteRole);
       } catch (e) {
         debugPrint('Error refreshing role from Supabase: $e');
@@ -138,7 +167,6 @@ class NegotiationViewModel extends ChangeNotifier {
 
       if (generation != _sessionGeneration || _supabase.auth.currentUser?.id != sessionUserId) return;
 
-      // Default to passenger if null, then fetch their negotiation lists
       currentUserRole ??= 'passenger';
       await fetchRequests();
     } else {
@@ -173,6 +201,8 @@ class NegotiationViewModel extends ChangeNotifier {
 
     try {
       if (currentUserRole == null) {
+        // SHARED PREFERENCES: role not in memory yet - try the local cache
+        // before falling back to a network call further down.
         final cachedRole = await _readCachedRole(sessionUserId);
         if (!isCurrentSessionValid()) return;
         currentUserRole = cachedRole;
@@ -189,6 +219,8 @@ class NegotiationViewModel extends ChangeNotifier {
           if (!isCurrentSessionValid()) return;
 
           currentUserRole = userData?['role']?.toString().replaceAll("'", "") ?? 'passenger';
+          // SHARED PREFERENCES: persist so the next cold start / offline
+          // session can skip this network call entirely.
           await _persistRole(sessionUserId, currentUserRole!);
         } catch (e) {
           debugPrint('Error fetching role in fetchRequests(): $e');
@@ -199,21 +231,25 @@ class NegotiationViewModel extends ChangeNotifier {
       currentUserRole ??= 'passenger';
 
       final isDriver = currentUserRole == 'driver';
-      // Select correct trip table
       final tripTable = isDriver ? 'driver_trips' : 'passenger_trips';
       final tripIdColumn = isDriver ? 'driver_trip_id' : 'passenger_trip_id';
 
       List<dynamic> rows;
 
       if (isOffline) {
-        final p = await _localService.getOfflineRequests('pending');
-        final n = await _localService.getOfflineRequests('negotiating');
-        final c = await _localService.getOfflineRequests('completed');
-        final r = await _localService.getOfflineRequests('rejected');
-        final x = await _localService.getOfflineRequests('cancelled');
+        // SQLITE: no network - read every status bucket straight out of the
+        // local `tumpang_request` table (via NegotiationLocalService /
+        // LocalDbService's readOnlyDatabase) instead of hitting Supabase.
+        // sessionUserId scopes the query to `WHERE owner_id = ?` so cached
+        // rows from a different account on the same device aren't returned.
+        // FIX: Passed sessionUserId to local calls
+        final p = await _localService.getOfflineRequests('pending', sessionUserId);
+        final n = await _localService.getOfflineRequests('negotiating', sessionUserId);
+        final c = await _localService.getOfflineRequests('completed', sessionUserId);
+        final r = await _localService.getOfflineRequests('rejected', sessionUserId);
+        final x = await _localService.getOfflineRequests('cancelled', sessionUserId);
 
         if (!isCurrentSessionValid()) return;
-        // Spread operator: takes all the items from the 5 different status lists and combines them into one single list
         rows = [...p, ...n, ...c, ...r, ...x];
 
         if (rows.isNotEmpty) {
@@ -247,7 +283,6 @@ class NegotiationViewModel extends ChangeNotifier {
 
         currentTripId = tripIds.first;
 
-        // Fetch matching requests from database
         rows = await _supabase
             .from('tumpang_request')
             .select()
@@ -257,7 +292,12 @@ class NegotiationViewModel extends ChangeNotifier {
         if (!isCurrentSessionValid()) return;
 
         try {
-          await _localService.cacheTumpangRequests(rows.cast<Map<String, dynamic>>());
+          // SQLITE: mirror what we just fetched from Supabase into the local
+          // `tumpang_request` table (upsert/replace) so the same data is
+          // available next time the app is offline. sessionUserId is stored
+          // as `owner_id` on each row for the account-scoping described above.
+          // FIX: Passed sessionUserId to local calls
+          await _localService.cacheTumpangRequests(rows.cast<Map<String, dynamic>>(), sessionUserId);
         } catch (e) {
           debugPrint('Could not cache request offline due to strict foreign keys: $e');
         }
@@ -300,16 +340,28 @@ class NegotiationViewModel extends ChangeNotifier {
   }
 
   Future<TumpangRequest?> getSingleRequest(String requestId) async {
-    // Search local cache if offline
     if (isOffline) {
       final all = [...pendingRequests, ...completedRequests];
       for (final r in all) {
         if (r.id == requestId) return r;
       }
+
+      // FIX: Require the active user ID to fetch from offline cache safely
+      final activeUserId = _supabase.auth.currentUser?.id ?? currentUserId;
+      if (activeUserId != null) {
+        // SQLITE: in-memory lists above were empty/missed - fall back to a
+        // direct single-row lookup in the local `tumpang_request` table
+        // (`WHERE id = ? AND owner_id = ?`), so a deep link / notification
+        // opened straight into this screen still works offline even before
+        // fetchRequests() has populated the in-memory lists.
+        final row = await _localService.getOfflineRequestById(requestId, activeUserId);
+        if (row != null) {
+          return TumpangRequest.fromJson(row);
+        }
+      }
       return null;
     }
 
-    // Fetch from remote if online
     final activeUser = _supabase.auth.currentUser;
     if (activeUser == null) return null;
 
@@ -320,10 +372,8 @@ class NegotiationViewModel extends ChangeNotifier {
     if (_userCache.containsKey(tripId)) return _userCache[tripId];
     if (isOffline) return null;
 
-    // Select target trip table
     final tableName = isDriverTrip ? 'driver_trips' : 'passenger_trips';
     try {
-      // Return one row if it exists, or return null if it doesn't: prevent crash
       final res = await _supabase.from(tableName).select('users(*)').eq('id', tripId).maybeSingle();
       if (res != null && res['users'] != null) {
         final user = res['users'] as Map<String, dynamic>;
@@ -332,6 +382,27 @@ class NegotiationViewModel extends ChangeNotifier {
       }
     } catch (e) {
       debugPrint('Error fetching user profile: $e');
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> getPassengerSchedule(String passengerTripId) async {
+    if (_scheduleCache.containsKey(passengerTripId)) return _scheduleCache[passengerTripId];
+    if (isOffline) return null;
+
+    try {
+      final row = await _supabase
+          .from('passenger_trips')
+          .select('active_monday, active_tuesday, active_wednesday, active_thursday, active_friday, active_saturday, active_sunday')
+          .eq('id', passengerTripId)
+          .maybeSingle();
+
+      if (row != null) {
+        _scheduleCache[passengerTripId] = row;
+        return row;
+      }
+    } catch (e) {
+      debugPrint('Error fetching passenger schedule: $e');
     }
     return null;
   }
@@ -349,7 +420,6 @@ class NegotiationViewModel extends ChangeNotifier {
     return 'Your Trip';
   }
 
-  // Safely executes database actions with session validation and error wrapping.
   Future<T> runNegotiationAction<T>(
       Future<T> Function() action, {
         String fallbackMessage = 'An error occurred during negotiation.',
@@ -359,12 +429,9 @@ class NegotiationViewModel extends ChangeNotifier {
 
     try {
       final result = await action();
-
-      // Stop if account was switched
       if (startGeneration != _sessionGeneration || startUserId != currentUserId) {
         throw NegotiationException('Session changed. Request discarded.');
       }
-
       return result;
     } on PostgrestException catch (e) {
       throw NegotiationException(e.message);
@@ -374,11 +441,9 @@ class NegotiationViewModel extends ChangeNotifier {
     }
   }
 
-  // Accepts a specific negotiation term
   Future<void> acceptTerm(String requestId, String fieldPrefix) {
     if (isOffline) throw NegotiationException('You cannot accept terms while offline.');
     return runNegotiationAction(() async {
-      // Update term status in database
       await _service.acceptNegotiationField(requestId: requestId, fieldPrefix: fieldPrefix);
       await refreshRequests();
     });
@@ -391,14 +456,11 @@ class NegotiationViewModel extends ChangeNotifier {
     double? lat,
     double? lng,
   }) {
-    // Validate network connection
     if (isOffline) throw NegotiationException('You cannot propose terms while offline.');
     final activeUserId = _supabase.auth.currentUser?.id;
-    // Validate user is logged in
     if (activeUserId == null) throw NegotiationException('You must be signed in to propose terms.');
 
     return runNegotiationAction(() async {
-      // Save new term to database
       await _service.updateNegotiationField(
         requestId: requestId,
         fieldPrefix: fieldPrefix,
@@ -406,7 +468,7 @@ class NegotiationViewModel extends ChangeNotifier {
         lat: lat,
         lng: lng,
         requestedById: activeUserId,
-        isAccepted: false, // Mark as unaccepted proposal
+        isAccepted: false,
       );
       await refreshRequests();
     });
@@ -424,12 +486,10 @@ class NegotiationViewModel extends ChangeNotifier {
     return runNegotiationAction(() async {
       final start = DateTime.tryParse(startDate);
       final end = DateTime.tryParse(endDate);
-      // Validate dates parsed successfully
       if (start == null || end == null) {
         throw NegotiationException('Please choose a valid date range.');
       }
 
-      // Apply business rules for dates
       final validationError = DateRangeRules.validate(start, end);
       if (validationError != null) {
         throw NegotiationException(validationError);
@@ -485,7 +545,6 @@ class NegotiationViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Fetches unpaid subscription invoices
   Future<List<Map<String, dynamic>>> getOpenInvoices(String subscriptionId) async {
     if (isOffline) return [];
     final rows = await _supabase
@@ -496,7 +555,6 @@ class NegotiationViewModel extends ChangeNotifier {
     return (rows as List).cast<Map<String, dynamic>>();
   }
 
-  // Fetches a specific subscription record
   Future<Map<String, dynamic>?> getSubscriptionById(String subscriptionId) async {
     if (isOffline) return null;
     try {
@@ -512,7 +570,6 @@ class NegotiationViewModel extends ChangeNotifier {
     }
   }
 
-  // Submits subscription extension request
   Future<String> submitExtensionRequest({
     required Map<String, dynamic> subscription,
     required DateTime newEndDate,
@@ -533,7 +590,6 @@ class NegotiationViewModel extends ChangeNotifier {
 
     return runNegotiationAction<String>(
           () async {
-        // Create extension in database
         final requestId = await _service.createExtensionRequest(
           subscription: subscription,
           requestedById: liveUserId,
@@ -555,7 +611,6 @@ class NegotiationViewModel extends ChangeNotifier {
     );
   }
 
-  // Gathers data for request summary
   Future<Map<String, dynamic>?> getSummaryData(String requestId) async {
     final req = await getSingleRequest(requestId);
     if (req == null) return null;
@@ -574,38 +629,31 @@ class NegotiationViewModel extends ChangeNotifier {
       }
     }
 
-    double oldDeposit = 0.0;
-    // Check if extending subscription
-    if (req.isExtension && req.extendsSubscriptionId != null) {
-      final oldSub = await getSubscriptionById(req.extendsSubscriptionId!);
-      oldDeposit = double.tryParse(oldSub?['deposit']?.toString() ?? '') ?? 0.0;
-    }
-
     return {
       'request': req,
-      'oldDeposit': oldDeposit,
       'schedule': schedule,
     };
   }
 
-  // Finalizes a subscription extension request
   Future<void> finalizeExtensionRequest({
     required String extensionRequestId,
     required double additionalDeposit,
     required String paymentIntentId,
   }) {
     if (isOffline) throw NegotiationException('You cannot finalize an extension while offline.');
+    // NOTE: additionalDeposit is intentionally not forwarded to the service -
+    // the server derives the real amount from the PaymentIntent itself. It's
+    // kept as a parameter here only so callers can still validate/display
+    // the amount they expect to be charged before calling this.
     return runNegotiationAction(() async {
       await _service.finalizeExtension(
         extensionRequestId,
-        additionalDeposit: additionalDeposit,
         paymentIntentId: paymentIntentId,
       );
       await refreshRequests();
     });
   }
 
-  /// Whether [date] is an active ride day in a passenger trip schedule.
   static bool isDayActive(DateTime date, Map<String, dynamic> schedule) {
     switch (date.weekday) {
       case DateTime.monday:
@@ -627,21 +675,16 @@ class NegotiationViewModel extends ChangeNotifier {
     }
   }
 
-  // Prepares deposit payment transaction
-  Future<String> createDepositPaymentIntent({
-    required double amount,
+  Future<Map<String, dynamic>> createDepositPaymentIntent({
     required String requestId,
   }) async {
-    // Validate amount is positive
-    if (amount <= 0) throw NegotiationException('Deposit amount must be greater than RM 0.');
     if (isOffline) throw NegotiationException('You cannot process a payment while offline.');
 
     isLoading = true;
     errorMessage = null;
     notifyListeners();
     try {
-      // Request payment intent from service
-      return await _service.createDepositPaymentIntent(amount: amount, requestId: requestId);
+      return await _service.createDepositPaymentIntent(requestId: requestId);
     } catch (e) {
       errorMessage = 'Unable to prepare the deposit payment.';
       rethrow;
@@ -651,7 +694,6 @@ class NegotiationViewModel extends ChangeNotifier {
     }
   }
 
-  // Finalizes subscription after deposit payment
   Future<void> createSubscriptionAfterDeposit({
     required TumpangRequest request,
     required double deposit,
@@ -660,17 +702,18 @@ class NegotiationViewModel extends ChangeNotifier {
     if (deposit <= 0) throw NegotiationException('Deposit amount must be greater than RM 0.');
     if (isOffline) throw NegotiationException('You cannot complete a subscription while offline.');
 
+    // NOTE: deposit is validated above but intentionally not forwarded to
+    // the service - the server derives the real amount from the
+    // PaymentIntent itself rather than trusting a client-supplied figure.
     await runNegotiationAction(() async {
       await _service.createSubscriptionAfterDeposit(
         request: request,
-        deposit: deposit,
         paymentIntentId: paymentIntentId,
       );
       await refreshRequests();
     });
   }
 
-  /// Counts scheduled ride days inclusively between [start] and [end].
   static int countActiveDays(
       DateTime start,
       DateTime end,
@@ -681,13 +724,12 @@ class NegotiationViewModel extends ChangeNotifier {
     var count = 0;
     for (var date = DateTime(start.year, start.month, start.day);
     !date.isAfter(end);
-    date = date.add(const Duration(days: 1))) {
+    date = DateTime(date.year, date.month, date.day + 1)) {
       if (isDayActive(date, schedule)) count++;
     }
     return count;
   }
 
-  // Calculates future subscription invoice cycles
   static List<Map<String, dynamic>> calculateInvoicePeriods({
     required DateTime startDate,
     required DateTime endDate,
@@ -699,13 +741,12 @@ class NegotiationViewModel extends ChangeNotifier {
     final periods = <Map<String, dynamic>>[];
     if (endDate.isBefore(startDate)) return periods;
 
-    var cycleStart = startDate.add(Duration(days: depositDays));
+    var cycleStart = DateTime(startDate.year, startDate.month, startDate.day + depositDays);
+
     while (!cycleStart.isAfter(endDate)) {
-      final cycleEnd = cycleStart
-          .add(Duration(days: invoiceCycleDays - 1))
-          .isAfter(endDate)
-          ? endDate
-          : cycleStart.add(Duration(days: invoiceCycleDays - 1));
+      final potentialEnd = DateTime(cycleStart.year, cycleStart.month, cycleStart.day + invoiceCycleDays - 1);
+      final cycleEnd = potentialEnd.isAfter(endDate) ? endDate : potentialEnd;
+
       final activeDays = countActiveDays(cycleStart, cycleEnd, schedule);
       periods.add({
         'startDay': cycleStart.difference(startDate).inDays + 1,
@@ -713,7 +754,8 @@ class NegotiationViewModel extends ChangeNotifier {
         'days': activeDays,
         'amount': dailyFee * activeDays,
       });
-      cycleStart = cycleEnd.add(const Duration(days: 1));
+
+      cycleStart = DateTime(cycleEnd.year, cycleEnd.month, cycleEnd.day + 1);
     }
     return periods;
   }

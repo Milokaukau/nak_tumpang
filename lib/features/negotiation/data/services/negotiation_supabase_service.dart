@@ -1,5 +1,16 @@
+import 'dart:math';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nak_tumpang/core/entities/tumpang_request.dart';
+
+final Random _idRandom = Random();
+
+/// Short random alphanumeric suffix used to disambiguate IDs generated in
+/// the same millisecond. Not cryptographically secure - just enough entropy
+/// to make an accidental collision practically impossible.
+String _randomSuffix({int length = 6}) {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  return List.generate(length, (_) => chars[_idRandom.nextInt(chars.length)]).join();
+}
 
 class NegotiationSupabaseService {
   final SupabaseClient _supabase;
@@ -20,53 +31,61 @@ class NegotiationSupabaseService {
     return TumpangRequest.fromJson(response);
   }
 
-  Future<String> createDepositPaymentIntent({
-    required double amount,
+  Future<Map<String, dynamic>> createDepositPaymentIntent({
     required String requestId,
   }) async {
-    // Invoke Supabase payment edge function
     final response = await _supabase.functions.invoke(
       'create-payment-intent',
-      body: {
-        'amount': amount,
-        'currency': 'myr',
-        'description': 'Nak Tumpang deposit for request $requestId',
-      },
+      body: {'request_id': requestId},
     );
     if (response.status != 200 || response.data == null) {
       final error = response.data is Map ? response.data['error'] : null;
       throw StateError(error?.toString() ?? 'Failed to create PaymentIntent');
     }
-    final clientSecret = (response.data as Map)['client_secret']?.toString();
-    if (clientSecret == null || clientSecret.isEmpty) {
-      throw StateError('No client_secret returned from server');
+
+    final data = response.data as Map;
+    final clientSecret = data['client_secret']?.toString();
+    final serverAmount = (data['amount'] as num?)?.toDouble();
+
+    if (clientSecret == null || clientSecret.isEmpty || serverAmount == null) {
+      throw StateError('Invalid response from payment server');
     }
-    return clientSecret;
+
+    return {
+      'clientSecret': clientSecret,
+      'amount': serverAmount,
+    };
   }
 
   /// Finalizes a brand-new subscription after a successful deposit payment.
+  ///
   /// All multi-table writes (subscription insert, payment insert, request
-  /// status update) now happen inside the `finalize_tumpang_payment` Postgres
-  /// function, in a single atomic transaction. `paymentIntentId` is used
-  /// server-side as an idempotency key: if the app retries this call (e.g.
-  /// after a crash or network drop) with the same Stripe PaymentIntent id,
-  /// the RPC detects the existing `payments` row and returns the already-
-  /// created subscription id instead of writing duplicate rows.
+  /// status update) happen server-side inside the `finalize-deposit-payment`
+  /// Edge Function. The deposit *amount* is never sent from the client here -
+  /// the function looks up the amount itself from the PaymentIntent
+  /// identified by [paymentIntentId], which is also used as an idempotency
+  /// key: if the app retries this call (e.g. after a crash or network drop)
+  /// with the same Stripe PaymentIntent id, the function should detect the
+  /// existing `payments` row and return the already-created subscription id
+  /// instead of writing duplicate rows. Verify the function itself upholds
+  /// that idempotency guarantee.
   Future<String> createSubscriptionAfterDeposit({
     required TumpangRequest request,
-    required double deposit,
     required String paymentIntentId,
   }) async {
-    final response = await _supabase.rpc(
-      'finalize_tumpang_payment',
-      params: {
-        'p_request_id': request.id,
-        'p_payment_intent_id': paymentIntentId,
-        'p_deposit': deposit,
+    final response = await _supabase.functions.invoke(
+      'finalize-deposit-payment',
+      body: {
+        'request_id': request.id,
+        'payment_intent_id': paymentIntentId,
       },
     );
 
-    final subscriptionId = response?.toString();
+    if (response.status != 200 || response.data == null) {
+      final error = response.data is Map ? response.data['error'] : null;
+      throw StateError(error?.toString() ?? 'Could not finalize deposit payment');
+    }
+    final subscriptionId = (response.data as Map)['subscription_id']?.toString();
     if (subscriptionId == null || subscriptionId.isEmpty) {
       throw StateError('finalize_tumpang_payment did not return a subscription id');
     }
@@ -154,8 +173,12 @@ class NegotiationSupabaseService {
   }) async {
     final subscriptionId = subscription['id'] as String;
 
-    // Format dates for database storage
-    final requestId = 'ext_${DateTime.now().millisecondsSinceEpoch}';
+    // Format dates for database storage.
+    // NOTE: appends a random suffix on top of the millisecond timestamp so
+    // two extension requests created in the same millisecond (e.g. a
+    // double-tap or two devices racing) can't collide on the primary key.
+    final requestId =
+        'ext_${DateTime.now().millisecondsSinceEpoch}_${_randomSuffix()}';
     final newEndDateStr = newEndDate.toIso8601String().split('T').first;
 
     final bool pickupChanged = overridePickupName != null;
@@ -211,27 +234,30 @@ class NegotiationSupabaseService {
   ///
   /// As with [createSubscriptionAfterDeposit], all writes (new subscription
   /// insert, old subscription shutdown, request completion, payment insert)
-  /// now happen atomically inside `finalize_tumpang_payment`, keyed on
-  /// `paymentIntentId` for idempotent retries. The client-side
-  /// isFullyAgreed / isExtension / expiry validation that used to live here
-  /// should be re-checked server-side inside the RPC (or kept here as a
-  /// pre-flight check) since this method no longer performs those reads
-  /// itself before writing.
+  /// happen server-side inside the `finalize-deposit-payment` Edge Function,
+  /// keyed on [paymentIntentId] for idempotent retries; the amount is looked
+  /// up from the PaymentIntent server-side, never trusted from the client.
+  /// The client-side isFullyAgreed / isExtension / expiry validation that
+  /// used to live here should be re-checked inside that function (or kept
+  /// here as a pre-flight check) since this method no longer performs those
+  /// reads itself before writing.
   Future<String> finalizeExtension(
       String extensionRequestId, {
-        double additionalDeposit = 0.0,
         required String paymentIntentId,
       }) async {
-    final response = await _supabase.rpc(
-      'finalize_tumpang_payment',
-      params: {
-        'p_request_id': extensionRequestId,
-        'p_payment_intent_id': paymentIntentId,
-        'p_deposit': additionalDeposit,
+    final response = await _supabase.functions.invoke(
+      'finalize-deposit-payment',
+      body: {
+        'request_id': extensionRequestId,
+        'payment_intent_id': paymentIntentId,
       },
     );
 
-    final subscriptionId = response?.toString();
+    if (response.status != 200 || response.data == null) {
+      final error = response.data is Map ? response.data['error'] : null;
+      throw StateError(error?.toString() ?? 'Could not finalize deposit payment');
+    }
+    final subscriptionId = (response.data as Map)['subscription_id']?.toString();
     if (subscriptionId == null || subscriptionId.isEmpty) {
       throw StateError('finalize_tumpang_payment did not return a subscription id');
     }

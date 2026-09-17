@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_stripe/flutter_stripe.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:nak_tumpang/core/entities/payment.dart';
 import 'package:nak_tumpang/features/payment/data/services/payment_supabase_service.dart';
 import 'package:nak_tumpang/core/services/network_service.dart';
@@ -25,6 +26,8 @@ class PaymentViewModel extends ChangeNotifier {
   String? proformaErrorMessage;
 
   String? _currentUserId;
+  String? _confirmedPaymentIntentId;
+  Set<String> _confirmedPaymentIds = {};
 
   bool get isOffline => NetworkService.isOfflineNotifier.value;
 
@@ -34,10 +37,6 @@ class PaymentViewModel extends ChangeNotifier {
     _authSubscription = _supabase.auth.onAuthStateChange.listen((data) async {
       final newUserId = data.session?.user.id;
 
-      // An explicit sign-out, or a DIFFERENT account signing in without an
-      // app restart in between — either way the SQLite payments cache
-      // still holds the PREVIOUS account's invoices/history and must not
-      // leak into the new session.
       final isAccountChange = data.event == AuthChangeEvent.signedOut ||
           (data.event == AuthChangeEvent.signedIn && _currentUserId != null && newUserId != _currentUserId);
 
@@ -57,9 +56,6 @@ class PaymentViewModel extends ChangeNotifier {
     });
   }
 
-  /// Call this from your auth/logout flow as an extra safeguard so the
-  /// cache is cleared immediately, without waiting for the
-  /// onAuthStateChange event to round-trip.
   Future<void> clearLocalCacheOnLogout() async {
     try {
       await _localService.clearPaymentsCache();
@@ -98,6 +94,35 @@ class PaymentViewModel extends ChangeNotifier {
         .fold(0.0, (sum, item) => sum + item.amount);
   }
 
+  Future<Payment?> getPaymentById(String paymentId) async {
+    final allMem = [...pendingPayments, ...paymentHistory];
+    for (final p in allMem) {
+      if (p.id == paymentId) return p;
+    }
+
+    if (isOffline) {
+      final row = await _localService.getOfflinePaymentById(paymentId);
+      if (row != null) {
+        return Payment.fromJson(row);
+      }
+      return null;
+    }
+
+    try {
+      final response = await _supabase
+          .from('payments')
+          .select('*, tumpang_subscription(pickup_location, dropoff_location)')
+          .eq('id', paymentId)
+          .maybeSingle();
+      if (response != null) {
+        return Payment.fromJson(response);
+      }
+    } catch (e) {
+      debugPrint('Error fetching single payment: $e');
+    }
+    return null;
+  }
+
   Future<void> fetchAllPayments() async {
     isLoading = true;
     errorMessage = null;
@@ -112,27 +137,18 @@ class PaymentViewModel extends ChangeNotifier {
       }
 
       if (isOffline) {
-        // SQLite: Retrieve pending and completed payment records from local database
         final pRows = await _localService.getOfflinePayments(isCompleted: false);
         final cRows = await _localService.getOfflinePayments(isCompleted: true);
 
         pendingPayments = pRows.map((r) => Payment.fromJson(r)).toList();
         paymentHistory = cRows.map((r) => Payment.fromJson(r)).toList();
       } else {
-        // Fetch from Supabase
         await _service.generateDueInvoicesForUser(userId);
 
-        // fetchPendingPayments also repairs/cleans up invalid invoices
-        // remotely (premature bills, zeroed-out amounts) and hands back
-        // which invoice ids it deleted so the offline cache can be kept
-        // in sync.
         final pendingResult = await _service.fetchPendingPayments(userId);
         pendingPayments = pendingResult.payments;
         paymentHistory = await _service.fetchPaymentHistory(userId);
 
-        // Purge any zombie invoices the service just deleted server-side so
-        // they don't resurface from the offline cache next time the app is
-        // opened without a network connection.
         if (pendingResult.deletedInvoiceIds.isNotEmpty) {
           try {
             await _localService.deletePaymentsByIds(pendingResult.deletedInvoiceIds);
@@ -141,7 +157,6 @@ class PaymentViewModel extends ChangeNotifier {
           }
         }
 
-        // SQLite: Save fetched records to local database
         try {
           final allPayments = [...pendingPayments, ...paymentHistory].map((p) => p.toJson()).toList();
           await _localService.cachePayments(allPayments);
@@ -206,7 +221,6 @@ class PaymentViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Processes selected invoice payments via Stripe
   Future<bool> paySelectedWithStripe() async {
     if (isOffline) {
       paymentErrorMessage = 'Payment cannot be processed offline.';
@@ -220,52 +234,108 @@ class PaymentViewModel extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // Supabase Edge Function: Create payment intent on server
-      final response = await _supabase.functions.invoke(
-        'create-payment-intent',
-        body: {
-          'amount': totalSelectedAmount,
-          'currency': 'myr',
-          'description': 'Nak Tumpang Invoice Settlement (${selectedPaymentIds.length} items)',
-        },
-      );
+      final selectedIds = selectedPaymentIds.toList()..sort();
+      final batchKey = 'stripe_batch_${selectedIds.join('_')}';
+      final prefs = await SharedPreferences.getInstance();
 
-      if (response.status != 200 || response.data == null) {
-        final err = response.data is Map ? response.data['error'] : null;
-        throw Exception(err ?? 'Stripe PaymentIntent failure.');
+      String? paymentIntentId = prefs.getString(batchKey);
+      String? clientSecret;
+      bool needsStripeSheet = false;
+
+      // 1. Idempotency Check: Do we already have an intent for this exact batch?
+      if (paymentIntentId != null) {
+        // App crashed after Stripe succeeded but before settlement. Just retry settlement.
+        needsStripeSheet = false;
+      } else if (_confirmedPaymentIntentId != null &&
+          _confirmedPaymentIds.length == selectedIds.length &&
+          _confirmedPaymentIds.containsAll(selectedIds)) {
+        // Memory cached intent. Just retry settlement.
+        paymentIntentId = _confirmedPaymentIntentId!;
+        needsStripeSheet = false;
+      } else {
+        // 2. Generate new intent from edge function
+        final response = await _supabase.functions.invoke(
+          'create-payment-intent',
+          body: {'payment_ids': selectedIds},
+        );
+
+        if (response.status != 200 || response.data == null) {
+          final err = response.data is Map ? response.data['error'] : null;
+          throw Exception(err ?? 'Stripe PaymentIntent failure.');
+        }
+
+        final paymentIntent = response.data as Map;
+        clientSecret = paymentIntent['client_secret']?.toString();
+        if (clientSecret == null || clientSecret.isEmpty) {
+          throw Exception('No client_secret returned from server');
+        }
+        paymentIntentId = _extractPaymentIntentId(clientSecret);
+        needsStripeSheet = true;
       }
 
-      final paymentIntent = response.data as Map;
-      final clientSecret = paymentIntent['client_secret'];
-      if (clientSecret == null) {
-        throw Exception('No client_secret returned from server');
-      }
-
-      // Initialize and present Stripe payment sheet
-      await Stripe.instance.initPaymentSheet(
-        paymentSheetParameters: SetupPaymentSheetParameters(
-          paymentIntentClientSecret: clientSecret,
-          merchantDisplayName: 'Nak Tumpang',
-          style: ThemeMode.light,
-          billingDetails: const BillingDetails(
-            address: Address(
-              country: 'MY',
-              city: '',
-              line1: '',
-              line2: '',
-              postalCode: '',
-              state: '',
+      // 3. Present Stripe if required
+      if (needsStripeSheet && clientSecret != null) {
+        await Stripe.instance.initPaymentSheet(
+          paymentSheetParameters: SetupPaymentSheetParameters(
+            paymentIntentClientSecret: clientSecret,
+            merchantDisplayName: 'Nak Tumpang',
+            style: ThemeMode.light,
+            billingDetails: const BillingDetails(
+              address: Address(
+                country: 'MY',
+                city: '',
+                line1: '',
+                line2: '',
+                postalCode: '',
+                state: '',
+              ),
             ),
           ),
-        ),
-      );
+        );
 
-      await Stripe.instance.presentPaymentSheet();
+        await Stripe.instance.presentPaymentSheet();
 
-      // Supabase: Finalize batch payment
-      await _service.completePaymentBatch(selectedPaymentIds.toList());
+        // 4. On Stripe success, persist intent immediately before hitting our API
+        _confirmedPaymentIntentId = paymentIntentId;
+        _confirmedPaymentIds = selectedIds.toSet();
+        await prefs.setString(batchKey, paymentIntentId!);
+      }
+
+      // 5. Complete settlement via edge function
+      try {
+        await _service.completePaymentBatch(selectedIds, paymentIntentId: paymentIntentId!);
+      } catch (e) {
+        if (_isTerminalSettlementError(e)) {
+          // The batch is no longer payable — most likely it was already
+          // settled by a prior attempt whose success response we never saw
+          // (e.g. app killed right after step 4, or Stripe succeeded but
+          // completePaymentBatch failed on the *previous* retry after
+          // actually applying server-side). Retrying with the same intent
+          // would only fail forever, so clear it, drop the now-stale
+          // selection, and refresh from the server so the UI reflects the
+          // real (already-paid) state instead of a nonexistent balance.
+          await prefs.remove(batchKey);
+          selectedPaymentIds.clear();
+          _confirmedPaymentIntentId = null;
+          _confirmedPaymentIds = {};
+          paymentErrorMessage = 'This payment was already completed.';
+          await fetchAllPayments();
+          return false;
+        }
+        // Transient or ambiguous failure (network blip, edge function 5xx,
+        // etc.) — deliberately keep the stored intent so a retry settles
+        // against the SAME PaymentIntent instead of generating a new one,
+        // which would charge the card again for any overlapping invoices.
+        rethrow;
+      }
+
+      // 6. Clear persistence and state on full success
+      await prefs.remove(batchKey);
       selectedPaymentIds.clear();
+      _confirmedPaymentIntentId = null;
+      _confirmedPaymentIds = {};
       await fetchAllPayments();
+
       return true;
     } on StripeException catch (e) {
       debugPrint('Stripe payment cancelled/failed: ${e.error.localizedMessage}');
@@ -280,12 +350,30 @@ class PaymentViewModel extends ChangeNotifier {
     }
   }
 
-  // =========================================================================
-  // CANCELLATION BILLING
-  // =========================================================================
+  /// Best-effort classification of a settlement failure as terminal (the
+  /// batch can never succeed with this intent again, e.g. already settled /
+  /// invoices no longer payable) vs. transient/ambiguous (worth retrying
+  /// with the same intent). completePaymentBatch only surfaces a free-text
+  /// message from the edge function (see payment_supabase_service.dart),
+  /// not a structured error code, so this matches on message content.
+  /// NOTE: if `settle-payment-batch` starts returning a stable machine
+  /// readable code (e.g. {"error_code": "already_settled"}), prefer
+  /// matching on that instead of these string fragments.
+  bool _isTerminalSettlementError(Object error) {
+    final msg = error.toString().toLowerCase();
+    return msg.contains('already paid') ||
+        msg.contains('already settled') ||
+        msg.contains('already completed') ||
+        msg.contains('no longer payable') ||
+        msg.contains('not payable');
+  }
 
-  /// Returns the breakdown of actual fetched days and exact fees owed/refundable.
-  /// Perfect for powering the cancellation confirmation screen UI.
+  String _extractPaymentIntentId(String clientSecret) {
+    final separator = clientSecret.indexOf('_secret_');
+    if (separator < 1) throw StateError('Unexpected PaymentIntent client secret format.');
+    return clientSecret.substring(0, separator);
+  }
+
   Future<Map<String, dynamic>?> getCancellationSummary(String subscriptionId) async {
     if (isOffline) {
       paymentErrorMessage = 'Cannot calculate exact cancellation fees while offline.';
@@ -293,7 +381,6 @@ class PaymentViewModel extends ChangeNotifier {
       return null;
     }
 
-    // Supabase: Calculate cancellation fee
     try {
       return await _service.calculateCancellationFee(subscriptionId);
     } catch (e) {
@@ -302,7 +389,6 @@ class PaymentViewModel extends ChangeNotifier {
     }
   }
 
-  /// Executes the final bill generation upon successful cancellation.
   Future<bool> processCancellationBill(String subscriptionId) async {
     if (isOffline) {
       paymentErrorMessage = 'Cannot process cancellations while offline.';
@@ -314,10 +400,9 @@ class PaymentViewModel extends ChangeNotifier {
     paymentErrorMessage = null;
     notifyListeners();
 
-    // Supabase: Generate cancellation invoice
     try {
       await _service.generateCancellationInvoice(subscriptionId);
-      await fetchAllPayments(); // Refresh list to instantly show the final bill
+      await fetchAllPayments();
       return true;
     } catch (e) {
       paymentErrorMessage = 'Failed to generate final cancellation bill: $e';

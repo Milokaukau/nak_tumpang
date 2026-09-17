@@ -7,6 +7,7 @@ import 'package:nak_tumpang/core/entities/tumpang_request.dart';
 import 'package:nak_tumpang/features/negotiation/view_models/negotiation_view_model.dart';
 import 'package:nak_tumpang/features/negotiation/UI/components/summary_route_map.dart';
 import 'package:nak_tumpang/features/home/view_models/home_view_model.dart';
+import 'package:nak_tumpang/core/services/network_service.dart';
 
 class TumpangSummaryScreen extends StatefulWidget {
   final String requestId;
@@ -48,11 +49,6 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
     return subscriptionDays <= 60 ? subscriptionDays : 60;
   }
 
-  /// Stripe's `flutter_stripe` payment sheet doesn't hand back the
-  /// PaymentIntent object after `presentPaymentSheet()` succeeds — but the
-  /// PaymentIntent id is always the prefix of the client secret, in the form
-  /// `pi_XXXXXXXX_secret_YYYYYYYY`. We use that to recover the id so it can
-  /// be passed server-side as the idempotency key.
   String _extractPaymentIntentId(String clientSecret) {
     final secretIndex = clientSecret.indexOf('_secret_');
     if (secretIndex == -1) {
@@ -61,18 +57,16 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
     return clientSecret.substring(0, secretIndex);
   }
 
-  Future<void> _handlePayDeposit({
-    required TumpangRequest request,
-    required double totalDeposit,
-  }) async {
+  Future<void> _handlePayDeposit({required TumpangRequest request}) async {
     setState(() => _isProcessing = true);
 
     try {
       final controller = context.read<NegotiationViewModel>();
-      final clientSecret = await controller.createDepositPaymentIntent(
-        amount: totalDeposit,
-        requestId: request.id,
-      );
+
+      // Fetch intent and server-derived amount
+      final intentData = await controller.createDepositPaymentIntent(requestId: request.id);
+      final clientSecret = intentData['clientSecret'] as String;
+      final serverAmount = intentData['amount'] as double;
       final paymentIntentId = _extractPaymentIntentId(clientSecret);
 
       await Stripe.instance.initPaymentSheet(
@@ -81,14 +75,7 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
           merchantDisplayName: 'Nak Tumpang',
           style: ThemeMode.light,
           billingDetails: const BillingDetails(
-            address: Address(
-              country: 'MY',
-              city: null,
-              line1: null,
-              line2: null,
-              postalCode: null,
-              state: null,
-            ),
+            address: Address(country: 'MY', city: null, line1: null, line2: null, postalCode: null, state: null),
           ),
         ),
       );
@@ -97,20 +84,16 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
 
       if (!mounted) return;
 
-      // paymentIntentId is passed through so the server-side RPC can treat
-      // this call idempotently: if the app crashes or is retried after this
-      // point, the same PaymentIntent id will short-circuit to the already
-      // finalized subscription instead of writing duplicate rows.
       if (request.isExtension) {
         await controller.finalizeExtensionRequest(
           extensionRequestId: request.id,
-          additionalDeposit: totalDeposit,
+          additionalDeposit: serverAmount, // Use server amount
           paymentIntentId: paymentIntentId,
         );
       } else {
         await controller.createSubscriptionAfterDeposit(
           request: request,
-          deposit: totalDeposit,
+          deposit: serverAmount, // Use server amount
           paymentIntentId: paymentIntentId,
         );
       }
@@ -183,24 +166,20 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
           if (startDate == null || endDate == null) {
             return const Center(child: Text('Invalid subscription dates.'));
           }
-          final depositEndDate = startDate
-              .add(const Duration(days: 59))
-              .isAfter(endDate)
-              ? endDate
-              : startDate.add(const Duration(days: 59));
+
+          // FIX: DST-safe calendar math
+          final potentialDepositEnd = DateTime(startDate.year, startDate.month, startDate.day + 59);
+          final depositEndDate = potentialDepositEnd.isAfter(endDate) ? endDate : potentialDepositEnd;
+
           final depositActiveDays = NegotiationViewModel.countActiveDays(
             startDate,
             depositEndDate,
             schedule,
           );
 
+          // FIX: Cleaned up vestigial oldDeposit math. Always charge the target total.
           final targetTotalDeposit = depositActiveDays * dailyFee;
-
-          // Calculate the actual shortfall to charge extensions correctly
-          final oldDeposit = snapshot.data!['oldDeposit'] as double? ?? 0.0;
-          final payableDeposit = request.isExtension
-              ? (targetTotalDeposit - oldDeposit).clamp(0.0, double.infinity)
-              : targetTotalDeposit;
+          final payableDeposit = targetTotalDeposit;
 
           final totalActiveDays = NegotiationViewModel.countActiveDays(startDate, endDate, schedule);
 
@@ -283,30 +262,31 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
                         const SizedBox(height: 24),
                         SizedBox(
                           width: double.infinity,
-                          child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: AppColors.primaryYellow,
-                              foregroundColor: AppColors.black,
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                              elevation: 0,
-                            ),
-                            onPressed: _isProcessing
-                                ? null
-                                : () => _handlePayDeposit(
-                              request: request,
-                              totalDeposit: payableDeposit,
-                            ),
-                            child: _isProcessing
-                                ? const SizedBox(
-                              height: 20,
-                              width: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.black),
-                            )
-                                : Text(
-                              'Pay RM ${payableDeposit.toStringAsFixed(2)} to confirm',
-                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                              textAlign: TextAlign.center,
+                          child: ValueListenableBuilder<bool>(
+                            valueListenable: NetworkService.isOfflineNotifier,
+                            builder: (context, isOffline, _) => ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppColors.primaryYellow,
+                                foregroundColor: AppColors.black,
+                                padding: const EdgeInsets.symmetric(vertical: 14),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                elevation: 0,
+                              ),
+                              onPressed: _isProcessing || isOffline
+                                  ? null
+                              // FIX: Removed `totalDeposit` argument
+                                  : () => _handlePayDeposit(request: request),
+                              child: _isProcessing
+                                  ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.black),
+                              )
+                                  : Text(
+                                'Pay RM ${payableDeposit.toStringAsFixed(2)} to confirm',
+                                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                                textAlign: TextAlign.center,
+                              ),
                             ),
                           ),
                         ),
