@@ -26,7 +26,6 @@ class PaymentHistoryCard extends StatelessWidget {
       ),
       elevation: 0,
       color: AppColors.white,
-      // Wrap the content with InkWell to make the card clickable
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: () {

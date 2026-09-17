@@ -26,7 +26,6 @@ class _DateRangeProposalBottomSheetState extends State<DateRangeProposalBottomSh
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
 
-    // 1. Parse Start Date (Default to sysdate if invalid or in the past)
     _startDate = DateTime.tryParse(widget.initialStartDate) ?? today;
     _startDate = DateTime(_startDate.year, _startDate.month, _startDate.day);
 
@@ -34,9 +33,8 @@ class _DateRangeProposalBottomSheetState extends State<DateRangeProposalBottomSh
       _startDate = today;
     }
 
-    // 2. Parse End Date & Auto-Fill Default (Start + 14 days)
     final parsedEnd = DateTime.tryParse(widget.initialEndDate);
-    final twoWeeksLater = DateRangeRules.minEndDate(_startDate); // start + 14 days
+    final twoWeeksLater = DateRangeRules.minEndDate(_startDate);
 
     if (parsedEnd != null) {
       final normalizedEnd = DateTime(parsedEnd.year, parsedEnd.month, parsedEnd.day);
@@ -46,7 +44,6 @@ class _DateRangeProposalBottomSheetState extends State<DateRangeProposalBottomSh
         _endDate = normalizedEnd;
       }
     } else {
-      // New Request / First Entry Default: Exactly start + 14 days
       _endDate = twoWeeksLater;
     }
   }
@@ -80,7 +77,6 @@ class _DateRangeProposalBottomSheetState extends State<DateRangeProposalBottomSh
     if (picked != null) {
       setState(() {
         _startDate = picked;
-        // Auto-fill exactly 2 weeks out whenever start date is manually changed
         _endDate = DateRangeRules.addTwoWeeks(picked);
       });
     }
@@ -91,7 +87,7 @@ class _DateRangeProposalBottomSheetState extends State<DateRangeProposalBottomSh
     final picked = await showDatePicker(
       context: context,
       initialDate: _endDate.isBefore(minEnd) ? minEnd : _endDate,
-      firstDate: minEnd, // Greys out any date earlier than 2 weeks
+      firstDate: minEnd,
       lastDate: _startDate.add(const Duration(days: 730)),
       builder: (context, child) => Theme(data: _yellowTheme(context), child: child!),
     );

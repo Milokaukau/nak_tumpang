@@ -21,7 +21,7 @@ class RouteMapHeader extends StatelessWidget {
     final location = LatLng(lat, lng);
 
     return Container(
-      height: 150, // Slightly taller so the real map is visible
+      height: 150,
       width: double.infinity,
       decoration: BoxDecoration(
         color: const Color(0xFFF0F4F8),
@@ -44,9 +44,9 @@ class RouteMapHeader extends StatelessWidget {
               FlutterMap(
                 options: MapOptions(
                   initialCenter: location,
-                  initialZoom: 16.0, // Zoomed in to see the specific condo/building
+                  initialZoom: 16.0,
                   interactionOptions: const InteractionOptions(
-                    flags: InteractiveFlag.none, // scrolling handled by fullscreen view instead
+                    flags: InteractiveFlag.none,
                   ),
                 ),
                 children: [
@@ -66,7 +66,6 @@ class RouteMapHeader extends StatelessWidget {
                   ),
                 ],
               ),
-              // Expand hint
               Positioned(
                 top: 6,
                 right: 6,
@@ -79,7 +78,6 @@ class RouteMapHeader extends StatelessWidget {
                   child: const Icon(Icons.fullscreen, size: 18, color: AppColors.black),
                 ),
               ),
-              // Semi-transparent label at the bottom of the map
               Positioned(
                 bottom: 0,
                 left: 0,

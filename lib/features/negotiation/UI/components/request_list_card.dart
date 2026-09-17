@@ -67,7 +67,6 @@ class RequestListCard extends StatelessWidget {
     final targetTripId = isDriver ? request.passengerTripId : request.driverTripId;
     final myTripId = isDriver ? request.driverTripId : request.passengerTripId;
 
-    // Instantly retrieve the name without awaiting
     final tripName = controller.getCachedTripName(myTripId);
 
     return FutureBuilder<Map<String, dynamic>?>(
@@ -113,7 +112,7 @@ class RequestListCard extends StatelessWidget {
                       ),
                       child: avatarUrl != null && avatarUrl.isNotEmpty
                           ? ClipRRect(
-                        borderRadius: BorderRadius.circular(7), // 8 - the 1px border
+                        borderRadius: BorderRadius.circular(7),
                         child: Image.network(
                           avatarUrl,
                           width: 68,

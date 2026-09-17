@@ -242,18 +242,14 @@ class PaymentViewModel extends ChangeNotifier {
       String? clientSecret;
       bool needsStripeSheet = false;
 
-      // 1. Idempotency Check: Do we already have an intent for this exact batch?
       if (paymentIntentId != null) {
-        // App crashed after Stripe succeeded but before settlement. Just retry settlement.
         needsStripeSheet = false;
       } else if (_confirmedPaymentIntentId != null &&
           _confirmedPaymentIds.length == selectedIds.length &&
           _confirmedPaymentIds.containsAll(selectedIds)) {
-        // Memory cached intent. Just retry settlement.
         paymentIntentId = _confirmedPaymentIntentId!;
         needsStripeSheet = false;
       } else {
-        // 2. Generate new intent from edge function
         final response = await _supabase.functions.invoke(
           'create-payment-intent',
           body: {'payment_ids': selectedIds},
@@ -273,7 +269,6 @@ class PaymentViewModel extends ChangeNotifier {
         needsStripeSheet = true;
       }
 
-      // 3. Present Stripe if required
       if (needsStripeSheet && clientSecret != null) {
         await Stripe.instance.initPaymentSheet(
           paymentSheetParameters: SetupPaymentSheetParameters(
@@ -295,25 +290,15 @@ class PaymentViewModel extends ChangeNotifier {
 
         await Stripe.instance.presentPaymentSheet();
 
-        // 4. On Stripe success, persist intent immediately before hitting our API
         _confirmedPaymentIntentId = paymentIntentId;
         _confirmedPaymentIds = selectedIds.toSet();
         await prefs.setString(batchKey, paymentIntentId!);
       }
 
-      // 5. Complete settlement via edge function
       try {
         await _service.completePaymentBatch(selectedIds, paymentIntentId: paymentIntentId!);
       } catch (e) {
         if (_isTerminalSettlementError(e)) {
-          // The batch is no longer payable — most likely it was already
-          // settled by a prior attempt whose success response we never saw
-          // (e.g. app killed right after step 4, or Stripe succeeded but
-          // completePaymentBatch failed on the *previous* retry after
-          // actually applying server-side). Retrying with the same intent
-          // would only fail forever, so clear it, drop the now-stale
-          // selection, and refresh from the server so the UI reflects the
-          // real (already-paid) state instead of a nonexistent balance.
           await prefs.remove(batchKey);
           selectedPaymentIds.clear();
           _confirmedPaymentIntentId = null;
@@ -322,14 +307,9 @@ class PaymentViewModel extends ChangeNotifier {
           await fetchAllPayments();
           return false;
         }
-        // Transient or ambiguous failure (network blip, edge function 5xx,
-        // etc.) — deliberately keep the stored intent so a retry settles
-        // against the SAME PaymentIntent instead of generating a new one,
-        // which would charge the card again for any overlapping invoices.
         rethrow;
       }
 
-      // 6. Clear persistence and state on full success
       await prefs.remove(batchKey);
       selectedPaymentIds.clear();
       _confirmedPaymentIntentId = null;
@@ -350,15 +330,6 @@ class PaymentViewModel extends ChangeNotifier {
     }
   }
 
-  /// Best-effort classification of a settlement failure as terminal (the
-  /// batch can never succeed with this intent again, e.g. already settled /
-  /// invoices no longer payable) vs. transient/ambiguous (worth retrying
-  /// with the same intent). completePaymentBatch only surfaces a free-text
-  /// message from the edge function (see payment_supabase_service.dart),
-  /// not a structured error code, so this matches on message content.
-  /// NOTE: if `settle-payment-batch` starts returning a stable machine
-  /// readable code (e.g. {"error_code": "already_settled"}), prefer
-  /// matching on that instead of these string fragments.
   bool _isTerminalSettlementError(Object error) {
     final msg = error.toString().toLowerCase();
     return msg.contains('already paid') ||

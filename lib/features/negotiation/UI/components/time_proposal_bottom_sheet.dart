@@ -31,7 +31,6 @@ class _TimeProposalBottomSheetState extends State<TimeProposalBottomSheet> {
     return TimeOfDay.now();
   }
 
-  // Format exactly for the UI display (e.g. "08:00 AM")
   String _formatAmPm(TimeOfDay t) {
     final int hour = t.hourOfPeriod == 0 ? 12 : t.hourOfPeriod;
     final String period = t.period == DayPeriod.am ? 'AM' : 'PM';
@@ -39,7 +38,6 @@ class _TimeProposalBottomSheetState extends State<TimeProposalBottomSheet> {
     return '$hour:$minute $period';
   }
 
-  // Format exactly for the Supabase database (e.g. "08:00:00")
   String _formatDatabase(TimeOfDay t) =>
       "${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}:00";
 
@@ -48,7 +46,6 @@ class _TimeProposalBottomSheetState extends State<TimeProposalBottomSheet> {
       context: context,
       initialTime: _selectedTime,
       builder: (context, child) {
-        // Force AM/PM mode by overriding MediaQuery
         return MediaQuery(
           data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: false),
           child: Theme(
@@ -92,7 +89,6 @@ class _TimeProposalBottomSheetState extends State<TimeProposalBottomSheet> {
                 border: OutlineInputBorder(),
                 suffixIcon: Icon(Icons.access_time, color: Colors.grey),
               ),
-              // Display in enforced AM/PM format
               child: Text(_formatAmPm(_selectedTime), style: const TextStyle(fontSize: 16)),
             ),
           ),
@@ -106,7 +102,6 @@ class _TimeProposalBottomSheetState extends State<TimeProposalBottomSheet> {
                 foregroundColor: AppColors.black,
               ),
               onPressed: () {
-                // Submit the backend 24-hour format to the database
                 Navigator.pop(context, _formatDatabase(_selectedTime));
               },
               child: const Text('Submit Proposal'),

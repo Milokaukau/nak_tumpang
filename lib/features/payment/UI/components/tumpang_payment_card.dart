@@ -30,7 +30,6 @@ class TumpangPaymentCard extends StatelessWidget {
       ),
       elevation: 0,
       color: AppColors.white,
-      // Wrap in InkWell so the entire card is clickable like a List Tile
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: () => onChanged(!isSelected),
@@ -39,18 +38,16 @@ class TumpangPaymentCard extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              // 1. Left Side: Amount (Replaces the "secondary" widget)
               Text(
                 'RM ${payment.amount.toStringAsFixed(2)}',
                 style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppColors.black),
               ),
               const SizedBox(width: 16),
 
-              // 2. Middle: Title & Subtitle (Wrapped in Expanded to prevent horizontal overflow)
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min, // Allows the column to grow vertically as needed
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
                       payment.direction,
@@ -62,7 +59,6 @@ class TumpangPaymentCard extends StatelessWidget {
                     Text('Due Date: $dueDateStr', style: const TextStyle(fontSize: 12, color: Colors.redAccent, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 6),
                     InkWell(
-                      // Stop the tap from bubbling up and checking/unchecking the box
                       onTap: () => InvoiceSheet.show(context, payment),
                       child: const Row(
                         mainAxisSize: MainAxisSize.min,
@@ -89,13 +85,12 @@ class TumpangPaymentCard extends StatelessWidget {
 
               const SizedBox(width: 8),
 
-              // 3. Right Side: Checkbox
               Checkbox(
                 activeColor: AppColors.primaryYellow,
                 checkColor: AppColors.black,
                 value: isSelected,
                 onChanged: onChanged,
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap, // Tightens up extra padding
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
             ],
           ),

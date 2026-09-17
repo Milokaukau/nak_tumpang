@@ -34,15 +34,13 @@ class SummaryRouteMap extends StatelessWidget {
                 (pickupLng + dropoffLng) / 2,
               ),
               initialZoom: 13.0,
-              interactionOptions: const InteractionOptions(flags: InteractiveFlag.all), // Interactive full screen
+              interactionOptions: const InteractionOptions(flags: InteractiveFlag.all),
             ),
             children: [
-              // Render map tiles from OpenStreetMap
               TileLayer(
                 urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 userAgentPackageName: 'com.example.nak_tumpang',
               ),
-              // Draw a straight line connecting pickup and dropoff
               PolylineLayer(
                 polylines: [
                   Polyline(

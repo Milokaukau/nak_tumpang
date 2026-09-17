@@ -1,4 +1,3 @@
-// result -> real place w coordinates
 class GeocodedPlace {
   final String label;
   final double latitude;
@@ -13,8 +12,6 @@ class GeocodedPlace {
     this.layer,
   });
 
-
-  // layers Pelias use for waters than actual land
   static const Set<String> waterLayers = {'ocean', 'marinearea'};
 
   bool get isWater => layer != null && waterLayers.contains(layer);

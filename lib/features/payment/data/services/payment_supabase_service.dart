@@ -2,12 +2,6 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:nak_tumpang/core/entities/payment.dart';
 
-/// Bundles the pending payments returned from Supabase together with the
-/// ids of any "zombie" invoice rows (premature bills, or bills recalculated
-/// down to zero) that [PaymentSupabaseService.recalculateUnpaidInvoices]
-/// deleted server-side while building the list. Callers (PaymentViewModel)
-/// use [deletedInvoiceIds] to purge the same rows from the offline SQLite
-/// cache so they don't resurface next time the app opens without network.
 class PendingPaymentsResult {
   final List<Payment> payments;
   final List<String> deletedInvoiceIds;
@@ -22,22 +16,15 @@ class PaymentSupabaseService {
   final SupabaseClient _supabase = Supabase.instance.client;
   final String _table = 'payments';
 
-  // Helper to safely advance the calendar date to midnight, avoiding 24-hour DST traps
   DateTime _nextCalendarDate(DateTime date) =>
       DateTime(date.year, date.month, date.day + 1);
 
-  // Inclusive calendar-day count between two dates, computed via UTC-normalized
-  // date-only values so a DST transition between start and end can't shave a
-  // day off an elapsed-hours-based difference().inDays calculation.
   int _inclusiveCalendarDays(DateTime start, DateTime end) =>
       DateTime.utc(end.year, end.month, end.day)
           .difference(DateTime.utc(start.year, start.month, start.day))
           .inDays +
           1;
 
-  // Advance a date by a fixed number of CALENDAR days (not 24-hour periods),
-  // so a DST transition crossed along the way can't push the result onto the
-  // wrong side of a calendar date.
   DateTime _addCalendarDays(DateTime date, int days) =>
       DateTime(date.year, date.month, date.day + days);
 
@@ -173,10 +160,8 @@ class PaymentSupabaseService {
 
       DateTime nextCycleStart = _nextCalendarDate(cycleEnd);
 
-      // Billing date is ALWAYS cycle end date + 1 day
       final billingDate = _nextCalendarDate(cycleEnd);
 
-      // ONLY generate the invoice if today has reached the billing date
       if (!today.isBefore(billingDate)) {
         final cycleStartStr = cycleStart.toIso8601String().split('T').first;
         final cycleEndStr = cycleEnd.toIso8601String().split('T').first;
@@ -208,7 +193,6 @@ class PaymentSupabaseService {
           final amount = dailyFee * billableDays;
 
           if (amount > 0) {
-            // Due date is ALWAYS fixed to the 1st of the next month following billing date
             final dueDate = DateTime(billingDate.year, billingDate.month + 1, 1);
             final paymentId = 'pay_${DateTime.now().millisecondsSinceEpoch}_${cycleStartStr.replaceAll('-', '')}';
 
@@ -256,11 +240,6 @@ class PaymentSupabaseService {
           cycleEnd = DateTime.tryParse(cycleEndStr);
         }
 
-        // 1. HIDE PREMATURE BILLS — LOCAL UI CORRECTED FIRST.
-        // Billing Date = cycle_end_date + 1 day. If sysdate hasn't reached
-        // it yet, this row must never be visible. The in-memory row is
-        // zeroed out immediately so the screen is correct even if the
-        // Supabase delete below fails (offline, RLS, network blip, etc).
         if (cycleEnd != null) {
           final billingDate = _nextCalendarDate(cycleEnd);
 
@@ -268,8 +247,6 @@ class PaymentSupabaseService {
             row['amount'] = 0.0;
             deletedIds.add(paymentId);
 
-            // Best-effort remote + local-SQLite cleanup. UI correctness
-            // does not depend on this succeeding.
             try {
               await _supabase.from(_table).delete().eq('id', paymentId).isFilter('paid_at', null);
             } catch (e) {
@@ -279,10 +256,6 @@ class PaymentSupabaseService {
           }
         }
 
-        // 2. FIX DUE DATE / MONTH / YEAR — LOCAL UI CORRECTED FIRST.
-        // Due Date is ALWAYS the 1st of the month after the Billing Date's
-        // month. No exceptions. Falls back to the saved month/year for
-        // legacy rows missing cycle_start_date/cycle_end_date.
         int expectedMonth;
         int expectedYear;
 
@@ -294,8 +267,6 @@ class PaymentSupabaseService {
           expectedMonth = int.tryParse(row['month']?.toString() ?? '') ?? today.month;
           expectedYear = int.tryParse(row['year']?.toString() ?? '') ?? today.year;
         }
-        // DateTime normalizes month 13 into January of the next year, so
-        // this also correctly handles a December billing date.
         final expectedDueDate = DateTime(expectedYear, expectedMonth + 1, 1);
         final expectedDueDateStr = expectedDueDate.toIso8601String();
 
@@ -303,23 +274,22 @@ class PaymentSupabaseService {
 
         final currentDueDateStr = row['due_date']?.toString();
         if (currentDueDateStr == null || !currentDueDateStr.startsWith(expectedDueDateStr.split('T').first)) {
-          row['due_date'] = expectedDueDateStr; // local first
+          row['due_date'] = expectedDueDateStr;
           updates['due_date'] = expectedDueDateStr;
         }
 
         final currentMonth = int.tryParse(row['month']?.toString() ?? '');
         if (currentMonth != expectedMonth) {
-          row['month'] = expectedMonth; // local first
+          row['month'] = expectedMonth;
           updates['month'] = expectedMonth;
         }
 
         final currentYear = int.tryParse(row['year']?.toString() ?? '');
         if (currentYear != expectedYear) {
-          row['year'] = expectedYear; // local first
+          row['year'] = expectedYear;
           updates['year'] = expectedYear;
         }
 
-        // 3. RECALCULATE AMOUNT — LOCAL UI CORRECTED FIRST.
         if (cycleStart != null && cycleEnd != null) {
           final sub = await _supabase
               .from('tumpang_subscription')
@@ -346,7 +316,7 @@ class PaymentSupabaseService {
               final correctAmount = dailyFee * billableDays;
 
               if (correctAmount <= 0) {
-                row['amount'] = 0.0; // local first
+                row['amount'] = 0.0;
                 deletedIds.add(paymentId);
                 try {
                   await _supabase.from(_table).delete().eq('id', paymentId).isFilter('paid_at', null);
@@ -358,18 +328,13 @@ class PaymentSupabaseService {
 
               final currentAmount = double.tryParse(row['amount']?.toString() ?? '') ?? 0.0;
               if ((correctAmount - currentAmount).abs() > 0.005) {
-                row['amount'] = correctAmount; // local first
+                row['amount'] = correctAmount;
                 updates['amount'] = correctAmount;
               }
             }
           }
         }
 
-        // 4. PERSIST TO SUPABASE, BEST-EFFORT.
-        // The local row (and thus the UI) is already correct as of steps
-        // 1–3 above. A failure here only means the fix hasn't reached the
-        // remote source of truth yet — it'll be retried on the next
-        // refresh — but it must never roll back what's already shown.
         if (updates.isNotEmpty) {
           try {
             await _supabase.from(_table).update(updates).eq('id', paymentId).isFilter('paid_at', null);
@@ -438,12 +403,8 @@ class PaymentSupabaseService {
           .isFilter('paid_at', null)
           .order('due_date', ascending: true);
 
-      // Map copy so Dart allows local edits when hiding bills
       final rows = (response as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
 
-      // Cleans data & enforces strict UI corrections first, and reports back
-      // any invoice ids it deleted remotely (premature or zeroed-out bills)
-      // so the caller can keep the offline SQLite cache in sync.
       final deletedInvoiceIds = await recalculateUnpaidInvoices(rows);
 
       final payments = rows
@@ -490,10 +451,6 @@ class PaymentSupabaseService {
     }
   }
 
-  // Was a raw `update paid_at`. Now routed through settle_payments() so
-  // that marking a payment paid and crediting the responsible driver's
-  // payout balance (net of the platform fee) happen atomically — see
-  // supabase/migrations/settle_payments.sql.
   Future<void> completePaymentBatch(List<String> paymentIds, {required String paymentIntentId}) async {
     final response = await _supabase.functions.invoke(
       'settle-payment-batch',
@@ -507,10 +464,6 @@ class PaymentSupabaseService {
       throw StateError(error?.toString() ?? 'Could not settle payment.');
     }
   }
-
-  // =========================================================================
-  // CANCELLATION BILLING LOGIC
-  // =========================================================================
 
   Future<Map<String, dynamic>> calculateCancellationFee(String subscriptionId) async {
     final sub = await _supabase
