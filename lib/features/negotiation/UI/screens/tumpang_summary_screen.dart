@@ -57,18 +57,16 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
     return clientSecret.substring(0, secretIndex);
   }
 
-  Future<void> _handlePayDeposit({
-    required TumpangRequest request,
-    required double totalDeposit,
-  }) async {
+  Future<void> _handlePayDeposit({required TumpangRequest request}) async {
     setState(() => _isProcessing = true);
 
     try {
       final controller = context.read<NegotiationViewModel>();
-      final clientSecret = await controller.createDepositPaymentIntent(
-        amount: totalDeposit,
-        requestId: request.id,
-      );
+
+      // Fetch intent and server-derived amount
+      final intentData = await controller.createDepositPaymentIntent(requestId: request.id);
+      final clientSecret = intentData['clientSecret'] as String;
+      final serverAmount = intentData['amount'] as double;
       final paymentIntentId = _extractPaymentIntentId(clientSecret);
 
       await Stripe.instance.initPaymentSheet(
@@ -77,14 +75,7 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
           merchantDisplayName: 'Nak Tumpang',
           style: ThemeMode.light,
           billingDetails: const BillingDetails(
-            address: Address(
-              country: 'MY',
-              city: null,
-              line1: null,
-              line2: null,
-              postalCode: null,
-              state: null,
-            ),
+            address: Address(country: 'MY', city: null, line1: null, line2: null, postalCode: null, state: null),
           ),
         ),
       );
@@ -96,13 +87,13 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
       if (request.isExtension) {
         await controller.finalizeExtensionRequest(
           extensionRequestId: request.id,
-          additionalDeposit: totalDeposit,
+          additionalDeposit: serverAmount, // Use server amount
           paymentIntentId: paymentIntentId,
         );
       } else {
         await controller.createSubscriptionAfterDeposit(
           request: request,
-          deposit: totalDeposit,
+          deposit: serverAmount, // Use server amount
           paymentIntentId: paymentIntentId,
         );
       }
@@ -275,29 +266,27 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
                             valueListenable: NetworkService.isOfflineNotifier,
                             builder: (context, isOffline, _) => ElevatedButton(
                               style: ElevatedButton.styleFrom(
-                              backgroundColor: AppColors.primaryYellow,
-                              foregroundColor: AppColors.black,
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                              elevation: 0,
-                            ),
-                            onPressed: _isProcessing || isOffline
-                                ? null
-                                : () => _handlePayDeposit(
-                              request: request,
-                              totalDeposit: payableDeposit,
-                            ),
-                            child: _isProcessing
-                                ? const SizedBox(
-                              height: 20,
-                              width: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.black),
-                            )
-                                : Text(
-                              'Pay RM ${payableDeposit.toStringAsFixed(2)} to confirm',
-                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                              textAlign: TextAlign.center,
-                            ),
+                                backgroundColor: AppColors.primaryYellow,
+                                foregroundColor: AppColors.black,
+                                padding: const EdgeInsets.symmetric(vertical: 14),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                elevation: 0,
+                              ),
+                              onPressed: _isProcessing || isOffline
+                                  ? null
+                              // FIX: Removed `totalDeposit` argument
+                                  : () => _handlePayDeposit(request: request),
+                              child: _isProcessing
+                                  ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.black),
+                              )
+                                  : Text(
+                                'Pay RM ${payableDeposit.toStringAsFixed(2)} to confirm',
+                                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                                textAlign: TextAlign.center,
+                              ),
                             ),
                           ),
                         ),

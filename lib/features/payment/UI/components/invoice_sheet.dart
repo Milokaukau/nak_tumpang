@@ -80,8 +80,8 @@ class _InvoiceSheetState extends State<InvoiceSheet> {
       final schedule = details['schedule'] as Map<String, dynamic>;
       if (start != null && end != null) {
         for (var date = DateTime(start.year, start.month, start.day);
-            !date.isAfter(end);
-            date = DateTime(date.year, date.month, date.day + 1)) {
+        !date.isAfter(end);
+        date = DateTime(date.year, date.month, date.day + 1)) {
           if (_isDayActive(date, schedule)) _activeCycleDays++;
         }
 
@@ -92,22 +92,19 @@ class _InvoiceSheetState extends State<InvoiceSheet> {
           final overlapStart = s.isBefore(start) ? start : s;
           final overlapEnd = e.isAfter(end) ? end : e;
           for (DateTime d = overlapStart;
-              !d.isAfter(overlapEnd);
-              d = DateTime(d.year, d.month, d.day + 1)) {
+          !d.isAfter(overlapEnd);
+          d = DateTime(d.year, d.month, d.day + 1)) {
             if (_isDayActive(d, schedule)) {
               dates.add(d.toIso8601String().split('T').first);
             }
           }
         }
         _missedDateList = dates.toList()..sort();
-        if (_dailyFee > 0) {
-          final subtotal = _activeCycleDays * _dailyFee;
-          _missedDays = ((subtotal - widget.payment.amount) / _dailyFee)
-              .round()
-              .clamp(0, _activeCycleDays);
-        } else {
-          _missedDays = dates.length;
-        }
+        // Use the exact missed-day count we already computed above (schedule
+        // ∩ driver-exception overlap) rather than reverse-engineering it from
+        // the stored invoice amount, which can drift if the fee/schedule
+        // snapshot at invoice time differs from what's live now.
+        _missedDays = dates.length;
       } else {
         if (_dailyFee > 0) {
           _activeCycleDays = (widget.payment.amount / _dailyFee).round();
@@ -133,13 +130,13 @@ class _InvoiceSheetState extends State<InvoiceSheet> {
 
     final isPaid = widget.payment.paidAt != null;
     final isOverdue = !isPaid && DateTime.now().isAfter(widget.payment.dueDate);
-    final isCancellation = widget.payment.id.endsWith('_cancel');
+    final isCancellation = widget.payment.id.endsWith('_cancel') || widget.payment.id.endsWith('_refund');
 
     final totalDue = isPaid || isCancellation
         ? widget.payment.amount
         : (_loadError != null
         ? widget.payment.amount
-        : (subtotal - deduction).clamp(0, double.infinity));
+        : (subtotal - deduction).clamp(0, double.infinity).toDouble());
 
     String billingPeriodText = widget.payment.dateRange;
     if (widget.payment.cycleStartDate != null && widget.payment.cycleEndDate != null) {
@@ -235,7 +232,35 @@ class _InvoiceSheetState extends State<InvoiceSheet> {
 
             if (_loading)
               const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator()))
-            else ...[
+            else if (isCancellation) ...[
+              // Cancellation/refund invoices don't have a real billing cycle
+              // (generateCancellationInvoice stamps a fake 1-day cycle), so
+              // the itemized Scheduled Days / Fee / Subtotal table would show
+              // numbers unrelated to how the amount was actually derived
+              // (dailyFee × actual fetched days − amount already paid).
+              // Show a plain settlement summary instead.
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.info_outline, size: 16, color: Colors.grey),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Cancellation Settlement — this amount reflects the final adjusted balance for the subscription, not a regular billing cycle.',
+                        style: TextStyle(fontSize: 12, color: Colors.black54),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(),
+              _totalRow(isPaid: isPaid, totalDue: totalDue),
+            ] else ...[
               Container(
                 color: Colors.grey.shade100,
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -256,7 +281,7 @@ class _InvoiceSheetState extends State<InvoiceSheet> {
               ),
               if (_missedDays > 0)
                 _tableRow(
-                  description: 'Cant Fetch Deduction',
+                  description: "Driver Couldn't Fetch Deduction",
                   days: '-$_missedDays days',
                   fee: 'RM ${_dailyFee.toStringAsFixed(2)}',
                   subtotal: '-RM ${deduction.toStringAsFixed(2)}',
@@ -264,29 +289,15 @@ class _InvoiceSheetState extends State<InvoiceSheet> {
                 )
               else
                 _tableRow(
-                  description: 'Cant Fetch Deduction',
+                  description: "Driver Couldn't Fetch Deduction",
                   days: '0 days',
                   fee: 'RM 0.00',
                   subtotal: 'RM 0.00',
                   isMuted: true,
                 ),
+              if (_missedDateList.isNotEmpty) _missedDatesExpansion(),
               const Divider(),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                        isPaid ? 'Total Amount Paid' : 'Total Amount Due',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)
-                    ),
-                    Text(
-                      'RM ${totalDue.toStringAsFixed(2)}',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: AppColors.black),
-                    ),
-                  ],
-                ),
-              ),
+              _totalRow(isPaid: isPaid, totalDue: totalDue),
             ],
             const SizedBox(height: 20),
             ElevatedButton(
@@ -335,6 +346,54 @@ class _InvoiceSheetState extends State<InvoiceSheet> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _totalRow({required bool isPaid, required double totalDue}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            isPaid ? 'Total Amount Paid' : 'Total Amount Due',
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+          ),
+          Text(
+            'RM ${totalDue.toStringAsFixed(2)}',
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: AppColors.black),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _missedDatesExpansion() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          tilePadding: EdgeInsets.zero,
+          childrenPadding: const EdgeInsets.only(bottom: 8),
+          title: Text(
+            'Which days were missed? (${_missedDateList.length})',
+            style: const TextStyle(fontSize: 12, color: Colors.red, fontWeight: FontWeight.w600),
+          ),
+          children: [
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: _missedDateList
+                  .map((iso) => Text(
+                _formatDateDdMmYyyy(DateTime.parse(iso)),
+                style: const TextStyle(fontSize: 12, color: Colors.black87),
+              ))
+                  .toList(),
+            ),
+          ],
+        ),
       ),
     );
   }

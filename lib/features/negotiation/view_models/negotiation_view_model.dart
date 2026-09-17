@@ -12,8 +12,18 @@ import 'package:nak_tumpang/features/negotiation/data/services/negotiation_local
 class NegotiationViewModel extends ChangeNotifier {
   final NegotiationSupabaseService _service = NegotiationSupabaseService();
   final SupabaseClient _supabase = Supabase.instance.client;
+
+  // SQLITE: All offline reads/writes for negotiation requests go through this
+  // service, which wraps the on-device SQLite database (via LocalDbService)
+  // and operates on a single table: `tumpang_request`. See
+  // negotiation_local_service.dart for the actual queries.
   final NegotiationLocalService _localService = NegotiationLocalService();
 
+  // SHARED PREFERENCES: key prefix used to cache the current user's role
+  // ('driver' / 'passenger') in on-device key-value storage (shared_preferences
+  // package), so the app still knows the role instantly on next launch/offline
+  // without waiting on a Supabase round trip. Actual key looks like
+  // "nak_tumpang_cached_role_<userId>" - see _persistRole() / _readCachedRole().
   static const String _roleCacheKeyPrefix = 'nak_tumpang_cached_role_';
 
   String? currentUserId;
@@ -56,6 +66,9 @@ class NegotiationViewModel extends ChangeNotifier {
         notifyListeners();
 
         try {
+          // SQLITE: wipes every row of the local `tumpang_request` table so
+          // the previous account's cached requests can't leak into the new
+          // session. See NegotiationLocalService.clearRequestsCache().
           await _localService.clearRequestsCache();
         } catch (e) {
           debugPrint('Failed to clear local negotiation cache on account change: $e');
@@ -79,12 +92,19 @@ class NegotiationViewModel extends ChangeNotifier {
     notifyListeners();
 
     try {
+      // SQLITE: same table wipe as above, called explicitly from the
+      // logout flow as an extra safeguard (doesn't wait for the
+      // onAuthStateChange listener to fire first).
       await _localService.clearRequestsCache();
     } catch (e) {
       debugPrint('Failed to clear local negotiation cache on logout: $e');
     }
   }
 
+  // SHARED PREFERENCES (write): stores the resolved role for [userId] under
+  // key "nak_tumpang_cached_role_<userId>" in the device's shared_preferences
+  // store, so _readCachedRole() can restore it instantly on the next app
+  // launch or while offline, without hitting Supabase.
   Future<void> _persistRole(String userId, String role) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -94,6 +114,9 @@ class NegotiationViewModel extends ChangeNotifier {
     }
   }
 
+  // SHARED PREFERENCES (read): retrieves the role previously saved by
+  // _persistRole() for [userId] from the same "nak_tumpang_cached_role_<userId>"
+  // key, so the app remembers the user's role across restarts and while offline.
   Future<String?> _readCachedRole(String userId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -117,6 +140,8 @@ class NegotiationViewModel extends ChangeNotifier {
     currentUserId = sessionUserId;
 
     if (user != null && sessionUserId != null) {
+      // SHARED PREFERENCES: fast local read so the UI has a role to show
+      // immediately, before/without the Supabase round trip below.
       final cachedRole = await _readCachedRole(sessionUserId);
 
       if (generation != _sessionGeneration || _supabase.auth.currentUser?.id != sessionUserId) return;
@@ -133,6 +158,8 @@ class NegotiationViewModel extends ChangeNotifier {
 
         final remoteRole = userData?['role']?.toString().replaceAll("'", "") ?? 'passenger';
         currentUserRole = remoteRole;
+        // SHARED PREFERENCES: refresh the cached role now that we have the
+        // authoritative value from Supabase.
         await _persistRole(sessionUserId, remoteRole);
       } catch (e) {
         debugPrint('Error refreshing role from Supabase: $e');
@@ -174,6 +201,8 @@ class NegotiationViewModel extends ChangeNotifier {
 
     try {
       if (currentUserRole == null) {
+        // SHARED PREFERENCES: role not in memory yet - try the local cache
+        // before falling back to a network call further down.
         final cachedRole = await _readCachedRole(sessionUserId);
         if (!isCurrentSessionValid()) return;
         currentUserRole = cachedRole;
@@ -190,6 +219,8 @@ class NegotiationViewModel extends ChangeNotifier {
           if (!isCurrentSessionValid()) return;
 
           currentUserRole = userData?['role']?.toString().replaceAll("'", "") ?? 'passenger';
+          // SHARED PREFERENCES: persist so the next cold start / offline
+          // session can skip this network call entirely.
           await _persistRole(sessionUserId, currentUserRole!);
         } catch (e) {
           debugPrint('Error fetching role in fetchRequests(): $e');
@@ -206,11 +237,17 @@ class NegotiationViewModel extends ChangeNotifier {
       List<dynamic> rows;
 
       if (isOffline) {
-        final p = await _localService.getOfflineRequests('pending');
-        final n = await _localService.getOfflineRequests('negotiating');
-        final c = await _localService.getOfflineRequests('completed');
-        final r = await _localService.getOfflineRequests('rejected');
-        final x = await _localService.getOfflineRequests('cancelled');
+        // SQLITE: no network - read every status bucket straight out of the
+        // local `tumpang_request` table (via NegotiationLocalService /
+        // LocalDbService's readOnlyDatabase) instead of hitting Supabase.
+        // sessionUserId scopes the query to `WHERE owner_id = ?` so cached
+        // rows from a different account on the same device aren't returned.
+        // FIX: Passed sessionUserId to local calls
+        final p = await _localService.getOfflineRequests('pending', sessionUserId);
+        final n = await _localService.getOfflineRequests('negotiating', sessionUserId);
+        final c = await _localService.getOfflineRequests('completed', sessionUserId);
+        final r = await _localService.getOfflineRequests('rejected', sessionUserId);
+        final x = await _localService.getOfflineRequests('cancelled', sessionUserId);
 
         if (!isCurrentSessionValid()) return;
         rows = [...p, ...n, ...c, ...r, ...x];
@@ -255,7 +292,12 @@ class NegotiationViewModel extends ChangeNotifier {
         if (!isCurrentSessionValid()) return;
 
         try {
-          await _localService.cacheTumpangRequests(rows.cast<Map<String, dynamic>>());
+          // SQLITE: mirror what we just fetched from Supabase into the local
+          // `tumpang_request` table (upsert/replace) so the same data is
+          // available next time the app is offline. sessionUserId is stored
+          // as `owner_id` on each row for the account-scoping described above.
+          // FIX: Passed sessionUserId to local calls
+          await _localService.cacheTumpangRequests(rows.cast<Map<String, dynamic>>(), sessionUserId);
         } catch (e) {
           debugPrint('Could not cache request offline due to strict foreign keys: $e');
         }
@@ -304,10 +346,18 @@ class NegotiationViewModel extends ChangeNotifier {
         if (r.id == requestId) return r;
       }
 
-      // FIX: Database fallback for offline deep links & notifications
-      final row = await _localService.getOfflineRequestById(requestId);
-      if (row != null) {
-        return TumpangRequest.fromJson(row);
+      // FIX: Require the active user ID to fetch from offline cache safely
+      final activeUserId = _supabase.auth.currentUser?.id ?? currentUserId;
+      if (activeUserId != null) {
+        // SQLITE: in-memory lists above were empty/missed - fall back to a
+        // direct single-row lookup in the local `tumpang_request` table
+        // (`WHERE id = ? AND owner_id = ?`), so a deep link / notification
+        // opened straight into this screen still works offline even before
+        // fetchRequests() has populated the in-memory lists.
+        final row = await _localService.getOfflineRequestById(requestId, activeUserId);
+        if (row != null) {
+          return TumpangRequest.fromJson(row);
+        }
       }
       return null;
     }
@@ -579,7 +629,6 @@ class NegotiationViewModel extends ChangeNotifier {
       }
     }
 
-    // FIX: Vestigial oldDeposit fetch removed.
     return {
       'request': req,
       'schedule': schedule,
@@ -592,10 +641,13 @@ class NegotiationViewModel extends ChangeNotifier {
     required String paymentIntentId,
   }) {
     if (isOffline) throw NegotiationException('You cannot finalize an extension while offline.');
+    // NOTE: additionalDeposit is intentionally not forwarded to the service -
+    // the server derives the real amount from the PaymentIntent itself. It's
+    // kept as a parameter here only so callers can still validate/display
+    // the amount they expect to be charged before calling this.
     return runNegotiationAction(() async {
       await _service.finalizeExtension(
         extensionRequestId,
-        additionalDeposit: additionalDeposit,
         paymentIntentId: paymentIntentId,
       );
       await refreshRequests();
@@ -623,18 +675,16 @@ class NegotiationViewModel extends ChangeNotifier {
     }
   }
 
-  Future<String> createDepositPaymentIntent({
-    required double amount,
+  Future<Map<String, dynamic>> createDepositPaymentIntent({
     required String requestId,
   }) async {
-    if (amount <= 0) throw NegotiationException('Deposit amount must be greater than RM 0.');
     if (isOffline) throw NegotiationException('You cannot process a payment while offline.');
 
     isLoading = true;
     errorMessage = null;
     notifyListeners();
     try {
-      return await _service.createDepositPaymentIntent(amount: amount, requestId: requestId);
+      return await _service.createDepositPaymentIntent(requestId: requestId);
     } catch (e) {
       errorMessage = 'Unable to prepare the deposit payment.';
       rethrow;
@@ -652,10 +702,12 @@ class NegotiationViewModel extends ChangeNotifier {
     if (deposit <= 0) throw NegotiationException('Deposit amount must be greater than RM 0.');
     if (isOffline) throw NegotiationException('You cannot complete a subscription while offline.');
 
+    // NOTE: deposit is validated above but intentionally not forwarded to
+    // the service - the server derives the real amount from the
+    // PaymentIntent itself rather than trusting a client-supplied figure.
     await runNegotiationAction(() async {
       await _service.createSubscriptionAfterDeposit(
         request: request,
-        deposit: deposit,
         paymentIntentId: paymentIntentId,
       );
       await refreshRequests();
@@ -689,7 +741,6 @@ class NegotiationViewModel extends ChangeNotifier {
     final periods = <Map<String, dynamic>>[];
     if (endDate.isBefore(startDate)) return periods;
 
-    // FIX: DST-safe calendar math
     var cycleStart = DateTime(startDate.year, startDate.month, startDate.day + depositDays);
 
     while (!cycleStart.isAfter(endDate)) {
@@ -704,7 +755,6 @@ class NegotiationViewModel extends ChangeNotifier {
         'amount': dailyFee * activeDays,
       });
 
-      // FIX: DST-safe calendar math
       cycleStart = DateTime(cycleEnd.year, cycleEnd.month, cycleEnd.day + 1);
     }
     return periods;

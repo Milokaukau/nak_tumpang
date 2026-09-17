@@ -29,11 +29,15 @@ class PaymentLocalService {
     final db = await _dbService.readOnlyDatabase;
 
     final whereClause = isCompleted ? 'paid_at IS NOT NULL' : 'paid_at IS NULL';
+    // Match online ordering: pending is soonest-due-first (ASC), history is
+    // most-recently-paid-first (DESC). paid_at isn't guaranteed indexed the
+    // same way offline, so due_date is used as a stable proxy for history too.
+    final orderBy = isCompleted ? 'due_date DESC' : 'due_date ASC';
 
     return await db.query(
       'payments',
       where: whereClause,
-      orderBy: 'due_date DESC',
+      orderBy: orderBy,
     );
   }
 

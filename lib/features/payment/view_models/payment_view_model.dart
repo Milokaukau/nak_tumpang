@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_stripe/flutter_stripe.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:nak_tumpang/core/entities/payment.dart';
 import 'package:nak_tumpang/features/payment/data/services/payment_supabase_service.dart';
 import 'package:nak_tumpang/core/services/network_service.dart';
@@ -93,7 +94,6 @@ class PaymentViewModel extends ChangeNotifier {
         .fold(0.0, (sum, item) => sum + item.amount);
   }
 
-  // FIX: Added method to instantly fetch a payment for notifications/deep links offline
   Future<Payment?> getPaymentById(String paymentId) async {
     final allMem = [...pendingPayments, ...paymentHistory];
     for (final p in allMem) {
@@ -234,16 +234,29 @@ class PaymentViewModel extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final selectedIds = selectedPaymentIds.toSet();
-      String paymentIntentId;
-      String? clientSecret;
+      final selectedIds = selectedPaymentIds.toList()..sort();
+      final batchKey = 'stripe_batch_${selectedIds.join('_')}';
+      final prefs = await SharedPreferences.getInstance();
 
-      if (_confirmedPaymentIntentId != null && _confirmedPaymentIds.length == selectedIds.length && _confirmedPaymentIds.containsAll(selectedIds)) {
+      String? paymentIntentId = prefs.getString(batchKey);
+      String? clientSecret;
+      bool needsStripeSheet = false;
+
+      // 1. Idempotency Check: Do we already have an intent for this exact batch?
+      if (paymentIntentId != null) {
+        // App crashed after Stripe succeeded but before settlement. Just retry settlement.
+        needsStripeSheet = false;
+      } else if (_confirmedPaymentIntentId != null &&
+          _confirmedPaymentIds.length == selectedIds.length &&
+          _confirmedPaymentIds.containsAll(selectedIds)) {
+        // Memory cached intent. Just retry settlement.
         paymentIntentId = _confirmedPaymentIntentId!;
+        needsStripeSheet = false;
       } else {
+        // 2. Generate new intent from edge function
         final response = await _supabase.functions.invoke(
           'create-payment-intent',
-          body: {'payment_ids': selectedIds.toList()},
+          body: {'payment_ids': selectedIds},
         );
 
         if (response.status != 200 || response.data == null) {
@@ -257,9 +270,11 @@ class PaymentViewModel extends ChangeNotifier {
           throw Exception('No client_secret returned from server');
         }
         paymentIntentId = _extractPaymentIntentId(clientSecret);
+        needsStripeSheet = true;
       }
 
-      if (clientSecret != null) {
+      // 3. Present Stripe if required
+      if (needsStripeSheet && clientSecret != null) {
         await Stripe.instance.initPaymentSheet(
           paymentSheetParameters: SetupPaymentSheetParameters(
             paymentIntentClientSecret: clientSecret,
@@ -279,15 +294,23 @@ class PaymentViewModel extends ChangeNotifier {
         );
 
         await Stripe.instance.presentPaymentSheet();
+
+        // 4. On Stripe success, persist intent immediately before hitting our API
         _confirmedPaymentIntentId = paymentIntentId;
-        _confirmedPaymentIds = selectedIds;
+        _confirmedPaymentIds = selectedIds.toSet();
+        await prefs.setString(batchKey, paymentIntentId!);
       }
 
-      await _service.completePaymentBatch(selectedIds.toList(), paymentIntentId: paymentIntentId);
+      // 5. Complete settlement via edge function
+      await _service.completePaymentBatch(selectedIds, paymentIntentId: paymentIntentId!);
+
+      // 6. Clear persistence and state on full success
+      await prefs.remove(batchKey);
       selectedPaymentIds.clear();
       _confirmedPaymentIntentId = null;
       _confirmedPaymentIds = {};
       await fetchAllPayments();
+
       return true;
     } on StripeException catch (e) {
       debugPrint('Stripe payment cancelled/failed: ${e.error.localizedMessage}');
