@@ -5,7 +5,7 @@ class PaymentBottomBar extends StatelessWidget {
   final double totalAmount;
   final int selectedCount;
   final bool isProcessing;
-  final VoidCallback? onPayPressed; // FIX: Changed to nullable VoidCallback?
+  final VoidCallback? onPayPressed;
 
   const PaymentBottomBar({
     super.key,
@@ -50,7 +50,6 @@ class PaymentBottomBar extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(50)),
               ),
-              // If offline (onPayPressed is null), or not selected/processing, disable the button
               onPressed: (selectedCount > 0 && !isProcessing && onPayPressed != null) ? onPayPressed : null,
               child: isProcessing
                   ? const SizedBox(

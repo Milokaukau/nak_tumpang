@@ -58,9 +58,13 @@ class TumpangRequest {
   final NegotiatedField<double> fee;
   final NegotiatedField<String> subscriptionStartDate;
   final NegotiatedField<String> subscriptionEndDate;
+
   final String? subscriptionId;
+
   final bool isExtension;
+
   final String? extendsSubscriptionId;
+
   final String? extensionType;
 
   int get subscriptionDays {
@@ -72,6 +76,7 @@ class TumpangRequest {
   }
 
   double get totalFee => fee.value * subscriptionDays;
+
   bool get isFullyAgreed =>
       fee.isAccepted &&
           pickupTime.isAccepted &&

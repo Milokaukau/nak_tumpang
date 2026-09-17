@@ -110,7 +110,6 @@ class _PaymentScreenState extends State<PaymentScreen> with SingleTickerProvider
                 return TabBarView(
                   controller: _tabController,
                   children: [
-                    // Tab 1: Pending Invoices
                     RefreshIndicator(
                       onRefresh: isOffline ? () async {} : () => viewModel.fetchAllPayments(),
                       child: viewModel.pendingPayments.isEmpty
@@ -160,7 +159,6 @@ class _PaymentScreenState extends State<PaymentScreen> with SingleTickerProvider
                       ),
                     ),
 
-                    // Tab 2: Payment History
                     RefreshIndicator(
                       onRefresh: isOffline ? () async {} : () => viewModel.fetchAllPayments(),
                       child: viewModel.paymentHistory.isEmpty
@@ -195,7 +193,6 @@ class _PaymentScreenState extends State<PaymentScreen> with SingleTickerProvider
                   totalAmount: viewModel.totalSelectedAmount,
                   selectedCount: viewModel.selectedPaymentIds.length,
                   isProcessing: viewModel.isProcessingPayment,
-                  // FIX: Passing null directly to grey out the button when offline
                   onPayPressed: isOffline ? null : () => _handlePayment(viewModel),
                 );
               },

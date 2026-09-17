@@ -100,10 +100,6 @@ class _InvoiceSheetState extends State<InvoiceSheet> {
           }
         }
         _missedDateList = dates.toList()..sort();
-        // Use the exact missed-day count we already computed above (schedule
-        // ∩ driver-exception overlap) rather than reverse-engineering it from
-        // the stored invoice amount, which can drift if the fee/schedule
-        // snapshot at invoice time differs from what's live now.
         _missedDays = dates.length;
       } else {
         if (_dailyFee > 0) {
@@ -233,12 +229,6 @@ class _InvoiceSheetState extends State<InvoiceSheet> {
             if (_loading)
               const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator()))
             else if (isCancellation) ...[
-              // Cancellation/refund invoices don't have a real billing cycle
-              // (generateCancellationInvoice stamps a fake 1-day cycle), so
-              // the itemized Scheduled Days / Fee / Subtotal table would show
-              // numbers unrelated to how the amount was actually derived
-              // (dailyFee × actual fetched days − amount already paid).
-              // Show a plain settlement summary instead.
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(

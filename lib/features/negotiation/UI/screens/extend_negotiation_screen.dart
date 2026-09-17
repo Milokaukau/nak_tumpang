@@ -186,7 +186,7 @@ class _ExtendNegotiationScreenState extends State<ExtendNegotiationScreen> {
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (context) => ProposeValueBottomSheet(
         title: 'Fee (per day)',
-        currentValue: _fee.toString(), // FIX: Passing raw fractional value instead of rounded string
+        currentValue: _fee.toString(),
         onSubmit: (value) async {
           final parsed = double.tryParse(value);
           if (parsed == null || !parsed.isFinite || parsed <= 0) {
@@ -424,7 +424,7 @@ class _ExtendNegotiationScreenState extends State<ExtendNegotiationScreen> {
 
           NegotiationFieldRow(
             title: 'Tumpang Fee',
-            value: 'RM ${_fee.toStringAsFixed(2)}/day', // Updated consistency with fraction values
+            value: 'RM ${_fee.toStringAsFixed(2)}/day',
             isAccepted: true,
             isRequestedByMe: false,
             onPropose: _openFeeSheet,

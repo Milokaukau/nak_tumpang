@@ -4,9 +4,6 @@ import 'package:nak_tumpang/core/entities/tumpang_request.dart';
 
 final Random _idRandom = Random();
 
-/// Short random alphanumeric suffix used to disambiguate IDs generated in
-/// the same millisecond. Not cryptographically secure - just enough entropy
-/// to make an accidental collision practically impossible.
 String _randomSuffix({int length = 6}) {
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
   return List.generate(length, (_) => chars[_idRandom.nextInt(chars.length)]).join();
@@ -57,18 +54,6 @@ class NegotiationSupabaseService {
     };
   }
 
-  /// Finalizes a brand-new subscription after a successful deposit payment.
-  ///
-  /// All multi-table writes (subscription insert, payment insert, request
-  /// status update) happen server-side inside the `finalize-deposit-payment`
-  /// Edge Function. The deposit *amount* is never sent from the client here -
-  /// the function looks up the amount itself from the PaymentIntent
-  /// identified by [paymentIntentId], which is also used as an idempotency
-  /// key: if the app retries this call (e.g. after a crash or network drop)
-  /// with the same Stripe PaymentIntent id, the function should detect the
-  /// existing `payments` row and return the already-created subscription id
-  /// instead of writing duplicate rows. Verify the function itself upholds
-  /// that idempotency guarantee.
   Future<String> createSubscriptionAfterDeposit({
     required TumpangRequest request,
     required String paymentIntentId,
@@ -173,10 +158,6 @@ class NegotiationSupabaseService {
   }) async {
     final subscriptionId = subscription['id'] as String;
 
-    // Format dates for database storage.
-    // NOTE: appends a random suffix on top of the millisecond timestamp so
-    // two extension requests created in the same millisecond (e.g. a
-    // double-tap or two devices racing) can't collide on the primary key.
     final requestId =
         'ext_${DateTime.now().millisecondsSinceEpoch}_${_randomSuffix()}';
     final newEndDateStr = newEndDate.toIso8601String().split('T').first;
@@ -230,17 +211,6 @@ class NegotiationSupabaseService {
     return requestId;
   }
 
-  /// Finalizes an extension after a successful additional-deposit payment.
-  ///
-  /// As with [createSubscriptionAfterDeposit], all writes (new subscription
-  /// insert, old subscription shutdown, request completion, payment insert)
-  /// happen server-side inside the `finalize-deposit-payment` Edge Function,
-  /// keyed on [paymentIntentId] for idempotent retries; the amount is looked
-  /// up from the PaymentIntent server-side, never trusted from the client.
-  /// The client-side isFullyAgreed / isExtension / expiry validation that
-  /// used to live here should be re-checked inside that function (or kept
-  /// here as a pre-flight check) since this method no longer performs those
-  /// reads itself before writing.
   Future<String> finalizeExtension(
       String extensionRequestId, {
         required String paymentIntentId,
