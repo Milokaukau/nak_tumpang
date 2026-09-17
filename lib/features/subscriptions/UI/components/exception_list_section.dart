@@ -9,7 +9,7 @@ import 'package:nak_tumpang/features/subscriptions/UI/components/edit_exception_
 class ExceptionListSection extends StatefulWidget {
   final String subscriptionId;
   final String currentUserRole;
-  final String otherUserId; // 👈 ADDED THIS
+  final String otherUserId;
   final double? fee;
   final bool isActive;
   final DateTime? minDate;
@@ -19,7 +19,7 @@ class ExceptionListSection extends StatefulWidget {
     super.key,
     required this.subscriptionId,
     required this.currentUserRole,
-    required this.otherUserId, // 👈 ADDED THIS
+    required this.otherUserId,
     this.fee,
     required this.isActive,
     this.minDate,
@@ -114,7 +114,7 @@ class _ExceptionListSectionState extends State<ExceptionListSection> {
       backgroundColor: Colors.transparent,
       builder: (ctx) => EditExceptionSheet(
         exception: ex,
-        otherUserId: widget.otherUserId, // 👈 PASSED IT DOWN HERE
+        otherUserId: widget.otherUserId,
         onChanged: _load,
         minDate: widget.minDate,
         maxDate: widget.maxDate,

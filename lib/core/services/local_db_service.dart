@@ -25,26 +25,12 @@ class LocalDbService {
       version: 11,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
-        // Busy timeout must be set BEFORE the WAL transition below — the
-        // transition itself can hit SQLITE_BUSY if another connection is
-        // mid-checkpoint, and with no busy handler installed yet that
-        // failure surfaces immediately instead of being retried.
         await db.rawQuery('PRAGMA busy_timeout = 3000');
-        // WAL lets the separate read-only connection below read
-        // concurrently while this connection writes, instead of the
-        // default rollback-journal mode where a write locks the whole
-        // file and any other connection touching it gets rejected with
-        // "database is locked" rather than waiting.
         final walResult = await db.rawQuery('PRAGMA journal_mode = WAL');
         final mode = walResult.isNotEmpty
             ? walResult.first.values.first.toString().toLowerCase()
             : null;
         if (mode != 'wal') {
-          // The pragma didn't actually take (e.g. this platform/driver
-          // silently falling back to the default rollback journal).
-          // The read-only connection below assumes WAL is active, so
-          // fail loudly here instead of limping along in a mode nothing
-          // was designed or tested for.
           throw StateError(
             'Failed to enable WAL journal mode (got "$mode" instead) — '
                 'the read-only connection depends on WAL for concurrent reads.',
@@ -56,53 +42,22 @@ class LocalDbService {
     );
   }
 
-  /// A second handle onto the same file, opened read-only at the SQLite
-  /// engine level. This is the mirror of the Supabase-side RLS lockdown on
-  /// driver_profiles/payout_history/payout_settings (view-only from the
-  /// client; every write goes through settle_payments()/request_payout()):
-  /// nothing that only needs to *display* cached wallet/trip data should be
-  /// able to write to this database file, even by accident. Local services'
-  /// `get*`/`getCached*` methods should use this getter; only the `cache*`/
-  /// `save*`/`clear*` methods that mirror a successful Supabase round-trip
-  /// should use the writable [database] getter above.
-  ///
-  /// Must be opened after the writable connection has run migrations at
-  /// least once (a read-only handle can't create or upgrade the schema),
-  /// which `database` above guarantees since it's always awaited first.
   Future<Database> get readOnlyDatabase {
     if (_readOnlyDatabase != null) return Future.value(_readOnlyDatabase!);
-    // Cache the in-flight open itself, not just the result — without
-    // this, two get*/getCached* calls landing before the first open
-    // resolves would each pass the `_readOnlyDatabase != null` check
-    // above and both call openDatabase, leaking a duplicate handle.
     return _readOnlyDatabaseFuture ??= _openReadOnlyDatabase();
   }
 
   Future<Database> _openReadOnlyDatabase() async {
-    await database; // ensure the file exists and is migrated
+    await database;
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, 'tumpang_cache.db');
-    // singleInstance: false is what actually makes this read-only:
-    // sqflite's default (true) means opening the same path again just
-    // hands back the existing writable instance and silently ignores
-    // readOnly: true, so without this the "read-only" handle could
-    // write just fine.
     _readOnlyDatabase = await openDatabase(path, readOnly: true, singleInstance: false);
-    // Same reasoning as the writable connection's onConfigure above —
-    // this connection also needs to not choke instantly if it lands on
-    // the file during a brief write, now that WAL is enabled there.
     await _readOnlyDatabase!.rawQuery('PRAGMA busy_timeout = 3000');
     return _readOnlyDatabase!;
   }
 
   Future<void> _upgradeDB(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
-      // Widen points_ledger's reason CHECK to match the Supabase migration
-      // (added 'goyang_points'/'goyang_voucher'). SQLite can't ALTER a
-      // CHECK constraint in place, so rename the old table, create the new
-      // one with the updated constraint, copy the existing rows across,
-      // then drop the old table — preserves cached history instead of
-      // wiping it on upgrade.
       await db.execute('ALTER TABLE points_ledger RENAME TO points_ledger_old');
 
       await db.execute('''
@@ -132,19 +87,6 @@ class LocalDbService {
     }
 
     if (oldVersion < 4) {
-      // payout_history's local schema had drifted from what the app
-      // actually reads/writes: it required a `payout_at` column that
-      // nothing ever supplies (guaranteed NOT NULL failure on every
-      // insert), required `bank_acc_no` even though e-wallet payouts
-      // deliberately leave it null, and was missing `ewallet_phone`
-      // entirely. That mismatch made every local cache write throw —
-      // right after a successful request_payout() call, and right
-      // after a successful history fetch — which is what made claim
-      // payout look like it "failed" (the server-side payout had
-      // already gone through) and made payout history fail to load.
-      // Safe to just drop and recreate: this table is a pure read
-      // cache of Supabase's payout_history, never the source of truth,
-      // so it refills itself on the next successful fetch.
       await db.execute('DROP TABLE IF EXISTS payout_history');
       await db.execute('''
         CREATE TABLE payout_history (
@@ -169,16 +111,6 @@ class LocalDbService {
     }
 
     if (oldVersion < 6) {
-      // Re-apply the payout_history fix from the oldVersion < 4 block
-      // above, unconditionally. Devices that had already reached
-      // version 4 or 5 before that migration was added never ran it —
-      // onUpgrade only fires for oldVersion < the declared version, so
-      // their local payout_history table is still stuck with the
-      // dropped payout_at column / missing ewallet_phone. Bumping the
-      // version and redoing the drop-and-recreate here (safe: this
-      // table is a pure read cache of Supabase's payout_history) makes
-      // sure every device actually gets the corrected schema, not just
-      // ones upgrading from a version older than 4.
       await db.execute('DROP TABLE IF EXISTS payout_history');
       await db.execute('''
         CREATE TABLE payout_history (
@@ -199,18 +131,6 @@ class LocalDbService {
     }
 
     if (oldVersion < 7) {
-      // Correction to the oldVersion < 4/6 fix above, which *removed*
-      // payout_at from this table on the theory that nothing supplied
-      // it. That was wrong: Supabase's real payout_history table has
-      // payout_at as a genuine NOT NULL column, and
-      // PayoutService.fetchPayoutHistoryPage() does a bare .select(),
-      // so every row fetched from the server legitimately includes a
-      // payout_at key. PayoutLocalService.cachePayoutHistoryPage()
-      // passes that row straight to db.insert(), so with the column
-      // missing locally, EVERY successful online history fetch has been
-      // failing to cache ever since v4 — not just the local
-      // just-submitted-payout insert in PayoutViewModel.submitPayout()
-      // (which never sets payout_at itself, hence nullable here).
       await db.execute('DROP TABLE IF EXISTS payout_history');
       await db.execute('''
         CREATE TABLE payout_history (
@@ -232,60 +152,25 @@ class LocalDbService {
     }
 
     if (oldVersion < 8) {
-      // Preventive fix, same class of bug as the payout_history saga
-      // above: Supabase's real payments table has a payment_intent_id
-      // text column (nullable) that this local cache table never had.
-      // Nothing hits this today — PaymentViewModel.fetchAllPayments()
-      // only ever caches Payment.toJson(), a hand-picked field set that
-      // happens not to include payment_intent_id — but that's
-      // incidental, not guaranteed: the moment any code path caches a
-      // raw Supabase row for this table (a bare .select(), the same
-      // mistake payout_history's fetch path made), every write would
-      // throw "table payments has no column named payment_intent_id".
-      // Adding it now, nullable, closes that gap before it's needed
-      // rather than after.
       await db.execute('ALTER TABLE payments ADD COLUMN payment_intent_id TEXT');
     }
 
     if (oldVersion < 9) {
-      // Mirrors the Supabase migration that added these to `payments` and
-      // `payout_settings` (see supabase/migrations/xxxx_platform_fee_and_payout_functions.sql).
-      // settle_payments() sets platform_fee/driver_net_amount server-side
-      // when an invoice is paid; driver_net_amount is what PayoutViewModel
-      // reads for "recent trips" points and the trip detail dialog's
-      // breakdown. Nullable here for the same reason payment_intent_id is:
-      // unsettled (paid_at IS NULL) rows never have these set.
       await db.execute('ALTER TABLE payments ADD COLUMN platform_fee REAL');
       await db.execute('ALTER TABLE payments ADD COLUMN driver_net_amount REAL');
       await db.execute('ALTER TABLE payout_settings ADD COLUMN platform_fee REAL NOT NULL DEFAULT 1.00');
     }
 
     if (oldVersion < 10) {
-      // Supabase's `payments` table also carries `credited_to_driver_at`
-      // (see supabase/sql/settle_payments.sql) — set alongside
-      // platform_fee/driver_net_amount the moment settle_payments() marks
-      // an invoice paid_at. Without this column here, any cache write that
-      // passes through a raw settled-payment row (the same "bare .select()"
-      // failure mode as payment_intent_id / platform_fee above) would throw
-      // "table payments has no column named credited_to_driver_at". Kept
-      // nullable for the same reason: unsettled rows never have it.
       await db.execute('ALTER TABLE payments ADD COLUMN credited_to_driver_at TEXT');
     }
 
     if (oldVersion < 11) {
-      // The Wallet tab's "Recent transactions" list and its two stat
-      // boxes were the only part of the payout module with no local
-      // cache at all: PayoutViewModel.load()'s offline fallback restored
-      // the balance columns from driver_profiles and stopped there, so
-      // the list came back empty offline even though the History tab
-      // (which does cache, see payout_history) filled in fine. This is
-      // the missing cache — see _createDriverWalletTripsTable.
       await _createDriverWalletTripsTable(db);
     }
   }
 
   Future<void> _createDB(Database db, int version) async {
-    // 1. users
     await db.execute('''
       CREATE TABLE users (
         id TEXT PRIMARY KEY,
@@ -304,7 +189,6 @@ class LocalDbService {
       )
     ''');
 
-    // 2. driver_profiles
     await db.execute('''
       CREATE TABLE driver_profiles (
         user_id TEXT PRIMARY KEY,
@@ -320,7 +204,6 @@ class LocalDbService {
       )
     ''');
 
-    // 3. payout_history
     await db.execute('''
       CREATE TABLE payout_history (
         id TEXT PRIMARY KEY,
@@ -339,7 +222,6 @@ class LocalDbService {
       )
     ''');
 
-    // 4. passenger_trips
     await db.execute('''
       CREATE TABLE passenger_trips (
         id TEXT PRIMARY KEY,
@@ -364,7 +246,6 @@ class LocalDbService {
       )
     ''');
 
-    // 5. driver_trips
     await db.execute('''
       CREATE TABLE driver_trips (
         id TEXT PRIMARY KEY,
@@ -389,7 +270,6 @@ class LocalDbService {
       )
     ''');
 
-    // 6. tumpang_subscription
     await db.execute('''
       CREATE TABLE tumpang_subscription (
         id TEXT PRIMARY KEY,
@@ -417,7 +297,6 @@ class LocalDbService {
       )
     ''');
 
-    // 7. tumpang_request
     await db.execute('''
       CREATE TABLE tumpang_request (
         id TEXT PRIMARY KEY,
@@ -456,7 +335,6 @@ class LocalDbService {
       )
     ''');
 
-    // 8. payments
     await db.execute('''
       CREATE TABLE payments (
         id TEXT PRIMARY KEY,
@@ -476,7 +354,6 @@ class LocalDbService {
       )
     ''');
 
-    // 9. tumpang_trip_log
     await db.execute('''
       CREATE TABLE tumpang_trip_log (
         id TEXT PRIMARY KEY,
@@ -489,7 +366,6 @@ class LocalDbService {
       )
     ''');
 
-    // 10. reward_points
     await db.execute('''
       CREATE TABLE reward_points (
         id TEXT PRIMARY KEY,
@@ -503,7 +379,6 @@ class LocalDbService {
       )
     ''');
 
-    // 11. tumpang_exception
     await db.execute('''
       CREATE TABLE tumpang_exception (
         id TEXT PRIMARY KEY,
@@ -518,7 +393,6 @@ class LocalDbService {
       )
     ''');
 
-    // 12. vouchers
     await db.execute('''
       CREATE TABLE vouchers (
         id TEXT PRIMARY KEY,
@@ -532,7 +406,6 @@ class LocalDbService {
       )
     ''');
 
-    // 13. user_vouchers
     await db.execute('''
       CREATE TABLE user_vouchers (
         id TEXT PRIMARY KEY,
@@ -547,7 +420,6 @@ class LocalDbService {
       )
     ''');
 
-    // 14. points_ledger
     await db.execute('''
   CREATE TABLE points_ledger (
     id TEXT PRIMARY KEY,
@@ -561,7 +433,6 @@ class LocalDbService {
   )
 ''');
 
-    // 15. payout_settings
     await db.execute('''
       CREATE TABLE payout_settings (
         id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
@@ -570,35 +441,11 @@ class LocalDbService {
       )
     ''');
 
-    // 16. post_signup_draft
     await _createPostSignupDraftTable(db);
-
-    // 17. pending_payout_reconciliation
     await _createPendingPayoutReconciliationTable(db);
-
-    // 18. driver_wallet_trips
     await _createDriverWalletTripsTable(db);
   }
 
-  /// Read cache behind the Wallet tab's "Recent transactions" list and
-  /// its "This month" / "Payments this month" stat boxes.
-  ///
-  /// Deliberately denormalised rather than reusing `payments` +
-  /// `tumpang_subscription` + `driver_trips` + `users`: the rows the
-  /// wallet shows come from one joined Supabase query
-  /// (PayoutService.fetchRecentCompletedTrips), and reassembling them
-  /// from four cache tables would mean every one of those parent rows
-  /// has to already be cached by some *other* module first — with
-  /// foreign keys ON, a missing passenger/subscription row makes the
-  /// whole write throw, which is exactly the class of failure that
-  /// broke payout_history before (see the v4 migration above). Storing
-  /// the display fields flat keeps this table self-contained: it can
-  /// always be written straight after a successful fetch, and it's a
-  /// pure read cache that refills itself, never a source of truth.
-  ///
-  /// `in_month` marks rows inside the current-month window (the stat
-  /// boxes) and `is_recent` marks the last-10 list — a row can be in
-  /// both, so they're separate flags rather than one "kind" column.
   Future<void> _createDriverWalletTripsTable(Database db) async {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS driver_wallet_trips (
@@ -625,11 +472,6 @@ class LocalDbService {
     );
   }
 
-  // A payout whose terminal status ('completed'/'failed') was decided
-  // locally (see PayoutViewModel.runPayoutStatusAnimation) but failed to
-  // persist to Supabase's payout_history even after one retry. Survives
-  // app restarts so the driver isn't stuck showing a status that never
-  // made it to the server — see PayoutLocalService.savePendingReconciliation.
   Future<void> _createPendingPayoutReconciliationTable(Database db) async {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS pending_payout_reconciliation (
@@ -640,12 +482,6 @@ class LocalDbService {
     ''');
   }
 
-  // No longer written to — the post-signup driver flow now reuses
-  // AddEditTripScreen (see add_edit_trip_screen.dart) instead of its
-  // own screen/draft-saving view model, so nothing populates this
-  // table anymore. Left in place rather than dropped so upgrading
-  // installs that still have an old cached draft row don't hit a
-  // "no such table" error before this comment is next revisited.
   Future<void> _createPostSignupDraftTable(Database db) async {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS post_signup_draft (

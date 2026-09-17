@@ -1,4 +1,3 @@
-// location selected should be within malaysia
 class MalaysiaBounds {
   static const double minLat = 0.85;
   static const double maxLat = 7.5;

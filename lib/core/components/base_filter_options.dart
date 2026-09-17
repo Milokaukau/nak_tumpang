@@ -20,20 +20,20 @@ class BaseFilterOptions extends StatelessWidget {
         final isSelected = option == selectedOption;
 
         return Padding(
-          padding: const EdgeInsets.only(right: 8.0), // Scaled down spacing between options
+          padding: const EdgeInsets.only(right: 8.0),
           child: GestureDetector(
             onTap: () => onSelectionChanged(option),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6), // Scaled down inner padding
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
               decoration: BoxDecoration(
                 border: isSelected ? null : Border.all(color: AppColors.greyBorder),
-                borderRadius: BorderRadius.circular(6), // Slightly tighter radius
+                borderRadius: BorderRadius.circular(6),
                 color: isSelected ? AppColors.primaryYellow : AppColors.white,
               ),
               child: Text(
                 option,
                 style: TextStyle(
-                  fontSize: 13, // Scaled down font size
+                  fontSize: 13,
                   color: AppColors.black,
                   fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
                 ),

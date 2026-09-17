@@ -1,20 +1,9 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:nak_tumpang/core/services/local_db_service.dart';
 
-/// Caches reward-module data for offline viewing: points balance/history
-/// and voucher catalog/ownership. Redeeming a voucher or playing Goyang
-/// are intentionally NOT cached/replayed offline — both touch server-side
-/// stock counts and uniqueness checks that can't be safely resolved
-/// without a live connection, so those actions stay online-only. This
-/// service only supports viewing what was already synced.
 class RewardsLocalService {
   final LocalDbService _dbService = LocalDbService.instance;
 
-  // ==========================================
-  // REWARD POINTS (drives the points summary card)
-  // ==========================================
-
-  /// Replaces all locally-cached reward_points rows for [userId].
   Future<void> cacheRewardPoints(String userId, List<Map<String, dynamic>> rows) async {
     final db = await _dbService.database;
 
@@ -43,8 +32,6 @@ class RewardsLocalService {
     });
   }
 
-  /// Recomputes the same summary shape as
-  /// RewardsSupabaseService.fetchPointsSummary, but from the local cache.
   Future<Map<String, dynamic>> getCachedPointsSummary(String userId) async {
     final db = await _dbService.database;
     final rows = await db.query('reward_points', where: 'user_id = ?', whereArgs: [userId]);
@@ -78,10 +65,6 @@ class RewardsLocalService {
       'nearest_expiry': nearestExpiry,
     };
   }
-
-  // ==========================================
-  // POINTS LEDGER (drives Points History tab)
-  // ==========================================
 
   Future<void> cachePointsLedger(String userId, List<Map<String, dynamic>> rows) async {
     final db = await _dbService.database;
@@ -121,12 +104,6 @@ class RewardsLocalService {
     );
   }
 
-  // ==========================================
-  // VOUCHERS (catalog + ownership)
-  // ==========================================
-
-  /// Caches the full voucher catalog. Not scoped to a user — vouchers are
-  /// shared across everyone, same as how driver_trips are shared.
   Future<void> cacheVouchers(List<Map<String, dynamic>> rows) async {
     final db = await _dbService.database;
 
@@ -184,9 +161,6 @@ class RewardsLocalService {
     });
   }
 
-  /// Mirrors RewardsSupabaseService.fetchAvailableVouchers: the open
-  /// catalog minus anything already point-redeemed (GOYANG- codes don't
-  /// count as redeemed — same rule as the online version).
   Future<List<Map<String, dynamic>>> getCachedAvailableVouchers(String userId) async {
     final db = await _dbService.database;
 
@@ -217,8 +191,6 @@ class RewardsLocalService {
     }).toList();
   }
 
-  /// Mirrors RewardsSupabaseService.fetchMyVouchers, joining in the
-  /// voucher details the same way the Supabase '*, vouchers(*)' select does.
   Future<List<Map<String, dynamic>>> getCachedMyVouchers(String userId) async {
     final db = await _dbService.database;
 

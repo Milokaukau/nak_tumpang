@@ -37,7 +37,7 @@ class ORSService {
 
       return features
           .map((f) {
-        final coords = f['geometry']['coordinates'] as List; // [lng, lat]
+        final coords = f['geometry']['coordinates'] as List;
         final props = f['properties'] as Map<String, dynamic>;
         return GeocodedPlace(
           label: (props['label'] as String?) ?? query.trim(),
@@ -46,7 +46,6 @@ class ORSService {
           layer: props['layer'] as String?,
         );
       })
-      // waters not valid pickup/dropoff
           .where((place) => !place.isWater)
           .take(6)
           .toList();
@@ -56,7 +55,6 @@ class ORSService {
     }
   }
 
-  // map pin drops, shows location name not just coordinates
   Future<GeocodedPlace> reverseGeocode(LatLng point) async {
     final fallback = GeocodedPlace(
       label: '${point.latitude.toStringAsFixed(5)}, ${point.longitude.toStringAsFixed(5)}',
@@ -69,7 +67,6 @@ class ORSService {
       return fallback;
     }
 
-    // allow address entry when no pin is close enough
     final venue = await _reverseGeocodeQuery(point, layers: 'venue');
     if (venue != null) return venue;
 
@@ -124,7 +121,6 @@ class ORSService {
       return [];
     }
 
-    //use API constants
     final endpoint = (profile == 'foot-walking' || profile.contains('walk'))
         ? ApiConstants.orsWalkingEndpoint
         : ApiConstants.orsDrivingEndpoint;
@@ -155,13 +151,11 @@ class ORSService {
   }
 
   Future<Map<String, dynamic>> getWalkingMetrics(LatLng start, LatLng end) async {
-    // --- FIXED: Removed unnecessary null check since _apiKey defaults to '' ---
     if (_apiKey.isEmpty) {
       print('⚠️ ORS API Key missing. Falling back to default metrics.');
       return {'distance': 0.0, 'duration': 0.0};
     }
 
-    // --- UPDATED to use ApiConstants ---
     final String url =
         '${ApiConstants.orsWalkingEndpoint}?api_key=$_apiKey&start=${start.longitude},${start.latitude}&end=${end.longitude},${end.latitude}';
 
@@ -181,7 +175,6 @@ class ORSService {
       print('ORS Walking API Error: $e');
     }
 
-    // Fallback to straight-line math if the API fails
     final fallbackDist = MatchingUtils.calculateDistance(
         start.latitude, start.longitude, end.latitude, end.longitude);
     return {

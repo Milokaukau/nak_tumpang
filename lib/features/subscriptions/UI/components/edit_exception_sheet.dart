@@ -8,7 +8,7 @@ import 'package:nak_tumpang/features/subscriptions/view_models/subscription_view
 class EditExceptionSheet extends StatefulWidget {
   final Map<String, dynamic> exception;
   final VoidCallback onChanged;
-  final String otherUserId; // 👈 ADDED THIS
+  final String otherUserId;
   final DateTime? minDate;
   final DateTime? maxDate;
 
@@ -16,7 +16,7 @@ class EditExceptionSheet extends StatefulWidget {
     super.key,
     required this.exception,
     required this.onChanged,
-    required this.otherUserId, // 👈 ADDED THIS
+    required this.otherUserId,
     this.minDate,
     this.maxDate,
   });

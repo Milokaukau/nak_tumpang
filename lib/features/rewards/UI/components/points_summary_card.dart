@@ -6,7 +6,7 @@ class PointsSummaryCard extends StatelessWidget {
   final int usedPoints;
   final int voucherCount;
   final DateTime? nearestExpiry;
-  final int expiredPoints; // NEW
+  final int expiredPoints;
 
   const PointsSummaryCard({
     super.key,
@@ -14,7 +14,7 @@ class PointsSummaryCard extends StatelessWidget {
     required this.usedPoints,
     required this.voucherCount,
     this.nearestExpiry,
-    this.expiredPoints = 0, // NEW
+    this.expiredPoints = 0,
   });
 
   @override

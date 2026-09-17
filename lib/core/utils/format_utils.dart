@@ -33,7 +33,6 @@ class FormatUtils {
   }
 
   static Map<String, bool> extractActiveDays(Map<String, dynamic> row) {
-    // Treat true, 1, or '1' as active
     bool isTrue(dynamic val) => val == true || val == 1 || val == '1';
 
     return {

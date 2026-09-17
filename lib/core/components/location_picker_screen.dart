@@ -9,8 +9,6 @@ import 'package:nak_tumpang/core/services/ors_service.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/utils/geo_bounds.dart';
 
-// pick a location by searching,  tapping on the map
-
 class LocationPickerScreen extends StatefulWidget {
   final String title;
   final String? initialQuery;
@@ -34,7 +32,6 @@ class LocationPickerScreen extends StatefulWidget {
 }
 
 class _LocationPickerScreenState extends State<LocationPickerScreen> {
-  // default center = KL
   static const _defaultCenter = LatLng(3.1390, 101.6869);
 
   final _ors = ORSService();
@@ -121,9 +118,6 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
 
     final place = await _ors.reverseGeocode(point);
     if (!mounted) return;
-
-    // allow within malaysia
-    // dont allow in the sea
     if (place.isWater) {
       setState(() {
         _selectedPlace = null;
@@ -140,7 +134,6 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
     });
   }
 
-  // use my location, no need to search for own location
   Future<void> _useMyLocation() async {
     setState(() => _isLocatingMe = true);
     try {
@@ -257,7 +250,6 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
             ],
           ),
 
-          // back button + search bar, with suggestions dropdown below it.
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -338,7 +330,6 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
             ),
           ),
 
-          // use my location floating above confirm
           Positioned(
             right: 16,
             bottom: 165,
@@ -380,7 +371,6 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
             ),
           ),
 
-          // selected place + confirm button = pin to bottom
           Positioned(
             left: 0,
             right: 0,

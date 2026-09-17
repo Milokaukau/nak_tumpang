@@ -7,9 +7,6 @@ import 'package:nak_tumpang/core/services/ors_service.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/core/utils/geo_bounds.dart';
 
-// text = real place with coordinates  via ORS geocoding
-// shows real place name, not just coordinates
-// also allow pick on map option
 class LocationAutocompleteField extends StatefulWidget {
   final TextEditingController controller;
   final String hintText;
@@ -37,7 +34,6 @@ class _LocationAutocompleteFieldState extends State<LocationAutocompleteField> {
   List<GeocodedPlace> _suggestions = [];
   bool _isSearching = false;
 
-  // next search suppressed when a suggestion is selected
   bool _suppressNextSearch = false;
 
   @override
@@ -72,8 +68,6 @@ class _LocationAutocompleteFieldState extends State<LocationAutocompleteField> {
   }
 
   void _select(GeocodedPlace place) {
-    // text search only find within malaysia and no ocean/sea results
-    // map picker can hand back a place
     if (!MalaysiaBounds.contains(place.latitude, place.longitude)) {
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()

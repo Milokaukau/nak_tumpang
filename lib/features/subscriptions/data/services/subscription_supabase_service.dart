@@ -22,9 +22,6 @@ class SubscriptionSupabaseService {
     final driverId = driverUser?['id'] ?? driverTrip?['user_id'] ?? '';
     final driverName = driverUser?['name'] ?? 'Driver';
     final driverPhone = driverUser?['phone'] ?? '';
-    // 'avatar_url' is the actual users column (see ProfileViewModel) —
-    // 'profile_image_url'/'imageUrl' aren't real columns, so this always
-    // evaluated to null regardless of whether the user had a photo.
     final driverImageUrl = driverUser?['avatar_url'] as String?;
 
     final passengerId = passengerUser?['id'] ?? passengerTrip?['user_id'] ?? '';
@@ -162,8 +159,7 @@ class SubscriptionSupabaseService {
       return refreshedList.map((sub) => normalizeSubscription(sub, role)).toList();
     } catch (e) {
       print("Error in fetchSubscriptions: $e");
-      rethrow; // was: return []; — swallowing this hid the error from the
-      // caller's fallback try/catch, so offline cache never kicked in
+      rethrow;
     }
   }
 
@@ -206,16 +202,12 @@ class SubscriptionSupabaseService {
     }
   }
 
-  // 1. UPDATE your existing cancelSubscription method to accept 'otherUserId'
   Future<bool> cancelSubscription({
     required String subscriptionId,
     required String cancelledByRole,
     required String otherUserId,
     String? reason,
   }) async {
-    // ==========================================
-    // 1. UPDATE THE SUBSCRIPTION STATUS
-    // ==========================================
     try {
       final updateData = {
         'status': 'inactive',
@@ -231,17 +223,13 @@ class SubscriptionSupabaseService {
 
     } catch (e) {
       debugPrint('🚨 Supabase Error cancelling subscription: $e');
-      return false; // If the cancel fails, stop here
+      return false;
     }
 
-    // ==========================================
-    // 2. INSERT THE NOTIFICATION
-    // ==========================================
     try {
       if (otherUserId.isEmpty) {
         debugPrint('🚨 NOTIF ERROR: otherUserId is empty! Supabase will reject this because it needs a valid UUID.');
       } else {
-        // Generate a unique string ID for the notification
         final String notifId = 'NOTIF-${DateTime.now().millisecondsSinceEpoch}';
 
         await _supabase.from('tumpang_notifications').insert({
@@ -263,7 +251,6 @@ class SubscriptionSupabaseService {
     return true;
   }
 
-  // 2. ADD THIS METHOD to fetch unread alerts
   Future<List<Map<String, dynamic>>> fetchUnreadNotifications(String userId) async {
     try {
       final response = await _supabase
@@ -279,7 +266,6 @@ class SubscriptionSupabaseService {
     }
   }
 
-  // 3. ADD THIS METHOD to mark them as read so they don't show twice
   Future<void> markNotificationsAsRead(List<String> notificationIds) async {
     if (notificationIds.isEmpty) return;
     try {
@@ -298,7 +284,7 @@ class SubscriptionSupabaseService {
     required DateTime endDate,
     required String reason,
     required String otherUserId,
-    String? subscriptionId, // NEW
+    String? subscriptionId,
   }) async {
     try {
       await _supabase.from('tumpang_exception').update({
@@ -315,7 +301,7 @@ class SubscriptionSupabaseService {
         'message': 'A schedule exception has been modified for dates ${_formatDate(startDate)} to ${_formatDate(endDate)}.',
         'type': 'exception',
         'is_read': false,
-        'subscription_id': subscriptionId, // NEW
+        'subscription_id': subscriptionId,
       });
 
       return true;
@@ -345,9 +331,6 @@ class SubscriptionSupabaseService {
     }
   }
 
-  /// Fetches a single subscription for a tapped notification, with a
-  /// timeout since this runs from a transient overlay UI that shouldn't
-  /// hang indefinitely if the network is slow/unavailable.
   Future<Map<String, dynamic>?> fetchSubscriptionForNotification(
       String subscriptionId,
       String role,
@@ -371,10 +354,6 @@ class SubscriptionSupabaseService {
     }
   }
 
-  /// All exceptions for a subscription, any status, newest start_date
-  /// first. Used by the Schedule Changes tab, which shows a full history
-  /// (unlike fetchExceptionsForSubscription, which only returns 'active'
-  /// ones for the exception-list-summary component).
   Future<List<Map<String, dynamic>>> fetchAllExceptionsForSubscription(String subscriptionId) async {
     try {
       final response = await _supabase

@@ -30,8 +30,6 @@ class RewardsSupabaseService {
         final isExpired = expiry != null && now.isAfter(expiry);
 
         if (isExpired) {
-          // Capture whatever was still available in THIS row before any
-          // sweep zeroes it out — this is the amount that lapsed unspent.
           if (avai > 0) {
             expiredUnused += avai;
             idsToZeroOut.add(row['id'].toString());
@@ -45,9 +43,6 @@ class RewardsSupabaseService {
         }
       }
 
-      // Sweep AFTER accounting, using the ids we already identified above —
-      // so the summary numbers reflect the state at read-time, not
-      // whatever's left after this same call's own side-effect.
       if (idsToZeroOut.isNotEmpty) {
         await _supabase
             .from('reward_points')
@@ -108,9 +103,6 @@ class RewardsSupabaseService {
           .select('voucher_id, code')
           .eq('user_id', userId);
 
-      // Only a POINT-redeemed voucher (code doesn't start with 'GOYANG-')
-      // counts as "already redeemed" here. A Goyang-won voucher is a free
-      // lucky win — it should still show as redeemable via points too.
       final pointRedeemedIds = (redeemedResponse as List)
           .where((r) => !(r['code']?.toString().startsWith('GOYANG-') ?? false))
           .map((r) => r['voucher_id'])
@@ -142,9 +134,6 @@ class RewardsSupabaseService {
     }
   }
 
-  /// Redeems a voucher: blocks duplicate redemption, deducts points FIFO
-  /// across reward_points batches, creates a user_vouchers row, and logs
-  /// the redemption in points_ledger.
   Future<bool> redeemVoucher({
     required String userId,
     required Map<String, dynamic> voucher,
@@ -153,9 +142,6 @@ class RewardsSupabaseService {
     final voucherId = voucher['id'];
 
     try {
-      // Block re-redemption of the same voucher by the same user via points
-      // (a Goyang win of the same voucher doesn't count — that's free, not
-      // paid for with points, so it shouldn't block a real redemption).
       final existing = await _supabase
           .from('user_vouchers')
           .select('id, code')
@@ -169,9 +155,6 @@ class RewardsSupabaseService {
         return false;
       }
 
-      // NEW: re-check current stock right before committing, in case it
-      // changed since the voucher list was last fetched. stock_quantity of
-      // null means unlimited stock — only enforce the check when it's set.
       final freshVoucher = await _supabase
           .from('vouchers')
           .select('stock_quantity')
@@ -184,7 +167,6 @@ class RewardsSupabaseService {
         return false;
       }
 
-      // Fetch spendable batches, oldest first (FIFO)
       final response = await _supabase
           .from('reward_points')
           .select()
@@ -200,10 +182,9 @@ class RewardsSupabaseService {
         totalAvailable += (b['avai_points'] as num).toInt();
       }
       if (totalAvailable < requiredPoints) {
-        return false; // insufficient points
+        return false;
       }
 
-      // Deduct across batches
       int remaining = requiredPoints;
       for (var batch in batches) {
         if (remaining <= 0) break;
@@ -216,7 +197,6 @@ class RewardsSupabaseService {
         remaining -= deduct;
       }
 
-      // NEW: decrement stock now that points have been successfully deducted.
       if (currentStock != null) {
         final updateResult = await _supabase
             .from('vouchers')
@@ -227,7 +207,6 @@ class RewardsSupabaseService {
         debugPrint('🔍 Stock update result: $updateResult, currentStock was: $currentStock, voucherId: $voucherId');
       }
 
-      // Create the voucher redemption record
       final validityDays = (voucher['validity_days'] as num).toInt();
       final now = DateTime.now();
       final expiredAt = now.add(Duration(days: validityDays));
@@ -244,7 +223,6 @@ class RewardsSupabaseService {
         'used_at': null,
       });
 
-      // Log the redemption
       await _supabase.from('points_ledger').insert({
         'id': 'pl_${DateTime.now().millisecondsSinceEpoch}',
         'user_id': userId,
@@ -282,11 +260,6 @@ class RewardsSupabaseService {
     }
   }
 
-  /// Plays one Goyang round: picks either a points bonus or a random
-  /// in-stock voucher, grants it, and logs it so it shows up in Points
-  /// History regardless of which outcome hit. Returns a result map:
-  /// {'type': 'points', 'points': int} | {'type': 'voucher', 'voucher_name': String}
-  /// | {'type': 'already_claimed'} | {'type': 'error'}
   Future<Map<String, dynamic>> playGoyang(String userId) async {
     try {
       if (await hasClaimedGoyangToday(userId)) {
@@ -301,8 +274,6 @@ class RewardsSupabaseService {
 
       final vouchers = List<Map<String, dynamic>>.from(eligibleVouchers);
       final random = Random();
-      // 25% chance of a voucher outcome (only if any are actually in stock),
-      // otherwise it's a points bonus.
       final bool tryVoucher = vouchers.isNotEmpty && random.nextDouble() < 0.25;
       final now = DateTime.now();
 
@@ -310,9 +281,6 @@ class RewardsSupabaseService {
         final voucher = vouchers[random.nextInt(vouchers.length)];
         final voucherId = voucher['id'];
 
-        // Re-check stock right before committing, in case it changed between
-        // the list fetch above and now (best-effort for assignment scope —
-        // not a true atomic decrement, same caveat as redeemVoucher's FIFO logic).
         final freshVoucher = await _supabase.from('vouchers').select().eq('id', voucherId).maybeSingle();
         final stock = freshVoucher?['stock_quantity'];
         if (stock != null && stock <= 0) {
@@ -370,12 +338,6 @@ class RewardsSupabaseService {
       'avai_points': points,
       'obtained_at': now.toIso8601String(),
       'expired_at': now.add(const Duration(days: 90)).toIso8601String(),
-      // Goyang wins aren't tied to a real trip log, but the column is
-      // NOT NULL and unique per (user_id, tumpang_trip_log_id) — a
-      // synthetic, per-play-unique value satisfies both without a real
-      // trip log row. The daily-limit guard (hasClaimedGoyangToday)
-      // already prevents a user from ever needing two of these on the
-      // same day, so uniqueness in practice is a non-issue.
       'tumpang_trip_log_id': 'goyang_${now.millisecondsSinceEpoch}',
     });
 
@@ -392,8 +354,6 @@ class RewardsSupabaseService {
     return {'type': 'points', 'points': points};
   }
 
-  /// Raw reward_points rows for [userId] — used to populate the local cache
-  /// so getCachedPointsSummary can recompute the same summary offline.
   Future<List<Map<String, dynamic>>> fetchRawRewardPoints(String userId) async {
     try {
       final response = await _supabase.from('reward_points').select().eq('user_id', userId);
@@ -404,9 +364,6 @@ class RewardsSupabaseService {
     }
   }
 
-  /// The full voucher catalog, unfiltered — used to populate the local
-  /// cache. (fetchAvailableVouchers already filters out redeemed ones for
-  /// display; this is the raw table for offline storage.)
   Future<List<Map<String, dynamic>>> fetchAllVouchers() async {
     try {
       final response = await _supabase.from('vouchers').select();
