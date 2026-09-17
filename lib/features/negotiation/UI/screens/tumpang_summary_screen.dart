@@ -63,7 +63,6 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
     try {
       final controller = context.read<NegotiationViewModel>();
 
-      // Fetch intent and server-derived amount
       final intentData = await controller.createDepositPaymentIntent(requestId: request.id);
       final clientSecret = intentData['clientSecret'] as String;
       final serverAmount = intentData['amount'] as double;
@@ -87,13 +86,13 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
       if (request.isExtension) {
         await controller.finalizeExtensionRequest(
           extensionRequestId: request.id,
-          additionalDeposit: serverAmount, // Use server amount
+          additionalDeposit: serverAmount,
           paymentIntentId: paymentIntentId,
         );
       } else {
         await controller.createSubscriptionAfterDeposit(
           request: request,
-          deposit: serverAmount, // Use server amount
+          deposit: serverAmount,
           paymentIntentId: paymentIntentId,
         );
       }
@@ -167,7 +166,6 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
             return const Center(child: Text('Invalid subscription dates.'));
           }
 
-          // FIX: DST-safe calendar math
           final potentialDepositEnd = DateTime(startDate.year, startDate.month, startDate.day + 59);
           final depositEndDate = potentialDepositEnd.isAfter(endDate) ? endDate : potentialDepositEnd;
 
@@ -177,7 +175,6 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
             schedule,
           );
 
-          // FIX: Cleaned up vestigial oldDeposit math. Always charge the target total.
           final targetTotalDeposit = depositActiveDays * dailyFee;
           final payableDeposit = targetTotalDeposit;
 
@@ -274,7 +271,6 @@ class _TumpangSummaryScreenState extends State<TumpangSummaryScreen> {
                               ),
                               onPressed: _isProcessing || isOffline
                                   ? null
-                              // FIX: Removed `totalDeposit` argument
                                   : () => _handlePayDeposit(request: request),
                               child: _isProcessing
                                   ? const SizedBox(

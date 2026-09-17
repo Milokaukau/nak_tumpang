@@ -4,19 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
-import 'package:geolocator/geolocator.dart'; // Added geolocator
+import 'package:geolocator/geolocator.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 
-/// Full-screen map, in two modes:
-///
-/// - readOnly = true  -> view-only (was FullscreenMapScreen). Just shows the
-///   pin, freely pannable/zoomable, no editing UI. Used when viewing an
-///   already-accepted location.
-/// - readOnly = false -> interactive picker (was LocationPickerScreen). Tap
-///   the map or search a store/street name to drop the pin, auto-fills the
-///   name via Nominatim reverse geocoding, and returns
-///   {'name': String, 'lat': double, 'lng': double} via Navigator.pop when
-///   confirmed.
 class MapScreen extends StatefulWidget {
   final String title;
   final double initialLat;
@@ -49,7 +39,7 @@ class _MapScreenState extends State<MapScreen> {
   Timer? _debounce;
   int _searchToken = 0;
 
-  bool _isLocating = false; // Added to track GPS fetch state
+  bool _isLocating = false;
 
   @override
   void initState() {
@@ -66,9 +56,6 @@ class _MapScreenState extends State<MapScreen> {
     super.dispose();
   }
 
-  /// Nominatim's display_name is a long comma-separated full address.
-  /// Keep only the first couple of segments so location names stay short
-  /// and readable in cards/lists — user can still edit it manually.
   String _shortenAddress(String fullAddress) {
     final parts = fullAddress.split(',').map((p) => p.trim()).where((p) => p.isNotEmpty).toList();
     if (parts.length <= 2) return fullAddress;
@@ -96,7 +83,6 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
-  // Handle fetching current location via Geolocator
   Future<void> _getCurrentLocation() async {
     setState(() => _isLocating = true);
     try {
@@ -143,7 +129,7 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   void _onSearchChanged(String query) {
-    setState(() {}); // update the clear/loading icon immediately
+    setState(() {});
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 500), () {
       _searchPlace(query);
@@ -158,12 +144,11 @@ class _MapScreenState extends State<MapScreen> {
     final int myToken = ++_searchToken;
     setState(() => _isSearching = true);
     try {
-      // Added &countrycodes=my to lock the search results entirely to Malaysia
       final uri = Uri.parse(
         'https://nominatim.openstreetmap.org/search?format=json&q=${Uri.encodeQueryComponent(query)}&limit=6&addressdetails=0&countrycodes=my',
       );
       final response = await http.get(uri, headers: {'User-Agent': 'com.example.nak_tumpang'});
-      if (myToken != _searchToken) return; // a newer search superseded this one
+      if (myToken != _searchToken) return;
       if (response.statusCode == 200) {
         final List<dynamic> data = jsonDecode(response.body);
         setState(() {
@@ -183,10 +168,8 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
-  // Handle keyboard "Enter/Search" submission
   Future<void> _onSearchSubmitted(String query) async {
     await _searchPlace(query);
-    // If the user presses enter instead of tapping the list, auto-select the best result
     if (_searchResults.isNotEmpty) {
       _selectSearchResult(_searchResults.first);
     }
@@ -196,7 +179,6 @@ class _MapScreenState extends State<MapScreen> {
     final point = LatLng(result['lat'], result['lon']);
     final fullName = result['display_name'].toString();
 
-    // Extract just the specific POI name (the first segment) for cleaner text fields
     final placeName = fullName.split(',').first.trim();
 
     setState(() {
@@ -212,12 +194,11 @@ class _MapScreenState extends State<MapScreen> {
     setState(() {
       _picked = point;
       _searchResults = [];
-      _searchController.clear(); // Clear the search bar if they tap elsewhere
+      _searchController.clear();
     });
     _reverseGeocode(point);
   }
 
-  // Highlights the matching part of the search string
   Widget _highlightSearchText(String text, String query) {
     if (query.trim().isEmpty) {
       return Text(text, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14, color: AppColors.black));
@@ -386,7 +367,6 @@ class _MapScreenState extends State<MapScreen> {
                   ],
                 ),
               ),
-              // Floating Action Button for 'Current Location'
               Positioned(
                 bottom: 16,
                 right: 16,

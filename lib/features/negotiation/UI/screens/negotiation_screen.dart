@@ -375,7 +375,6 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                 return FutureBuilder<Map<String, dynamic>?>(
                   future: controller.getUserProfileByTripId(targetTripId, isDriverTrip: !isDriver),
                   builder: (context, userSnapshot) {
-                    // NEW FIX: Wrap the UI to explicitly fetch and apply passenger's schedule
                     return FutureBuilder<Map<String, dynamic>?>(
                         future: controller.getPassengerSchedule(request.passengerTripId),
                         builder: (context, scheduleSnapshot) {
@@ -385,10 +384,9 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
 
                           final tripName = controller.getCachedTripName(myTripId);
 
-                          // NEW FIX: Dynamically calculate true billable days based on passenger's schedule
                           final schedule = scheduleSnapshot.data;
-                          int activeDays = request.subscriptionDays; // fallback if schedule fails
-                          double actualTotalFee = request.totalFee;  // fallback if schedule fails
+                          int activeDays = request.subscriptionDays;
+                          double actualTotalFee = request.totalFee;
 
                           if (schedule != null) {
                             final start = DateTime.tryParse(request.subscriptionStartDate.value);
@@ -490,13 +488,11 @@ class _NegotiationScreenState extends State<NegotiationScreen> {
                                   isOffline: isOffline,
                                   topWidget: Column(
                                     children: [
-                                      // NEW FIX: Shows actual billable active days instead of raw calendar days
                                       Text(
                                         'RM ${request.fee.value.toStringAsFixed(2)}/day  x  $activeDays day${activeDays == 1 ? '' : 's'}',
                                         style: const TextStyle(fontSize: 13, color: AppColors.black),
                                       ),
                                       const SizedBox(height: 4),
-                                      // NEW FIX: Shows strictly calculated bill based on schedule
                                       Text(
                                         'Total: RM ${actualTotalFee.toStringAsFixed(2)}',
                                         style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.black),

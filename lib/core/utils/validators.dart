@@ -1,4 +1,3 @@
-// shared form field for register and profile
 class Validators {
   Validators._();
 
@@ -12,8 +11,6 @@ class Validators {
     return null;
   }
 
-  // validate phone number
-  // non-zero starting
   static String? phoneLocal(String? v) {
     if (v == null || v.trim().isEmpty) return 'Phone number is required';
     final cleaned = v.trim().replaceAll(RegExp(r'[\s-]'), '');
@@ -29,7 +26,6 @@ class Validators {
     return null;
   }
 
-  // malaysian bank account numbers check
   static final RegExp bankAccNoRegex = RegExp(r'^[0-9]{8,17}$');
 
   static String? bankAccountNumber(String? v) {
@@ -46,7 +42,6 @@ class Validators {
     return null;
   }
 
-  // Malaysian car plate validation: letters, numbers, and spaces only
   static final RegExp carPlateRegex = RegExp(r'^[A-Za-z0-9\s]+$');
 
   static String? carPlateNumber(String? v) {

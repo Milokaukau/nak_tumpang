@@ -2,24 +2,10 @@ import 'package:sqflite/sqflite.dart';
 import 'package:nak_tumpang/core/services/local_db_service.dart';
 
 class NegotiationLocalService {
-  // Use the singleton instance
   final LocalDbService _dbService = LocalDbService.instance;
 
-  // Cached in-memory once we've confirmed (or added) the owner_id column on
-  // this process's database connection, so we don't re-issue the ALTER
-  // TABLE / probe on every call.
   bool _ownerIdColumnReady = false;
 
-  /// Ensures `tumpang_request.owner_id` exists, adding it if this device's
-  /// local schema predates the column. This makes owner_id scoping work
-  /// unconditionally — independent of LocalDbService's own migration
-  /// version — so callers never need to silently fall back to an unscoped
-  /// query (which would defeat the point of the scoping: if the cache
-  /// somehow isn't cleared on an account switch, an unscoped fallback could
-  /// let one account see another's cached negotiation data offline).
-  /// ALTER TABLE ... ADD COLUMN is idempotent-safe here: if the column
-  /// already exists (normal case, or a race with a concurrent call) SQLite
-  /// throws "duplicate column name", which we treat as success.
   Future<void> _ensureOwnerIdColumn() async {
     if (_ownerIdColumnReady) return;
     final db = await _dbService.database;
@@ -55,12 +41,6 @@ class NegotiationLocalService {
     }
   }
 
-  // ownerId stays optional so callers who don't need scoping (e.g. code not
-  // yet updated to pass an owner) keep working. When ownerId IS passed, the
-  // column is guaranteed to exist (see _ensureOwnerIdColumn) so there is no
-  // "missing column" fallback path here anymore — an owner-scoped query
-  // either matches real rows for that owner or returns nothing, it never
-  // silently widens to other accounts' data.
   Future<List<Map<String, dynamic>>> getOfflineRequests(String status, [String? ownerId]) async {
     await _ensureOwnerIdColumn();
     final db = await _dbService.readOnlyDatabase;
@@ -100,13 +80,11 @@ class NegotiationLocalService {
     return null;
   }
 
-  // DELETE to clear cache upon logout
   Future<void> clearRequestsCache() async {
     final db = await _dbService.database;
     await db.delete('tumpang_request');
   }
 
-  // --- Helpers for SQLite Boolean Mapping ---
   Map<String, dynamic> _mapBooleansToIntegers(Map<String, dynamic> data) {
     final result = Map<String, dynamic>.from(data);
     result.forEach((key, value) {

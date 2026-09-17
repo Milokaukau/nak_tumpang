@@ -5,8 +5,6 @@ import 'package:nak_tumpang/core/services/network_service.dart';
 import 'package:nak_tumpang/features/payment/view_models/payment_view_model.dart';
 import 'package:nak_tumpang/features/payment/UI/components/payment_history_card.dart';
 
-/// Shows the completed payment history for a single subscription.
-/// Typically opened from a subscription's detail screen.
 class PaymentHistoryScreen extends StatefulWidget {
   final String subscriptionId;
 

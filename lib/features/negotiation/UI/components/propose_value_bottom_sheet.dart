@@ -7,11 +7,6 @@ class ProposeValueBottomSheet extends StatefulWidget {
   final String title;
   final String currentValue;
 
-  /// NOTE: this is awaited by the sheet before it closes (previously it
-  /// was fired without awaiting, so the sheet closed immediately and any
-  /// failure from the mutation was silently lost). Throw a
-  /// [NegotiationException] from here (or let one propagate) to show a
-  /// user-facing error in the sheet and keep it open for retry.
   final Future<void> Function(String) onSubmit;
 
   const ProposeValueBottomSheet({
@@ -26,22 +21,13 @@ class ProposeValueBottomSheet extends StatefulWidget {
 }
 
 class _ProposeValueBottomSheetState extends State<ProposeValueBottomSheet> {
-  /// Every caller of this sheet that I can see only ever uses it for the
-  /// fee field — pickup/dropoff go through MapScreen, pickup time through
-  /// TimeProposalBottomSheet, dates through DateRangeProposalBottomSheet.
-  /// Detecting fee by title (same convention the old keyboardType/
-  /// validation logic already used) keeps the free-text path available as
-  /// a fallback for any other caller I don't have visibility into, rather
-  /// than assuming this sheet is fee-only and deleting that path outright.
   bool get _isFee => widget.title.toLowerCase().contains('fee');
 
-  static const int _minFee = 1; // RM1 floor — a fee can't be zero or negative
-  static const double _maxFee = 100.0; // RM100 maximum fee ceiling
+  static const int _minFee = 1;
+  static const double _maxFee = 100.0;
 
-  // Fee mode state: Now a double to preserve incoming legacy fractional fees
   late double _feeValue;
 
-  // Non-fee fallback mode state.
   late TextEditingController _controller;
 
   bool _isSubmitting = false;
@@ -52,7 +38,6 @@ class _ProposeValueBottomSheetState extends State<ProposeValueBottomSheet> {
     super.initState();
     if (_isFee) {
       final parsed = double.tryParse(widget.currentValue);
-      // Preserve fractional values on load, do not use .round()
       _feeValue = parsed ?? _minFee.toDouble();
       if (_feeValue < _minFee) _feeValue = _minFee.toDouble();
       if (_feeValue > _maxFee) _feeValue = _maxFee;
@@ -70,7 +55,6 @@ class _ProposeValueBottomSheetState extends State<ProposeValueBottomSheet> {
   void _incrementFee() {
     if (_isSubmitting || _feeValue >= _maxFee) return;
     setState(() {
-      // Snaps to the next whole integer if fractional, or adds exactly 1.0
       final nextVal = (_feeValue + 1.0).floorToDouble();
       _feeValue = nextVal > _maxFee ? _maxFee : nextVal;
     });
@@ -79,13 +63,11 @@ class _ProposeValueBottomSheetState extends State<ProposeValueBottomSheet> {
   void _decrementFee() {
     if (_isSubmitting || _feeValue <= _minFee) return;
     setState(() {
-      // Snaps down to the nearest whole integer, or subtracts exactly 1.0
       _feeValue = (_feeValue - 1.0).ceilToDouble();
       if (_feeValue < _minFee) _feeValue = _minFee.toDouble();
     });
   }
 
-  // Formats correctly based on whether the number is currently fractional or whole
   String get _formattedFee {
     return _feeValue == _feeValue.truncateToDouble()
         ? _feeValue.toStringAsFixed(0)
@@ -154,7 +136,6 @@ class _ProposeValueBottomSheetState extends State<ProposeValueBottomSheet> {
           const SizedBox(height: 20),
 
           if (_isFee) ...[
-            // Added explicit padding around the fee stepper row
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 12.0),
               child: Row(
@@ -211,8 +192,6 @@ class _ProposeValueBottomSheetState extends State<ProposeValueBottomSheet> {
   }
 }
 
-/// Round +/- tap target used by the fee stepper, styled to match the
-/// app's existing yellow-accent circular/pill button convention.
 class _StepButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback? onPressed;
