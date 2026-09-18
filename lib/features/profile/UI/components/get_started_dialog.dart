@@ -2,11 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:nak_tumpang/core/components/base_button.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 
-// after passenger finish creating profile
 class GetStartedDialog extends StatelessWidget {
   const GetStartedDialog({super.key});
 
-  /// shows the dialog and returns 'add_trip' or 'later'.
   static Future<String> show(BuildContext context) async {
     final choice = await showDialog<String>(
       context: context,

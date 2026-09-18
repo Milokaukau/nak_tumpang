@@ -12,17 +12,12 @@ import 'package:nak_tumpang/features/payout/data/services/payout_service.dart';
 
 enum PayoutMethod { bankTransfer, tngEwallet }
 
-// fallback for live cases where payout_settings in supabase is not available
 const double kFallbackBankTransferFee = 1.00;
 
-// minimum amount for a payout, avoid rm1 payout that would return 0 when deducted the transfer fee
 const double kMinPayoutAmount = 10.00;
 
-// whole numbers only
 final RegExp _amountFormatRegex = RegExp(r'^\d+$');
 
-// pre-submission preview before a payout history exist
-// should refer to payout_settings, not the fallback constant
 double payoutNetAmount(double grossAmount, PayoutMethod method, double bankTransferFee) =>
     method == PayoutMethod.bankTransfer
         ? (grossAmount - bankTransferFee < 0 ? 0 : grossAmount - bankTransferFee)
@@ -43,12 +38,9 @@ Color payoutStatusColor(String status) => switch (status) {
   _ => AppColors.greyText,
 };
 
-// points shown as whole number
-// driver cant see a point figure bigger than the RM value
 String pointsLabel(double amount) => amount.floor().toString();
 
 extension PayoutMethodDb on PayoutMethod {
-  // value stores in payout_history payment_method
   String get dbValue => this == PayoutMethod.bankTransfer ? 'bank_transfer' : 'tng_ewallet';
 
   static PayoutMethod fromDb(String? value) =>
@@ -60,7 +52,7 @@ enum PayoutView { wallet, history }
 class PayoutHistoryDisplay {
   final String id;
   final double amount;
-  final String status; // pending / processing / paid
+  final String status;
   final PayoutMethod paymentMethod;
   final String? bankName;
   final String? bankAccNo;
@@ -84,8 +76,6 @@ class PayoutHistoryDisplay {
 
   String get destinationLabel => isEwallet ? "Touch 'n Go eWallet" : (bankName ?? 'Bank transfer');
 
-  // fee charged at payout
-  // only uses fallback transfer fee for older rows that predate the column
   double get resolvedFee => fee ?? (paymentMethod == PayoutMethod.bankTransfer ? kFallbackBankTransferFee : 0);
 
   double get netAmount {
@@ -95,7 +85,6 @@ class PayoutHistoryDisplay {
 
   String get _destination => (isEwallet ? ewalletPhone : bankAccNo) ?? '-';
 
-  // masked bank acc no and ewallet phone num besides the final 4 values
   String get maskedDestination {
     final value = _destination;
     if (value.length <= 4) return '•' * value.length;
@@ -119,19 +108,19 @@ class PayoutHistoryDisplay {
 }
 
 class RecentTripDisplay {
-  final String tripId; // payments.id (settled) — shown as a reference on the receipt
+  final String tripId;
   final String passengerName;
-  final String tripName; // the driver's own trip name this cycle was billed against
+  final String tripName;
   final String pickupName;
   final String dropoffName;
-  final double points; // net, after platform fee — what actually hit the wallet
-  final double grossAmount; // what the passenger paid, before the platform fee
+  final double points;
+  final double grossAmount;
   final double platformFee;
-  final double dailyFee; // tumpang_subscription.fee — the per-day rate for this ride
+  final double dailyFee;
   final DateTime? cycleStartDate;
   final DateTime? cycleEndDate;
-  final String monthLabel; // e.g. "August"
-  final DateTime? tripDate; // full date, for the trip detail popup
+  final String monthLabel;
+  final DateTime? tripDate;
 
   RecentTripDisplay({
     required this.tripId,
@@ -149,10 +138,6 @@ class RecentTripDisplay {
     this.tripDate,
   });
 
-  // Billed days derived from amount ÷ daily rate rather than the raw
-  // cycle_start/cycle_end span — grossAmount already has driver-caused
-  // missed days deducted (see _countDriverMissedDays), the raw date range
-  // doesn't, so recomputing from dates alone would overcount.
   int get billableDays => dailyFee > 0 ? (grossAmount / dailyFee).round() : 0;
 }
 
@@ -173,18 +158,12 @@ class PayoutViewModel extends ChangeNotifier {
   double availableBalance = 0;
   double totalWithdrawn = 0;
 
-  // starts at fallback so claim dialog can show if it's open before the fetch resolves
-  // corrected the moment it resolved
   double bankTransferFee = kFallbackBankTransferFee;
 
-  // Count of settled payment rows (billing cycles) this month, not
-  // individual ride days — see _loadWalletData for why. Backs the
-  // "Payments this month" stat card.
   int tripsCompletedCount = 0;
   double thisMonthPoints = 0;
   List<RecentTripDisplay> recentTrips = [];
 
-// tab toggle between history and wallet
   PayoutView currentView = PayoutView.wallet;
   bool isHistoryLoading = false;
   bool isLoadingMoreHistory = false;
@@ -196,7 +175,6 @@ class PayoutViewModel extends ChangeNotifier {
   static const int _historyPageSize = 20;
   int _historyOffset = 0;
 
-  // every timestamp for this driver
   List<DateTime> _historyDates = [];
   bool _historyDatesLoaded = false;
 
@@ -204,14 +182,12 @@ class PayoutViewModel extends ChangeNotifier {
   DateTime? selectedHistoryMonth;
   bool get hasAnyHistory => _historyDates.isNotEmpty;
 
-  // first filter tier narrow history month before month chips can be picked from
   List<int> get historyYears {
     final years = _historyDates.map((d) => d.year).toSet().toList();
     years.sort((a, b) => b.compareTo(a));
     return years;
   }
 
-  // only the history of the selected month will be shown
   List<DateTime> get historyMonths {
     final year = selectedHistoryYear;
     final months = <DateTime>{};
@@ -227,7 +203,6 @@ class PayoutViewModel extends ChangeNotifier {
 
   void selectHistoryYear(int? year) {
     selectedHistoryYear = year;
-    // a month from a different year can no longer be valid once year filter changes
     selectedHistoryMonth = null;
     _reloadHistoryForCurrentScope();
   }
@@ -237,11 +212,9 @@ class PayoutViewModel extends ChangeNotifier {
     _reloadHistoryForCurrentScope();
   }
 
-// payout form state
   PayoutMethod selectedMethod = PayoutMethod.bankTransfer;
   final amountController = TextEditingController(text: '0');
 
-// bank name is a fixed dropdown of malaysian banks
   String? selectedBankName;
   final bankAccNoController = TextEditingController();
   final ewalletPhoneController = TextEditingController();
@@ -256,15 +229,6 @@ class PayoutViewModel extends ChangeNotifier {
   String? lastPayoutId;
   String payoutStatus = 'pending';
 
-  // payoutId -> intended terminal status ('completed'/'failed'), for
-  // payouts whose status was decided locally but failed to persist to
-  // payout_history — see runPayoutStatusAnimation(). Backed by
-  // PayoutLocalService's pending_payout_reconciliation table so a
-  // pending record survives an app restart, not just this instance.
-  // Consumed by _applyPendingReconciliations(), which loadHistory() and
-  // refreshHistory() both call before trusting a freshly-fetched server
-  // status for the same payout — otherwise a stale server 'pending' row
-  // could silently overwrite the terminal status the driver already saw.
   Map<String, String> pendingReconciliation = {};
 
   bool _disposed = false;
@@ -273,23 +237,10 @@ class PayoutViewModel extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
-  // NetworkService's device-level connectivity flag (see
-  // core/services/network_service.dart) is what we tried first, but it
-  // can misreport — some emulators/simulators, VPNs, and corporate
-  // networks confuse connectivity_plus, and it can lag right after
-  // reconnecting. What actually tells us whether the driver is offline
-  // is the exception the failed request threw: a PostgrestException or
-  // AuthException means the request reached Supabase and got a real
-  // response back (so the device is online, whatever else went wrong);
-  // only a genuine network failure — no route to host, DNS failure,
-  // timeout — means the driver is actually offline.
   bool _isConnectivityError(Object error) =>
       error is SocketException || error is TimeoutException || error is http.ClientException;
 
   String _fetchFailureMessage(Object error, {required String whenOffline, required String whenOnline}) {
-    // Raw error no longer shown in the UI — it's still logged via the
-    // debugPrint calls at each catch site, which is enough to diagnose
-    // issues without exposing stack-trace-shaped text to drivers.
     return _isConnectivityError(error) ? whenOffline : whenOnline;
   }
 
@@ -312,7 +263,6 @@ class PayoutViewModel extends ChangeNotifier {
     }
   }
 
-  // fetches lightweight date list once then the first page for all
   Future<void> loadHistory() async {
     final userId = Supabase.instance.client.auth.currentUser?.id;
     if (userId == null) return;
@@ -343,17 +293,12 @@ class PayoutViewModel extends ChangeNotifier {
       if (cachedRows.isNotEmpty) {
         payoutHistory = _applyReconciliationOverlay(cachedRows.map(PayoutHistoryDisplay.fromRow).toList());
         _historyOffset = payoutHistory.length;
-        hasMoreHistory = false; // cache has no reliable "more pages" signal
-        // Cached rows exist, so this is informational, not fatal — the
-        // list, filters, and refresh all stay usable.
         historyNotice = _fetchFailureMessage(
           e,
           whenOffline: "Showing your last saved history — you're offline.",
           whenOnline: 'Could not load the latest history — showing your last saved version.',
         );
       } else {
-        // Nothing to show at all — this is the one case that should
-        // replace the whole tab with an error + retry.
         historyError = _fetchFailureMessage(
           e,
           whenOffline: "You're offline and there's no saved history yet.",
@@ -366,7 +311,6 @@ class PayoutViewModel extends ChangeNotifier {
     }
   }
 
-  // pull to refresh point so user dont need to exit page and return to see changes
   Future<void> refreshHistory() => _reloadHistoryForCurrentScope();
 
   Future<void> _reloadHistoryForCurrentScope() async {
@@ -413,7 +357,6 @@ class PayoutViewModel extends ChangeNotifier {
     }
   }
 
-  // fetches the next page under the current scope and appends it
   Future<void> loadMoreHistory() async {
     if (isLoadingMoreHistory || isHistoryLoading || !hasMoreHistory) return;
     final userId = Supabase.instance.client.auth.currentUser?.id;
@@ -424,7 +367,6 @@ class PayoutViewModel extends ChangeNotifier {
     try {
       await _fetchHistoryPage(userId, reset: false);
     } catch (e) {
-      // driver can scroll or tap load more to retry without losing the page they already have
       hasMoreHistory = true;
     } finally {
       isLoadingMoreHistory = false;
@@ -446,23 +388,12 @@ class PayoutViewModel extends ChangeNotifier {
     );
     await _localService.cachePayoutHistoryPage(rows);
     final page = rows.map(PayoutHistoryDisplay.fromRow).toList();
-    // A row here reflects whatever Supabase currently has for it. If
-    // that payout still has an unresolved local reconciliation (the
-    // write that would've updated it on the server hasn't gone through
-    // yet), the server's copy is stale — keep showing the terminal
-    // status the driver already saw locally instead of regressing it
-    // back to 'pending'.
     final reconciled = _applyReconciliationOverlay(page);
     payoutHistory = reset ? reconciled : [...payoutHistory, ...reconciled];
     _historyOffset += page.length;
     hasMoreHistory = page.length == _historyPageSize;
   }
 
-  // Overlays any pending local reconciliation status onto a list of rows,
-  // leaving rows without one untouched. Shared by _fetchHistoryPage (server
-  // rows) and the offline-cache fallbacks in loadHistory() and
-  // _reloadHistoryForCurrentScope(), so a cached 'pending' row can't show
-  // through stale just because it came from the cache instead of the server.
   List<PayoutHistoryDisplay> _applyReconciliationOverlay(List<PayoutHistoryDisplay> rows) => [
     for (final row in rows)
       if (pendingReconciliation.containsKey(row.id))
@@ -481,12 +412,6 @@ class PayoutViewModel extends ChangeNotifier {
         row,
   ];
 
-  // Retries any payout statuses that were decided locally but never made
-  // it into payout_history (see runPayoutStatusAnimation). Runs before
-  // loadHistory()/refreshHistory() trust a freshly-fetched server status,
-  // so a payout the driver already saw as "Paid"/"Failed" doesn't get
-  // silently shown as "Pending" again just because the write that would've
-  // confirmed it on the server hadn't landed yet.
   Future<void> _applyPendingReconciliations() async {
     final persisted = await _localService.getPendingReconciliations();
     pendingReconciliation = {...persisted, ...pendingReconciliation};
@@ -501,9 +426,6 @@ class PayoutViewModel extends ChangeNotifier {
         await _localService.removePendingReconciliation(payoutId);
         pendingReconciliation.remove(payoutId);
       } catch (e) {
-        // Still unresolved — keep it queued (both in memory and in the
-        // local table) for the next attempt, and _fetchHistoryPage will
-        // keep overriding this payout's row with `status` until then.
         debugPrint('_applyPendingReconciliations: still failing to persist $payoutId: $e');
       }
     }
@@ -534,25 +456,17 @@ class PayoutViewModel extends ChangeNotifier {
         totalWithdrawn = (cached['total_withdrawn'] as num?)?.toDouble() ?? 0;
         final cachedFee = await _localService.getCachedBankTransferFee();
         if (cachedFee != null) bankTransferFee = cachedFee;
-        // The balance alone isn't the whole Wallet tab — "Recent
-        // transactions" and the two stat boxes sit right under it and
-        // used to come back empty offline because nothing restored them
-        // here. Best-effort: a cache miss just leaves the list empty,
-        // exactly as before, rather than turning a usable offline
-        // wallet into the no-cache error branch below.
         try {
           await _loadWalletDataFromCache(userId);
         } catch (cacheError) {
           debugPrint('load(): failed to restore wallet trips from cache: $cacheError');
         }
-        // Cached data exists, so this is informational, not fatal (the wallet, toggle, and refresh all stay usable).
         walletNotice = _fetchFailureMessage(
           e,
           whenOffline: "Showing your last saved wallet — you're offline.",
           whenOnline: 'Could not load the latest wallet — showing your last saved version.',
         );
       } else {
-        // nothing to show
         errorMessage = _fetchFailureMessage(
           e,
           whenOffline: "You're offline and there's no saved wallet yet.",
@@ -573,8 +487,6 @@ class PayoutViewModel extends ChangeNotifier {
       await _loadWalletData(userId);
       walletNotice = null;
     } catch (e) {
-      // The wallet is already populated from the previous successful
-      // load — a failed refresh is never fatal here, just a banner.
       walletNotice = _fetchFailureMessage(
         e,
         whenOffline: "You're offline — showing your last saved wallet.",
@@ -597,14 +509,10 @@ class PayoutViewModel extends ChangeNotifier {
       totalWithdrawn: totalWithdrawn,
     );
 
-    // Best-effort: if this fails, bankTransferFee just stays at its
-    // fallback value rather than blocking the whole Wallet tab from
-    // loading over what's ultimately a display-only preview number.
     try {
       bankTransferFee = await _service.fetchBankTransferFee();
       await _localService.cacheBankTransferFee(bankTransferFee);
     } catch (_) {
-      // keep the fallback already assigned above
     }
 
     final now = DateTime.now();
@@ -615,37 +523,20 @@ class PayoutViewModel extends ChangeNotifier {
       1,
     );
 
-    // Two bounded queries instead of one unpaginated fetch of every
-    // completed trip the driver has ever had: one scoped to the current
-    // month (for the stat cards), one capped at 10 rows (for the
-    // "Recent trips" list) — same reasoning as payout_history's
-    // paginated fetch, so this doesn't get slower the longer a driver's
-    // been active.
     final monthTrips = await _service.fetchCompletedTripsInRange(
       userId,
       start: monthStart,
       end: monthEnd,
     );
     thisMonthPoints = 0;
-    // Kept in lockstep with thisMonthPoints — both describe the same
-    // current-month window. Note this counts settled payment rows
-    // (billing cycles), not individual ride days — a single row can
-    // cover several billed days (amount = dailyFee × billableDays,
-    // see payment_supabase_service.dart), so the UI label reads
-    // "Payments this month", not "Trips this month".
     tripsCompletedCount = 0;
     for (final trip in monthTrips) {
-      // driver_net_amount is set by settle_payments() — the invoice
-      // amount with the RM1 platform fee already deducted.
       thisMonthPoints += (trip['driver_net_amount'] as num?)?.toDouble() ?? 0;
       tripsCompletedCount++;
     }
 
     final recent = await _service.fetchRecentCompletedTrips(userId, limit: 10);
     recentTrips = recent.map((trip) {
-      // paid_at (when it actually posted to the wallet) rather than
-      // cycle_start_date, so "recent" ordering matches what actually
-      // credited the driver.
       final dateStr = trip['paid_at'] as String?;
       final date = dateStr != null ? DateTime.tryParse(dateStr) : null;
       final subscription = trip['tumpang_subscription'] as Map<String, dynamic>?;
@@ -671,11 +562,6 @@ class PayoutViewModel extends ChangeNotifier {
       );
     }).toList();
 
-    // Mirror both result sets into SQLite so an offline load() can
-    // restore the "Recent transactions" list and the stat boxes, the
-    // same way the History tab already restores from payout_history.
-    // Best-effort and last: a cache write failing must never make an
-    // otherwise-successful wallet load look broken.
     try {
       await _localService.cacheDriverWalletTrips(
         userId: userId,
@@ -687,11 +573,6 @@ class PayoutViewModel extends ChangeNotifier {
     }
   }
 
-  /// Rebuilds [recentTrips] and the two stat-box values from SQLite.
-  /// Used by the offline fallback in [load] — the rows were flattened on
-  /// the way in (see PayoutLocalService.cacheDriverWalletTrips), so this
-  /// reads the display columns directly instead of re-walking the
-  /// Supabase join shape.
   Future<void> _loadWalletDataFromCache(String userId) async {
     final monthRows = await _localService.getCachedMonthWalletTrips(userId);
     thisMonthPoints = 0;
@@ -735,9 +616,6 @@ class PayoutViewModel extends ChangeNotifier {
 
   void notifyUiOnly() => notifyListeners();
 
-  /// Fills the amount field with the full available balance — the "Max"
-  /// shortcut next to the field, since the field itself no longer
-  /// defaults to the full balance.
   void setAmountToMax() {
     amountController.text = availableBalance.floor().toString();
     amountError = null;
@@ -765,7 +643,6 @@ class PayoutViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// no cents
   int _toCents(double rm) => (rm * 100).round();
 
   bool validateAmount() {
@@ -798,7 +675,6 @@ class PayoutViewModel extends ChangeNotifier {
     return bankNameError == null && bankAccNoError == null && ewalletPhoneError == null;
   }
 
-// clears screen when driver goes back to select payment method or change amount
   void resetDetailsFields() {
     amountController.text = '0';
     amountError = null;
@@ -811,16 +687,7 @@ class PayoutViewModel extends ChangeNotifier {
   }
 
   Future<bool> submitPayout() async {
-    // Guards against a second call landing while one is already in
-    // flight (e.g. a double-tap that lands before the UI has rebuilt
-    // with isSubmitting/isLoading disabling the button) — this moves
-    // real balance, so don't rely on the button's disabled state alone.
     if (isSubmitting) return false;
-
-    // Evaluated as two separate calls (not `!validateAmount() ||
-    // !validateDetails()`) so both always run — a `||` short-circuit
-    // would skip validateDetails() whenever the amount is invalid,
-    // leaving bank/eWallet field errors stale on screen.
     final amountValid = validateAmount();
     final detailsValid = validateDetails();
     if (!amountValid || !detailsValid) {
@@ -832,7 +699,6 @@ class PayoutViewModel extends ChangeNotifier {
 
     final amount = double.parse(amountController.text.trim());
 
-    // e-wallet payouts have no bank, bank_name goes in as null
     final bankName = selectedMethod == PayoutMethod.bankTransfer ? selectedBankName : null;
 
     final bankAccNo = selectedMethod == PayoutMethod.bankTransfer
@@ -858,25 +724,9 @@ class PayoutViewModel extends ChangeNotifier {
       final rawPayoutId = result['payout_id'];
       final rawNewBalance = result['new_balance'];
       if (rawPayoutId is! String || rawNewBalance is! num) {
-        // request_payout() already committed by the time it returns —
-        // the balance deduction and payout_history insert happen inside
-        // its own server-side transaction, before this JSON payload is
-        // even built. So an unexpected shape here doesn't mean the
-        // payout failed — it means it likely succeeded but this
-        // response can't be trusted to reflect it. Falling through to
-        // the generic "please try again" message would risk the driver
-        // retrying and being deducted twice for a payout that already
-        // went through, so refresh from the server instead of guessing.
         debugPrint('PayoutViewModel.submitPayout: unexpected request_payout result shape: $result');
         await refreshWallet();
         await refreshHistory();
-        // refreshWallet() clears walletNotice on success, so this has to
-        // be set after both refreshes — otherwise a successful refresh
-        // would wipe it before the driver ever sees it. Kept out of
-        // errorMessage on purpose: driver_balance_screen.dart replaces
-        // the whole wallet/history view with errorMessage, and the
-        // payout very likely went through, so the tabs (and their
-        // refresh controls) need to stay visible.
         walletNotice = "Your payout may have gone through, but we couldn't confirm it here — "
             'pull to refresh before trying again.';
         notifyListeners();
@@ -885,26 +735,9 @@ class PayoutViewModel extends ChangeNotifier {
 
       final payoutId = rawPayoutId;
       availableBalance = rawNewBalance.toDouble();
-      // The server computes and stores the fee now (see request_payout,
-      // reading payout_settings.bank_transfer_fee) — use exactly what it
-      // returns rather than recomputing it here, so the optimistic local
-      // entry can't ever disagree with what actually got written to
-      // payout_history.
       final fee = (result['fee'] as num?)?.toDouble();
-      // payout_history.fee is REAL NOT NULL DEFAULT 0, and
-      // PayoutHistoryDisplay.resolvedFee falls back to
-      // kFallbackBankTransferFee for bank transfers when fee is null.
-      // Write that same fallback to the cache rather than a bare 0, so
-      // an offline reload doesn't compute a different (too-high)
-      // netAmount than what the driver saw live.
       final cachedFee = fee ?? (selectedMethod == PayoutMethod.bankTransfer ? kFallbackBankTransferFee : 0);
       lastPayoutId = payoutId;
-      // Explicit reset, not just relying on the field's initial value —
-      // this view model is long-lived (one instance per driver session,
-      // not per-dialog), so a previous payout could've already left this
-      // at 'completed'. runPayoutStatusAnimation() (called once the
-      // success dialog is on screen) drives it from here through the
-      // gateway's processing -> completed animation.
       payoutStatus = 'pending';
       final now = DateTime.now();
 
@@ -928,12 +761,6 @@ class PayoutViewModel extends ChangeNotifier {
         'fee': cachedFee,
       });
 
-      // Only splice the new entry directly into the currently-loaded page
-      // if it actually belongs to whatever scope is selected right now
-      // (almost always true, since a fresh payout is dated today — but
-      // if the driver happened to have an old year/month filter active,
-      // inserting it here would show a \"today\" row inside a \"March 2025\"
-      // filtered list, which would be wrong).
       final matchesYear = selectedHistoryYear == null || selectedHistoryYear == now.year;
       final matchesMonth = selectedHistoryMonth == null ||
           (selectedHistoryMonth!.year == now.year && selectedHistoryMonth!.month == now.month);
@@ -952,29 +779,14 @@ class PayoutViewModel extends ChangeNotifier {
             fee: fee,
           ),
         );
-        // This new row now sits at position 0 in the server's own
-        // requested_at-desc order too, pushing every row after it one
-        // position later. _historyOffset is a count of rows already
-        // fetched from the server under the old order, so it needs the
-        // same +1 shift — otherwise the next loadMoreHistory() page would
-        // start one position too early and re-fetch (and re-append) a row
-        // that's already in the list, showing it twice.
         if (_historyDatesLoaded) {
           _historyOffset += 1;
         }
       }
-      // Keep the filter-chip date list in sync too — otherwise a payout
-      // made in a year/month that isn't already in _historyDates
-      // wouldn't get a chip for it until the next full reload.
       _historyDates.add(now);
 
       return true;
     } on PostgrestException catch (e) {
-      // request_payout raises a plain, driver-facing message for the
-      // one expected case (stale cached balance) — pass that through
-      // as-is. Anything else (constraint violations, unexpected server
-      // errors, etc.) shouldn't leak raw DB error text to the driver,
-      // but IS worth seeing in the console while debugging.
       debugPrint('PayoutViewModel.submitPayout: PostgrestException ${e.code}: ${e.message}');
       errorMessage = e.message.toLowerCase().contains('balance')
           ? e.message
@@ -990,13 +802,6 @@ class PayoutViewModel extends ChangeNotifier {
     }
   }
 
-  // Drives the pending -> processing -> completed animation on the
-  // success dialog by consuming the (currently mocked) payout gateway's
-  // status stream — see MockPayoutGateway's doc comment for why this is
-  // a deliberate demo simplification. 'processing' is UI-only and never
-  // written to payout_history (see payoutStatusLabel/Color); only the
-  // terminal 'completed'/'failed' status gets persisted, with the same
-  // retry/reconciliation safety net as before in case that write fails.
   Future<void> runPayoutStatusAnimation() async {
     final payoutId = lastPayoutId;
     if (payoutId == null) return;
@@ -1013,14 +818,7 @@ class PayoutViewModel extends ChangeNotifier {
         await _service.updatePayoutStatus(payoutId, status);
         await _localService.updateCachedPayoutStatus(payoutId, status, processedAt: DateTime.now());
       } catch (e) {
-        // The UI already shows this payout as done — don't let a failed
-        // write silently leave payout_history disagreeing with what the
-        // driver saw. Flag it for reconciliation and retry once, rather
-        // than losing the failure entirely.
         pendingReconciliation[payoutId] = status;
-        // Local persistence is independent of the remote retry below — a
-        // database error here (e.g. sqflite hiccup) must not skip the
-        // immediate remote retry, which is the more time-sensitive of the two.
         var localSaveOk = true;
         try {
           await _localService.savePendingReconciliation(payoutId, status);
@@ -1036,12 +834,6 @@ class PayoutViewModel extends ChangeNotifier {
           await _localService.removePendingReconciliation(payoutId);
           pendingReconciliation.remove(payoutId);
         } catch (e2) {
-          // Still unresolved after the immediate retry — it needs to stay
-          // recorded in pending_payout_reconciliation so
-          // _applyPendingReconciliations can retry it later (including
-          // across app restarts). If the earlier local save above failed,
-          // that record was never written, so try once more here rather
-          // than silently losing the reconciliation.
           if (!localSaveOk) {
             try {
               await _localService.savePendingReconciliation(payoutId, status);

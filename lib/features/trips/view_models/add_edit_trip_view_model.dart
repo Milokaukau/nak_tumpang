@@ -45,12 +45,8 @@ class AddEditTripViewModel extends ChangeNotifier {
 
   static const double _sameLocationThresholdMeters = 50;
 
-  // Passengers no longer enter a desired dropoff time; the DB column is
-  // NOT NULL, so we derive it from their pickup time instead.
   static const int _dropoffBufferMinutes = 30;
 
-  // Same story for drivers: arrival_time is NOT NULL but no longer has an
-  // input field, so it's derived from departure time instead.
   static const int _arrivalBufferMinutes = 30;
 
   void _revalidateLocations() {
@@ -209,12 +205,6 @@ class AddEditTripViewModel extends ChangeNotifier {
   Future<Map<String, dynamic>?> submit() async {
     if (!_validate()) return null;
 
-    // Last line of defence behind the three entry-point guards (My
-    // Trips' New Trip button, the home dropdown's "+ Add New Trip", and
-    // the home panel's "Add one now."): this is the only check that
-    // still holds if the connection drops while the form is open, or on
-    // the Edit path, which opens an existing trip rather than going
-    // through one of those.
     if (NetworkService.isOfflineNotifier.value) {
       errorMessage = "You're offline — this trip can't be saved until you reconnect.";
       notifyListeners();

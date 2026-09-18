@@ -9,7 +9,6 @@ import 'package:nak_tumpang/features/trips/UI/add_edit_trip_screen.dart';
 import 'package:nak_tumpang/features/profile/view_models/register_view_model.dart';
 
 class RegisterScreen extends StatelessWidget {
-  // role can still be changed before submitting
   final String initialRole;
 
   const RegisterScreen({super.key, this.initialRole = 'passenger'});
@@ -34,22 +33,10 @@ class _RegisterViewState extends State<_RegisterView> {
   Future<void> _register(RegisterViewModel vm) async {
     final success = await vm.submit();
     if (!mounted || !success) return;
-
-    // Account exists at this point — show the "Let's get started!"
-    // popup so they can optionally add a trip now.
     final choice = await GetStartedDialog.show(context);
     if (!mounted) return;
 
     if (choice == 'add_trip') {
-      // Land on Home first (replacing RegisterScreen, whose only path
-      // back is LoginScreen — confusing to land on once already
-      // registered and signed in), then push the same add-trip screen
-      // used from the sidebar on top of it. That way the back stack is
-      // [Home, AddEditTrip], so backing out lands on Home instead of
-      // Login. role is passed explicitly (rather than left to
-      // AddEditTripScreen's MyTripsViewModel fallback) — see
-      // AddEditTripScreen's doc comment for why it can't just read
-      // MyTripsViewModel.currentUserRole here.
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const HomeScreen()),
       );
@@ -59,7 +46,6 @@ class _RegisterViewState extends State<_RegisterView> {
       return;
     }
 
-    // 'later' — just go to Home.
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(builder: (_) => const HomeScreen()),
     );
@@ -337,8 +323,6 @@ class _RegisterViewState extends State<_RegisterView> {
     );
   }
 
-  // error messages aligned left to the box edge
-  // no changes if no error
   Widget _errorText(String? error) {
     if (error == null) return const SizedBox.shrink();
     return Padding(

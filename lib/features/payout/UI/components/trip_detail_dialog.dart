@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/features/payout/view_models/payout_view_model.dart';
 
-// clicks on recent trips will show detailed receipt-like information
 class TripDetailDialog extends StatelessWidget {
   final RecentTripDisplay trip;
 

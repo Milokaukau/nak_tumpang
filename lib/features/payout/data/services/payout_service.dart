@@ -1,6 +1,5 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-// data access to wallet
 class PayoutService {
   final _supabase = Supabase.instance.client;
 
@@ -9,21 +8,11 @@ class PayoutService {
     return _supabase.from('driver_profiles').select().eq('user_id', userId).maybeSingle();
   }
 
-  // reads the fee value in payout_settings
-  // falls back to 1rm if that row is missing
   Future<double> fetchBankTransferFee() async {
     final row = await _supabase.from('payout_settings').select('bank_transfer_fee').maybeSingle();
     return (row?['bank_transfer_fee'] as num?)?.toDouble() ?? 1.00;
   }
 
-  // filtered server-side by date range (not full)
-  // Points now come from actually-settled payments (driver_net_amount,
-  // already RM1 platform fee deducted by settle_payments()), not from
-  // tumpang_request.status — that field tracks whether a negotiation was
-  // finalized, not whether the passenger paid.
-  // payment_type = 'monthly' excludes the subscription deposit row and any
-  // cancellation/refund adjustment rows — only actually-billed cycles should
-  // count toward this month's points.
   Future<List<Map<String, dynamic>>> fetchCompletedTripsInRange(
       String userId, {
         required DateTime start,
@@ -36,22 +25,12 @@ class PayoutService {
         .eq('payment_type', 'monthly')
         .gte('paid_at', start.toIso8601String())
         .lt('paid_at', end.toIso8601String())
-    // paid_at alone isn't enough to call a row "settled" — it can be
-    // set without credited_to_driver_at/driver_net_amount also being
-    // populated on rows predating settle_payments(), which would
-    // otherwise count as a zero-value trip here.
         .not('credited_to_driver_at', 'is', null)
         .not('driver_net_amount', 'is', null);
 
     return List<Map<String, dynamic>>.from(response);
   }
 
-  // capped server-side with .limit() rather than fetching whole history and only using the first 10 client-side
-  // Each row is a settled payment (an actual paid invoice), joined through
-  // to the subscription for pickup/dropoff and the passenger's name — this
-  // is "the actual completed [and paid] trip" backing each recent-trip entry.
-  // payment_type = 'monthly' — same reasoning as fetchCompletedTripsInRange:
-  // deposits and cancellation/refund rows aren't trips and shouldn't show here.
   Future<List<Map<String, dynamic>>> fetchRecentCompletedTrips(
       String userId, {
         int limit = 10,
@@ -76,9 +55,6 @@ class PayoutService {
         ''')
         .eq('tumpang_subscription.driver_trips.user_id', userId)
         .eq('payment_type', 'monthly')
-    // Same settlement-field reasoning as fetchCompletedTripsInRange
-    // above — paid_at alone doesn't guarantee this row was actually
-    // processed by settle_payments().
         .not('credited_to_driver_at', 'is', null)
         .not('driver_net_amount', 'is', null)
         .order('paid_at', ascending: false)
@@ -87,16 +63,6 @@ class PayoutService {
     return List<Map<String, dynamic>>.from(response);
   }
 
-  // e-wallet payment method will have null bank name/bank_acc_no;
-  // bank_transfer will have null ewallet_phone. request_payout()
-  // enforces this pairing server-side too, so the two never end up
-  // populated for the same row regardless of what the client sends
-
-  // Runs as one atomic call via the `request_payout` Postgres function
-  // (see request_payout.sql) — the balance deduction and the
-  // payout_history insert happen in a single transaction on the server,
-  // so an interruption between them can't leave the two out of sync the
-  // way two separate client calls could.
   Future<Map<String, dynamic>> requestPayout({
     required double amount,
     required String paymentMethod,
@@ -115,10 +81,6 @@ class PayoutService {
     return Map<String, dynamic>.from(result as Map);
   }
 
-// payout history
-  // every requested_at timestamp for this driver
-  // compute which years and month payout in them for the filter chips in History tab
-
   Future<List<DateTime>> fetchPayoutHistoryDates(String userId) async {
     final response = await _supabase
         .from('payout_history')
@@ -131,15 +93,12 @@ class PayoutService {
         .toList();
   }
 
-  // one page of all payout rows, sorted by newest
-  // can be scoped to specific year and month
-  // filtering happens here so selecting year don't require driver's whole memory being loaded in memory
   Future<List<Map<String, dynamic>>> fetchPayoutHistoryPage(
       String userId, {
         required int limit,
         required int offset,
         int? year,
-        int? month, // 1-12; only meaningful together with `year`
+        int? month,
       }) async {
     var query = _supabase.from('payout_history').select().eq('user_id', userId);
 
@@ -156,9 +115,6 @@ class PayoutService {
   }
 
 
-  // check if the payout belongs to caller
-  // set payout status to needed status currently
-  // mock status
   Future<void> updatePayoutStatus(String payoutId, String status) async {
     await _supabase.rpc('set_payout_status', params: {
       'p_payout_id': payoutId,

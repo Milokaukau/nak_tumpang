@@ -79,10 +79,6 @@ class TripSupabaseService {
     await _supabase.from(table).insert(tripData);
   }
 
-  // --- NEW: Extracted Supabase logic from the ViewModel (data access belongs here) ---
-
-  // Uses the same status set as fetchNegotiatingTripIds so a trip with only a
-  // 'pending' request is still found here (previously only 'negotiating' matched).
   Future<String?> findNegotiatingRequestId(String tripId) async {
     try {
       final resList = await _supabase
@@ -96,7 +92,6 @@ class TripSupabaseService {
       return resList.first['id'] as String;
     } catch (e) {
       print('⚠️ Error finding negotiating request: $e');
-      rethrow; // let the caller distinguish "no match" (null) from "query failed" (throws)
     }
   }
 
@@ -117,7 +112,6 @@ class TripSupabaseService {
     }
   }
 
-  // --- NEW: Handle updating existing trips ---
   Future<void> updateTrip(String tripId, Map<String, dynamic> tripData, String role) async {
     final table = role == 'driver' ? 'driver_trips' : 'passenger_trips';
     await _supabase.from(table).update(tripData).eq('id', tripId);

@@ -11,7 +11,6 @@ import 'package:nak_tumpang/features/profile/data/services/profile_storage_servi
 
 class RegisterViewModel extends ChangeNotifier {
   RegisterViewModel({String initialRole = 'passenger'}) : role = initialRole {
-    // Rebuild the phone field's focus-dependent border when focus changes.
     phoneFocusNode.addListener(notifyListeners);
   }
 
@@ -24,17 +23,11 @@ class RegisterViewModel extends ChangeNotifier {
   final confirmPasswordController = TextEditingController();
   final phoneFocusNode = FocusNode();
 
-  // driver fields
   final carPlateNumberController = TextEditingController();
   Uint8List? licenseBytes;
   bool isUploadingLicense = false;
   String? licenseNumberError;
   String? licenseError;
-
-  // Set once the license (if any) is uploaded to Storage, then written
-  // straight onto `driver_profiles` below in the same submit() call —
-  // the post-signup "add trip" step (AddEditTripScreen) never touches
-  // driver_profiles, it only ever writes driver_trips.
   String? licenseStoragePath;
 
   final _storageService = ProfileStorageService();
@@ -57,7 +50,6 @@ class RegisterViewModel extends ChangeNotifier {
 
   String? _registeredUserId;
 
-  /// The Auth user id created by [submit], once it's run at least once.
   String? get registeredUserId => _registeredUserId;
 
   String get trimmedName => nameController.text.trim();
@@ -132,10 +124,6 @@ class RegisterViewModel extends ChangeNotifier {
   }
 
   Future<bool> submit() async {
-    // Guards against a second call landing while one is already in
-    // flight (e.g. a double-tap before the UI rebuilds with isLoading
-    // disabling the button) — this can create an auth user and upload a
-    // file, so don't rely on the button's disabled state alone.
     if (isLoading) return false;
 
     _autoValidate = true;
@@ -152,11 +140,6 @@ class RegisterViewModel extends ChangeNotifier {
       return false;
     }
 
-    // Creating an account means an auth signUp, a Storage upload (for
-    // drivers) and two table writes — none of which can be queued
-    // locally, and a half-created account is exactly what the self-heal
-    // in LoginViewModel exists to clean up. Refuse up front rather than
-    // letting signUp() fail with a network error.
     if (NetworkService.isOfflineNotifier.value) {
       errorMessage = "You're offline. You need an internet connection to create an account.";
       notifyListeners();
@@ -185,7 +168,6 @@ class RegisterViewModel extends ChangeNotifier {
           },
         );
 
-        // double check if email exists
         final identities = response.user?.identities;
         if (identities != null && identities.isEmpty) {
           errorMessage = 'An account with this email already exists. Please log in instead.';
@@ -199,27 +181,11 @@ class RegisterViewModel extends ChangeNotifier {
         }
         newUserId = createdUserId;
         _registeredUserId = newUserId;
-
-        // "Confirm email" is off for this project, so signUp() always
-        // returns a session immediately — there's no pending-
-        // verification state to handle here. If that setting ever gets
-        // turned on, this assumption breaks (signUp() would return
-        // session: null and auth.uid() wouldn't exist yet for the
-        // writes below), so this comment is the flag to revisit it.
       }
-
-      // Tracked separately from licenseStoragePath: only set when *this*
-      // call actually uploads a file, so the rollback below can't ever
-      // delete a file a previous, already-committed attempt is relying
-      // on — only ever the upload made in this attempt, if the DB
-      // writes right after it fail.
       String? pendingLicensePath;
       if (role == 'driver' && licenseBytes != null) {
         isUploadingLicense = true;
         notifyListeners();
-        // Unique filename per upload (rather than a fixed 'license.jpg')
-        // so re-picking a new photo on a retry doesn't collide with, or
-        // get confused for, an earlier attempt.
         pendingLicensePath = await _storageService.uploadUserFile(
           bytes: licenseBytes!,
           bucket: 'driver-licenses',
@@ -232,10 +198,6 @@ class RegisterViewModel extends ChangeNotifier {
       }
 
       try {
-        // Account row is written immediately for both roles now — a
-        // route is no longer required to have an account. Adding a trip
-        // is an optional next step offered by the "Let's get started!"
-        // dialog instead, not a precondition for the account existing.
         await _supabase.from('users').upsert({
           'id': newUserId,
           'name': nameController.text.trim(),
@@ -256,12 +218,6 @@ class RegisterViewModel extends ChangeNotifier {
         }
 
       } catch (e) {
-        // Neither remote write can be trusted to have committed — clean
-        // up the license file uploaded *in this attempt* so a failed
-        // submit doesn't leave an orphaned file in Storage that nothing
-        // in the DB ever ends up pointing to. A later retry (same
-        // screen instance) re-uploads under a fresh filename, so this
-        // is always safe to remove.
         if (pendingLicensePath != null) {
           await _storageService.deleteUserFile(bucket: 'driver-licenses', path: pendingLicensePath);
           licenseStoragePath = null;
@@ -269,9 +225,6 @@ class RegisterViewModel extends ChangeNotifier {
         rethrow;
       }
 
-      // remote account committed by this point, local cache seeded separately
-      // sqlite failure cannot delete license file the remote write already committed to
-      // supabase will overwrite this cache entry
       try {
         await _localService.cacheUserProfile(
           userId: newUserId,
@@ -296,7 +249,6 @@ class RegisterViewModel extends ChangeNotifier {
       errorMessage = e.message;
       return false;
     } on PostgrestException catch (e) {
-      // cannot register with email already in database
       errorMessage = e.code == '23505'
           ? 'That account detail is already registered.'
           : 'Could not complete registration. Please try again.';

@@ -1,18 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 
-// shown when user choose to create new account
 class RoleSelectionDialog extends StatelessWidget {
   final bool dismissible;
 
   const RoleSelectionDialog({super.key, this.dismissible = false});
 
-  /// Show the dialog and return the chosen role, or null if the user
-  /// canceled (only possible when [dismissible] is true — e.g. the
-  /// login screen's "create an account" entry point, where backing out
-  /// should return to login). Callers that can't sensibly proceed
-  /// without a role (e.g. first-time profile setup) should leave
-  /// [dismissible] false and treat the result as non-null.
   static Future<String?> show(BuildContext context, {bool dismissible = false}) {
     return showDialog<String>(
       context: context,
@@ -29,9 +22,6 @@ class RoleSelectionDialog extends StatelessWidget {
         insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: ConstrainedBox(
-          // Caps the dialog's width on wider screens (tablets) — on a
-          // phone this just matches whatever insetPadding leaves, so it
-          // doesn't change anything there.
           constraints: const BoxConstraints(maxWidth: 400),
           child: Padding(
             padding: const EdgeInsets.all(24),
@@ -39,10 +29,6 @@ class RoleSelectionDialog extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Title and close button share a row instead of the
-                // close button floating above a separately-wrapped
-                // title — keeps the X level with the first line of text
-                // instead of pushing the whole heading down.
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [

@@ -85,7 +85,7 @@ class _MyTripsScreenState extends State<MyTripsScreen> {
       if (status == TripStatus.negotiating) {
         final reqId = await vm.getNegotiatingRequestId(tripId);
         if (!context.mounted) return;
-        Navigator.pop(context); // close dialog
+        Navigator.pop(context);
 
         if (reqId != null) {
           Navigator.push(context, MaterialPageRoute(builder: (_) => NegotiationScreen(requestId: reqId)));
@@ -93,11 +93,10 @@ class _MyTripsScreenState extends State<MyTripsScreen> {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Request not found or no longer negotiating.')));
         }
       } else if (status == TripStatus.active) {
-        // Pass the role to the ViewModel so it handles normalization
         final normalizedData = await vm.getActiveSubscription(tripId, role);
 
         if (!context.mounted) return;
-        Navigator.pop(context); // close dialog
+        Navigator.pop(context);
 
         if (normalizedData != null) {
           final currentUserId = context.read<HomeViewModel>().currentUserId ?? '';
@@ -106,7 +105,7 @@ class _MyTripsScreenState extends State<MyTripsScreen> {
             context,
             MaterialPageRoute(
               builder: (_) => SubscriptionDetailScreen(
-                subscription: normalizedData, // Pass the already-clean data
+                subscription: normalizedData,
                 currentUserId: currentUserId,
                 role: role,
               ),
@@ -158,8 +157,6 @@ class _MyTripsScreenState extends State<MyTripsScreen> {
         backgroundColor: AppColors.primaryYellow,
         onPressed: () {
           if (NetworkService.isOfflineNotifier.value) {
-            // Dialog, not a SnackBar — see showOfflineDialog for why a
-            // SnackBar raised while offline never actually appears.
             showOfflineDialog(
               context,
               message: "You can't create or edit a trip while offline. "
@@ -288,8 +285,6 @@ class _MyTripsScreenState extends State<MyTripsScreen> {
                       return;
                     }
                     if (NetworkService.isOfflineNotifier.value) {
-                      // Dialog rather than a SnackBar for the same reason
-                      // as the New Trip guard above — see showOfflineDialog.
                       showOfflineDialog(
                         context,
                         message: "You can't edit a trip while offline. "

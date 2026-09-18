@@ -29,12 +29,6 @@ class _ProfileView extends StatefulWidget {
 
 class _ProfileViewState extends State<_ProfileView> {
   bool _isHoveringAvatar = false;
-
-  // Set to whatever avatarUrl last failed to load, so the CircleAvatar
-  // below can fall back to initials for that specific URL instead of
-  // retrying it forever — but still attempts a *different* URL (e.g.
-  // after picking a new avatar, or after loadProfile() re-fetches a
-  // fresh signed one) since only that exact failed value is excluded.
   String? _failedAvatarUrl;
 
   @override
@@ -69,9 +63,6 @@ class _ProfileViewState extends State<_ProfileView> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    // Rebuilds the whole form the moment connectivity flips, so the
-    // fields lock/unlock immediately instead of only after the next
-    // notifyListeners() from the view model.
     return ValueListenableBuilder<bool>(
       valueListenable: NetworkService.isOfflineNotifier,
       builder: (context, isOffline, _) => _buildForm(context, vm, isOffline),
@@ -100,7 +91,6 @@ class _ProfileViewState extends State<_ProfileView> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Avatar - tap to pick a photo, falls back to initials
                     Center(
                       child: MouseRegion(
                         cursor: (vm.isUploadingAvatar || locked)
@@ -126,12 +116,6 @@ class _ProfileViewState extends State<_ProfileView> {
                                   radius: 44,
                                   backgroundColor: AppColors.primaryYellow,
                                   backgroundImage: avatarImage,
-                                  // A stale/expired avatar URL (e.g. the
-                                  // bucket file was removed, or the URL
-                                  // is otherwise no longer valid) should
-                                  // fall back to initials instead of
-                                  // just failing silently with no image
-                                  // and no child shown.
                                   onBackgroundImageError: avatarImage is NetworkImage
                                       ? (_, __) {
                                     if (!mounted) return;
@@ -152,8 +136,6 @@ class _ProfileViewState extends State<_ProfileView> {
                                       : null,
                                 );
                               }),
-                              // Gray shade over the avatar, shown only on hover
-                              // to signal that it's tappable.
                               Positioned.fill(
                                 child: IgnorePointer(
                                   child: AnimatedOpacity(
@@ -215,7 +197,6 @@ class _ProfileViewState extends State<_ProfileView> {
                     ],
                     const SizedBox(height: 28),
 
-                    // Name
                     Text('Full Name', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
                     const SizedBox(height: 6),
                     TextField(
@@ -223,17 +204,12 @@ class _ProfileViewState extends State<_ProfileView> {
                       enabled: !locked,
                       decoration: _fieldDecoration(locked: locked),
                       onChanged: (_) {
-                        vm.notifyUiOnly(); // updates avatar initials live
+                        vm.notifyUiOnly();
                         vm.revalidateIfNeeded();
                       },
                     ),
                     _errorText(vm.nameError),
                     const SizedBox(height: 18),
-
-                    // Phone — the +60 prefix is a fixed Text widget outside the
-                    // TextField (not InputDecoration.prefixText), so it's always
-                    // visible instead of only appearing once the field is
-                    // focused or has content.
                     Text('Phone Number', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
                     const SizedBox(height: 6),
                     AnimatedBuilder(
@@ -242,10 +218,6 @@ class _ProfileViewState extends State<_ProfileView> {
                         return Container(
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(8),
-                            // Matches the greyed fill the other fields
-                            // get from _fieldDecoration when locked —
-                            // this one draws its own border/background
-                            // because of the fixed "+60" prefix.
                             color: locked ? AppColors.greyBorder.withValues(alpha: 0.18) : null,
                             border: Border.all(
                               color: vm.phoneError != null
@@ -289,7 +261,7 @@ class _ProfileViewState extends State<_ProfileView> {
                                 focusedBorder: InputBorder.none,
                               ),
                               onChanged: (_) {
-                                vm.notifyUiOnly(); // updates avatar initials live
+                                vm.notifyUiOnly();
                                 vm.revalidateIfNeeded();
                               },
                             ),
@@ -300,15 +272,8 @@ class _ProfileViewState extends State<_ProfileView> {
                     ),
                     _errorText(vm.phoneError),
                     const SizedBox(height: 18),
-
-                    // Role — chosen once via the Passenger/Driver dialog on
-                    // the register screen, and never editable from here.
                     Text('I am a', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
                     const SizedBox(height: 6),
-                    // Locked — the only place the role is ever actually
-                    // chosen is at registration. This is a plain pill
-                    // rather than a dropdown/text field so nothing on this
-                    // screen suggests it can be tapped and changed.
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -335,7 +300,6 @@ class _ProfileViewState extends State<_ProfileView> {
                       ),
                     ),
 
-                    // Driving license - drivers only
                     if (vm.role == 'driver') ...[
                       const SizedBox(height: 18),
                       Text('Car Plate Number', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
@@ -385,12 +349,6 @@ class _ProfileViewState extends State<_ProfileView> {
                                       fit: BoxFit.cover,
                                       width: double.infinity,
                                       height: double.infinity,
-                                      // The signed URL expires after 1 hour
-                                      // (ProfileStorageService.getSignedUrl) —
-                                      // if this screen was left open that
-                                      // long, or the network just failed,
-                                      // show a clear message instead of
-                                      // Flutter's default broken-image icon.
                                       errorBuilder: (context, error, stackTrace) => Center(
                                         child: Column(
                                           mainAxisSize: MainAxisSize.min,
@@ -426,10 +384,6 @@ class _ProfileViewState extends State<_ProfileView> {
                         ),
                       ),
                     ],
-
-                    // Change password — collapsed by default behind a link, so
-                    // opening it up is a deliberate action. Once open, the
-                    // current password is required before a new one is accepted.
                     const SizedBox(height: 18),
                     if (!vm.showChangePassword)
                       InkWell(
@@ -542,8 +496,6 @@ class _ProfileViewState extends State<_ProfileView> {
                       height: 48,
                       isLoading: vm.isSaving,
                       textStyle: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
-                      // Null disables the button outright rather than
-                      // letting a tap through to a save that can only fail.
                       onPressed: locked ? null : () => _save(vm),
                     ),
                   ],
@@ -559,8 +511,6 @@ class _ProfileViewState extends State<_ProfileView> {
   InputDecoration _fieldDecoration({String? hint, Color? hintColor, bool locked = false}) {
     return InputDecoration(
       hintText: hint,
-      // Greyed fill while offline, so a locked field reads as locked at a
-      // glance and not just as an ordinary field that won't accept taps.
       filled: locked,
       fillColor: locked ? AppColors.greyBorder.withValues(alpha: 0.18) : null,
       disabledBorder: OutlineInputBorder(
@@ -596,8 +546,6 @@ Widget _errorText(String? error) {
   );
 }
 
-/// Uppercases text as the user types, so driving license numbers are
-/// stored and compared consistently (e.g. "d1234567" -> "D1234567").
 class UpperCaseTextFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
