@@ -14,15 +14,15 @@ class BackToSubscriptionsButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12), // Scaled down padding
+      padding: const EdgeInsets.only(bottom: 12),
       child: Align(
         alignment: Alignment.centerLeft,
         child: TextButton.icon(
           onPressed: onPressed,
-          icon: const Icon(Icons.arrow_back, color: AppColors.black, size: 20), // Scaled icon
+          icon: const Icon(Icons.arrow_back, color: AppColors.black, size: 20),
           label: Text(
             label,
-            style: const TextStyle(color: AppColors.black, fontWeight: FontWeight.bold, fontSize: 13), // Scaled font
+            style: const TextStyle(color: AppColors.black, fontWeight: FontWeight.bold, fontSize: 13),
           ),
         ),
       ),

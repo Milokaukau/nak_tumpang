@@ -10,14 +10,12 @@ class HomeLocalService {
     final results = await db.query('users', columns: ['role'], where: 'id = ?', whereArgs: [userId]);
 
     if (results.isNotEmpty) {
-      // Cast as String? to prevent null subtype errors
       return results.first['role'] as String?;
     }
 
     return null;
   }
 
-  // --- ATOMIC CACHE (Fixes CodeRabbit Points 1, 2, and 3) ---
   Future<void> cacheHomeData({
     required List<Map<String, dynamic>> trips,
     required List<Map<String, dynamic>> rawSubs,
@@ -26,24 +24,11 @@ class HomeLocalService {
   }) async {
     final db = await _dbService.database;
 
-    // Run everything in a single transaction. If it fails halfway, it rolls back entirely.
     await db.transaction((txn) async {
       final batch = txn.batch();
       final table = isForPassenger ? 'passenger_trips' : 'driver_trips';
 
-      // 1. Clear old cache to prevent zombie data
       batch.delete(table, where: 'user_id = ?', whereArgs: [currentUserId]);
-
-      // 2. Insert Current user
-      //
-      // `users.email` is NOT NULL UNIQUE, so this row needs *some*
-      // address — but it used to always be "<uuid>@placeholder.com",
-      // and since home data is cached before the profile screen is ever
-      // opened, that placeholder is what the profile screen ended up
-      // displaying offline (the signed-in user seeing their own user id
-      // where their email should be). The real address is available
-      // right here from the auth session, so use it, and only fall back
-      // to the synthetic one when there's genuinely no session email.
       final authEmail = Supabase.instance.client.auth.currentUser?.email;
       batch.insert('users', {
         'id': currentUserId,
@@ -54,11 +39,6 @@ class HomeLocalService {
         'status': 'active',
       }, conflictAlgorithm: ConflictAlgorithm.ignore);
 
-      // The insert above is `ignore`, so it does nothing once the row
-      // exists — which means an install that already cached the
-      // placeholder would keep showing it forever. Repair it here, but
-      // only ever *onto* a real address and only over a placeholder, so
-      // this can't clobber a good email cached by ProfileLocalService.
       if (authEmail != null) {
         batch.update(
           'users',
@@ -68,7 +48,6 @@ class HomeLocalService {
         );
       }
 
-      // 3. Insert User's own trips (FIXED: Separated columns based on role)
       for (final t in trips) {
         if (isForPassenger) {
           batch.insert('passenger_trips', {
@@ -115,7 +94,6 @@ class HomeLocalService {
         }
       }
 
-      // 4. Insert Subscriptions and partner details
       for (final sub in rawSubs) {
         final tripKey = isForPassenger ? 'driver_trips' : 'passenger_trips';
         final myTripKey = isForPassenger ? 'passenger_trips' : 'driver_trips';
@@ -127,7 +105,6 @@ class HomeLocalService {
         final partnerUserId = partnerTrip['user_id'] ?? partnerUser['id'] ?? 'unknown_partner_${sub['id']}';
         final myTripUserId = myTrip['user_id'] ?? currentUserId;
 
-        // Use ignore to prevent CASCADE deletions on the parent table
         batch.insert('users', {
           'id': partnerUserId,
           'name': partnerUser['name'] ?? 'User',
@@ -138,7 +115,6 @@ class HomeLocalService {
           'status': 'active',
         }, conflictAlgorithm: ConflictAlgorithm.ignore);
 
-        // Safely update mutable fields
         batch.update('users', {
           'name': partnerUser['name'] ?? 'User',
           'phone': partnerUser['phone'] ?? 'N/A',
@@ -202,7 +178,6 @@ class HomeLocalService {
     });
   }
 
-  // --- GET CACHED DATA ---
   Future<List<Map<String, dynamic>>> getCachedUserTrips(String userId, {required bool isForPassenger}) async {
     final db = await _dbService.database;
     final table = isForPassenger ? 'passenger_trips' : 'driver_trips';

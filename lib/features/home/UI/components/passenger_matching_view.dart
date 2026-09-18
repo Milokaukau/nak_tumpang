@@ -47,7 +47,6 @@ class PassengerMatchingView extends StatelessWidget {
         ),
         const SizedBox(height: 16),
 
-        // --- NEW: Immediately show offline message instead of searching ---
         if (NetworkService.isOfflineNotifier.value)
           const EmptyStateMessage(
             message: 'Connect to the internet to find drivers.',

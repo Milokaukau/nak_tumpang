@@ -75,7 +75,7 @@ class SummaryRouteMap extends StatelessWidget {
               options: MapOptions(
                 initialCenter: LatLng((pickupLat + dropoffLat) / 2, (pickupLng + dropoffLng) / 2),
                 initialZoom: 12.0,
-                interactionOptions: const InteractionOptions(flags: InteractiveFlag.none), // Static preview
+                interactionOptions: const InteractionOptions(flags: InteractiveFlag.none),
               ),
               children: [
                 TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'com.example.nak_tumpang'),
@@ -95,7 +95,7 @@ class SummaryRouteMap extends StatelessWidget {
               right: 8,
               child: Container(
                 padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(color: Colors.white.withOpacity(0.9), shape: BoxShape.circle),
+                decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.9), shape: BoxShape.circle),
                 child: const Icon(Icons.fullscreen, size: 20, color: AppColors.black),
               ),
             ),

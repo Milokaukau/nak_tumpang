@@ -20,7 +20,7 @@ class EmptyStateMessage extends StatelessWidget {
           child: Text(
             message,
             textAlign: TextAlign.center,
-            style: const TextStyle(color: AppColors.greyText, fontSize: 14, height: 1.4), // Scaled font
+            style: const TextStyle(color: AppColors.greyText, fontSize: 14, height: 1.4),
           ),
         ),
       ],

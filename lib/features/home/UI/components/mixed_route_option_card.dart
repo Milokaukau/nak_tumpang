@@ -99,22 +99,22 @@ class MixedRouteOptionCard extends StatelessWidget {
             backgroundColor: Colors.grey.shade200,
             foregroundColor: Colors.grey.shade500,
             elevation: 0,
-            minimumSize: const Size(double.infinity, 40), // Scaled button height
+            minimumSize: const Size(double.infinity, 40),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
           child: const Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.check_circle, size: 16), // Scaled icon
+              Icon(Icons.check_circle, size: 16),
               SizedBox(width: 6),
-              Text('Requested Tumpang', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)), // Scaled font
+              Text('Requested Tumpang', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
             ],
           ),
         )
             : BaseButton(
           text: 'Request tumpang',
           onPressed: onRequestTumpang,
-          height: 40, // Scaled button height
+          height: 40,
           textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
         ),
       ],
@@ -124,7 +124,7 @@ class MixedRouteOptionCard extends StatelessWidget {
   Widget _buildTrainInfo() {
     if (isInterchange) {
       return Container(
-        padding: const EdgeInsets.all(10), // Scaled padding
+        padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
           color: Colors.grey.shade50,
           borderRadius: BorderRadius.circular(8),
@@ -135,12 +135,12 @@ class MixedRouteOptionCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(Icons.train, color: boardLineColor, size: 16), // Scaled icon
+                Icon(Icons.train, color: boardLineColor, size: 16),
                 const SizedBox(width: 4),
                 Flexible(
                   child: Text(
                     boardLineShortName,
-                    style: TextStyle(color: boardLineColor, fontWeight: FontWeight.w600, fontSize: 12), // Scaled font
+                    style: TextStyle(color: boardLineColor, fontWeight: FontWeight.w600, fontSize: 12),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
@@ -160,7 +160,7 @@ class MixedRouteOptionCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 4),
-            Text('~ $trainDuration mins (Line Transfer)', style: const TextStyle(fontSize: 11, color: AppColors.greyText)), // Scaled font
+            Text('~ $trainDuration mins (Line Transfer)', style: const TextStyle(fontSize: 11, color: AppColors.greyText)),
           ],
         ),
       );
@@ -181,7 +181,7 @@ class MixedRouteOptionCard extends StatelessWidget {
           Column(
             children: [
               Container(
-                width: 12, // Scaled down timeline node
+                width: 12,
                 height: 12,
                 margin: const EdgeInsets.only(top: 2),
                 decoration: const BoxDecoration(color: AppColors.primaryYellow, shape: BoxShape.circle),
@@ -202,20 +202,20 @@ class MixedRouteOptionCard extends StatelessWidget {
                 ),
             ],
           ),
-          const SizedBox(width: 12), // Tighter node spacing
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   location,
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13), // Scaled font
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(height: 8), // Scaled spacing
+                const SizedBox(height: 8),
                 child,
-                if (!isLast) const SizedBox(height: 16), // Scaled spacing
+                if (!isLast) const SizedBox(height: 16),
               ],
             ),
           ),
@@ -228,10 +228,10 @@ class MixedRouteOptionCard extends StatelessWidget {
     return Row(
       children: [
         Container(
-          width: 32, // Scaled down avatar
+          width: 32,
           height: 32,
           decoration: BoxDecoration(color: AppColors.driverBlueBg, borderRadius: BorderRadius.circular(6)),
-          child: Icon(icon, color: AppColors.greyText, size: 16), // Scaled icon
+          child: Icon(icon, color: AppColors.greyText, size: 16),
         ),
         const SizedBox(width: 8),
         Expanded(

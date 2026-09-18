@@ -27,7 +27,6 @@ import 'package:nak_tumpang/features/home/data/services/home_local_service.dart'
 class HomePanel extends StatelessWidget {
   const HomePanel({super.key});
 
-  /// Maps short codes to human-readable transit types
   String _getStationDisplay(dynamic station) {
     String type = 'Train';
     String shortName = (station.lineShortName ?? '').toUpperCase();
@@ -45,12 +44,10 @@ class HomePanel extends StatelessWidget {
     return '$type ${station.name}'.toUpperCase();
   }
 
-  /// Checks if coordinates are near a station and intercepts the UI text
   String _getStationNameIfNear(double lat, double lng, String defaultName) {
     if (lat == 0.0 || lng == 0.0) return defaultName;
     final station = TransitUtils.findNearestStation(LatLng(lat, lng));
 
-    // 250m tolerance for manual map pins
     if (station != null && MatchingUtils.calculateDistance(lat, lng, station.location.latitude, station.location.longitude) <= 250) {
       return _getStationDisplay(station);
     }
@@ -182,11 +179,6 @@ class HomePanel extends StatelessWidget {
   }
 
   List<Widget> _buildPassengerSubscriptionView(BuildContext context, HomeViewModel viewModel) {
-    // Reached here either with genuinely active subscriptions, or with none
-    // active today because they're all excepted (paused) — same heading
-    // either way, just swap the body between the card list and the paused
-    // message. The divider only makes sense when there's a card list above
-    // it to separate from.
     final isPaused = viewModel.activeSubscriptions.isEmpty;
 
     return [
@@ -511,7 +503,6 @@ class HomePanel extends StatelessWidget {
           const SizedBox(height: 4),
           GestureDetector(
             onTap: () {
-              // Same guard as the other two "add trip" entry points.
               if (NetworkService.isOfflineNotifier.value) {
                 showOfflineDialog(
                   context,
@@ -720,7 +711,7 @@ class HomePanel extends StatelessWidget {
             : null,
         onDetailsPressed: () => _openSubscriptionDetails(context, viewModel, leg),
         onExceptionPressed: () => viewModel.openNoNeedFetchPanel(leg),
-        isCompletedToday: false, // Passengers don't complete trips, drivers do
+        isCompletedToday: false,
         onCompleteTripPressed: null,
       ));
     }
@@ -774,7 +765,6 @@ class HomePanel extends StatelessWidget {
     Map<String, dynamic>? fullSubscription;
 
     if (NetworkService.isOfflineNotifier.value) {
-      // Offline: read from the local cache instead of hitting the network.
       final isForPassenger = viewModel.currentUserRole != 'driver';
       final cachedRawSubs = await HomeLocalService().getCachedSubscriptions(
         viewModel.currentUserId ?? '',
@@ -816,7 +806,6 @@ class HomePanel extends StatelessWidget {
       return;
     }
 
-    // Online: fetch fresh from Supabase, as before.
     showDialog(
       context: context,
       barrierDismissible: false,

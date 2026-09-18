@@ -33,13 +33,13 @@ class DirectRouteOptionCard extends StatelessWidget {
       profileImageUrl: profileImageUrl,
       title: Text(
         driverName,
-        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.black), // Scaled font
+        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.black),
       ),
       description: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _buildInfoRow(Icons.directions_car, '${distanceKm.toStringAsFixed(1)} km from your pickup'),
-          const SizedBox(height: 2), // Tighter spacing
+          const SizedBox(height: 2),
           _buildInfoRow(Icons.access_time_filled, departTime),
           if (isConfirmed && phoneNumber != null) ...[
             const SizedBox(height: 2),
@@ -53,7 +53,7 @@ class DirectRouteOptionCard extends StatelessWidget {
           BaseButton(
             text: 'Call',
             onPressed: () => print('Calling $driverName...'),
-            height: 36, // Scaled down height
+            height: 36,
             textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
           ),
           const SizedBox(height: 6),
@@ -63,12 +63,12 @@ class DirectRouteOptionCard extends StatelessWidget {
                 child: OutlinedButton(
                   onPressed: () {},
                   style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 8), // Tighter vertical padding
+                    padding: const EdgeInsets.symmetric(vertical: 8),
                     side: const BorderSide(color: AppColors.greyBorder),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     foregroundColor: AppColors.black,
                   ),
-                  child: const Text('Details', style: TextStyle(fontSize: 12)), // Scaled font
+                  child: const Text('Details', style: TextStyle(fontSize: 12)),
                 ),
               ),
               const SizedBox(width: 6),
@@ -81,7 +81,7 @@ class DirectRouteOptionCard extends StatelessWidget {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     foregroundColor: AppColors.black,
                   ),
-                  child: const Text('No need fetch', style: TextStyle(fontSize: 12)), // Scaled font
+                  child: const Text('No need fetch', style: TextStyle(fontSize: 12)),
                 ),
               ),
             ],
@@ -90,18 +90,18 @@ class DirectRouteOptionCard extends StatelessWidget {
       )
           : isRequested
           ? ElevatedButton(
-        onPressed: () {}, // Disabled state
+        onPressed: () {},
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.grey.shade200,
           foregroundColor: Colors.grey.shade500,
           elevation: 0,
-          padding: const EdgeInsets.symmetric(vertical: 10), // Scaled vertical padding
+          padding: const EdgeInsets.symmetric(vertical: 10),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
         child: const Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.check_circle, size: 16), // Scaled icon
+            Icon(Icons.check_circle, size: 16),
             SizedBox(width: 6),
             Text('Requested Tumpang', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
           ],
@@ -110,7 +110,7 @@ class DirectRouteOptionCard extends StatelessWidget {
           : BaseButton(
         text: 'Request tumpang',
         onPressed: onRequestTumpang,
-        height: 40, // Scaled button height
+        height: 40,
         textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
       ),
     );
@@ -119,11 +119,11 @@ class DirectRouteOptionCard extends StatelessWidget {
   Widget _buildInfoRow(IconData icon, String text) {
     return Row(
       children: [
-        Icon(icon, size: 12, color: AppColors.primaryYellow), // Scaled icon
+        Icon(icon, size: 12, color: AppColors.primaryYellow),
         const SizedBox(width: 4),
         Text(
           text,
-          style: const TextStyle(fontSize: 11, color: AppColors.black), // Scaled font
+          style: const TextStyle(fontSize: 11, color: AppColors.black),
         ),
       ],
     );

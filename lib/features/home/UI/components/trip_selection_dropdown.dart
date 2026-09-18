@@ -12,7 +12,7 @@ class TripSelectionDropdown extends StatelessWidget {
     final viewModel = context.watch<HomeViewModel>();
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), // Scaled padding
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       decoration: BoxDecoration(
         border: Border.all(color: AppColors.greyBorder),
         borderRadius: BorderRadius.circular(8),
@@ -20,9 +20,9 @@ class TripSelectionDropdown extends StatelessWidget {
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
           isExpanded: true,
-          isDense: true, // Makes the dropdown more compact
+          isDense: true,
           value: viewModel.currentSelectedTrip?['id'],
-          hint: const Text('No trip selected', style: TextStyle(color: AppColors.greyText, fontSize: 13)), // Scaled font
+          hint: const Text('No trip selected', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
           items: [
             const DropdownMenuItem(
               value: 'ADD_NEW',
@@ -31,7 +31,7 @@ class TripSelectionDropdown extends StatelessWidget {
             ...viewModel.availableTrips.map((trip) {
               return DropdownMenuItem(
                 value: trip['id'],
-                child: Text(trip['trip_name'] ?? 'Unnamed Trip', style: const TextStyle(fontSize: 13)), // Scaled font
+                child: Text(trip['trip_name'] ?? 'Unnamed Trip', style: const TextStyle(fontSize: 13)),
               );
             }),
           ],

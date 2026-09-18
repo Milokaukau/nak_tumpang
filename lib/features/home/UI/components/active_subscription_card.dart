@@ -228,7 +228,6 @@ class ActiveSubscriptionCard extends StatelessWidget {
       ),
       actionButtons: Column(
         children: [
-          // FIX: The SizedBox is now correctly scoped inside the condition
           if (leg.onCallPressed != null) ...[
             BaseButton(
               text: 'Call',
