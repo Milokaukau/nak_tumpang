@@ -69,7 +69,7 @@ class MyTripsViewModel extends ChangeNotifier {
         final localSubs = await HomeLocalService().getCachedSubscriptions(user.id, isForPassenger: isPassenger);
 
         activeSubbedTripIds = localSubs.map((s) => (isPassenger ? s['passenger_trip_id'] : s['driver_trip_id']).toString()).toSet();
-        negotiatingTripIds = {}; // Cannot fetch negotiations offline
+        negotiatingTripIds = {};
       } catch (e) {
         debugPrint('⚠️ SQLite MyTrips fetch error: $e');
       }
@@ -115,10 +115,6 @@ class MyTripsViewModel extends ChangeNotifier {
     }
   }
 
-  // Database access lives in TripSupabaseService; the view model only
-  // decides whether to call it (offline check) and passes data through.
-  // Errors from the service propagate to the caller instead of being
-  // swallowed into null, so "no match" and "query failed" stay distinguishable.
   Future<String?> getNegotiatingRequestId(String tripId) async {
     if (NetworkService.isOfflineNotifier.value) return null;
     return _tripService.findNegotiatingRequestId(tripId);

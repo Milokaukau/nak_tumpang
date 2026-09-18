@@ -34,9 +34,6 @@ class _LoginViewState extends State<_LoginView> {
     final result = await vm.submit();
     if (!mounted || result == null) return;
 
-    // A driver's account (and driver_profiles) always exists by login
-    // time now — nudge for a license re-upload if that was the one
-    // thing that had to be backfilled (see LoginViewModel.submit()).
     if (vm.driverLicenseNeedsReupload) {
       await showDialog<void>(
         context: context,
@@ -64,10 +61,6 @@ class _LoginViewState extends State<_LoginView> {
   }
 
   void _startRegister() async {
-    // Stop at the entry point rather than letting someone pick a role,
-    // fill in the whole form and upload a license only to be told at
-    // submit that registration needs a connection (RegisterViewModel
-    // refuses there too, as the last line of defence).
     if (NetworkService.isOfflineNotifier.value) {
       await showOfflineDialog(
         context,
@@ -78,7 +71,7 @@ class _LoginViewState extends State<_LoginView> {
     }
 
     final role = await RoleSelectionDialog.show(context, dismissible: true);
-    if (!mounted || role == null) return; // canceled — stay on login
+    if (!mounted || role == null) return;
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => RegisterScreen(initialRole: role)),
     );
@@ -98,7 +91,6 @@ class _LoginViewState extends State<_LoginView> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Logo
                 Center(
                   child: Image.asset(
                     'assets/launch_app_logo.png',
@@ -109,7 +101,6 @@ class _LoginViewState extends State<_LoginView> {
                 ),
                 const SizedBox(height: 20),
 
-                // Title
                 Text(
                   'Nak',
                   textAlign: TextAlign.center,
@@ -136,7 +127,6 @@ class _LoginViewState extends State<_LoginView> {
                 ),
                 const SizedBox(height: 36),
 
-                // Email
                 Text('Email', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
                 const SizedBox(height: 6),
                 TextField(
@@ -148,7 +138,6 @@ class _LoginViewState extends State<_LoginView> {
                 _errorText(vm.emailError),
                 const SizedBox(height: 18),
 
-                // Password
                 Text('Password', style: TextStyle(color: AppColors.greyText, fontSize: 13)),
                 const SizedBox(height: 6),
                 TextField(
@@ -237,9 +226,6 @@ class _LoginViewState extends State<_LoginView> {
     );
   }
 
-  // Renders a validation error flush-left, aligned with the field's
-  // label and box edge above it. Returns an empty (zero-height) widget
-  // when there's no error, so nothing shifts when errors appear/disappear.
   Widget _errorText(String? error) {
     if (error == null) return const SizedBox.shrink();
     return Padding(

@@ -1,16 +1,6 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:nak_tumpang/core/services/local_db_service.dart';
 
-/// Local SQLite cache for the profile module — mirrors the profile-facing
-/// columns on `users` (name, email, phone, role, avatar_url) and the
-/// license columns on `driver_profiles`. Supabase is always the source of
-/// truth; everything here is only ever written *after* the matching
-/// Supabase call already succeeded (see ProfileViewModel.loadProfile/save).
-///
-/// Note: `driver_profiles` also holds the wallet balance columns that
-/// PayoutLocalService writes to on the same row. Both services use a
-/// column-scoped upsert (see [_upsert]) rather than a blind
-/// INSERT OR REPLACE, so neither one wipes out columns the other owns.
 class ProfileLocalService {
   final _dbService = LocalDbService.instance;
 
@@ -28,8 +18,6 @@ class ProfileLocalService {
       await db.update(table, data, where: '$pkColumn = ?', whereArgs: [pkValue]);
     }
   }
-
-  // ---------------- users (profile-facing columns only) ----------------
 
   Future<void> cacheUserProfile({
     required String userId,
@@ -55,8 +43,6 @@ class ProfileLocalService {
     final rows = await db.query('users', where: 'id = ?', whereArgs: [userId], limit: 1);
     return rows.isEmpty ? null : rows.first;
   }
-
-  // ---------------- driver_profiles (license columns only) ----------------
 
   Future<void> cacheDriverLicense({
     required String userId,

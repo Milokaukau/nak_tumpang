@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 import 'package:nak_tumpang/core/theme/app_colors.dart';
 import 'package:nak_tumpang/features/payout/view_models/payout_view_model.dart';
 
-// success dialog simulating a successful transaction
 class PayoutSuccessDialog extends StatefulWidget {
   final double amount;
 
@@ -17,8 +16,6 @@ class _PayoutSuccessDialogState extends State<PayoutSuccessDialog> {
   @override
   void initState() {
     super.initState();
-    // Kick off the fake pending -> processing -> paid transition once
-    // the dialog is actually on screen.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       context.read<PayoutViewModel>().runPayoutStatusAnimation();
@@ -95,7 +92,6 @@ class _PayoutStatusIndicatorState extends State<_PayoutStatusIndicator>
   @override
   void initState() {
     super.initState();
-    // mocked gateway resolves pending to completed in a brief moment only
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 900),

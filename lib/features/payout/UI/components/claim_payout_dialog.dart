@@ -18,7 +18,6 @@ class ClaimPayoutDialog extends StatelessWidget {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(20),
-        // layout suitable for android phone
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -99,7 +98,7 @@ class ClaimPayoutDialog extends StatelessWidget {
   void _confirm(BuildContext context, PayoutViewModel vm) {
     if (!vm.validateAmount()) return;
 
-    Navigator.pop(context); // close this dialog
+    Navigator.pop(context);
     showDialog(
       context: context,
       builder: (_) => ChangeNotifierProvider.value(
@@ -109,10 +108,6 @@ class ClaimPayoutDialog extends StatelessWidget {
     );
   }
 }
-
-// fixed RM prefix
-// border turns yellow on focus
-// border turn red on error
 
 class _AmountField extends StatefulWidget {
   final PayoutViewModel vm;
@@ -141,7 +136,6 @@ class _AmountFieldState extends State<_AmountField> {
   }
 
   void _onFocusChange() {
-    // replaces default 0 with the first digit typed
     if (_focusNode.hasFocus && widget.vm.amountController.text == '0') {
       widget.vm.amountController.selection = TextSelection(
         baseOffset: 0,
@@ -191,7 +185,6 @@ class _AmountFieldState extends State<_AmountField> {
                   controller: vm.amountController,
                   focusNode: _focusNode,
                   keyboardType: TextInputType.number,
-                  // blocks any other input that are not whole number
                   inputFormatters: [
                     FilteringTextInputFormatter.digitsOnly,
                     _leadingZeroFormatter,

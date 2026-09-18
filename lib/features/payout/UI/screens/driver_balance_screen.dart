@@ -50,9 +50,6 @@ class _DriverBalanceView extends StatelessWidget {
                   ? _WalletTab(vm: vm)
                   : _HistoryTab(vm: vm),
             ),
-            // Pinned outside the scroll view so it's always reachable
-            // without scrolling past the transaction list, instead of
-            // living at the end of the SingleChildScrollView.
             if (vm.currentView == PayoutView.wallet)
               SafeArea(
                 top: false,
@@ -71,7 +68,6 @@ class _DriverBalanceView extends StatelessWidget {
   }
 }
 
-// informational banner for wallet notice (e.g. offline cache or failed refresh)
 class _InlineNoticeBanner extends StatelessWidget {
   final String text;
   const _InlineNoticeBanner({required this.text});
@@ -99,7 +95,6 @@ class _InlineNoticeBanner extends StatelessWidget {
   }
 }
 
-// toggle to wallet and history
 class _WalletHistoryToggle extends StatelessWidget {
   final PayoutViewModel vm;
   const _WalletHistoryToggle({required this.vm});
@@ -221,8 +216,6 @@ class _WalletTab extends StatelessWidget {
                   builder: (_) => TripDetailDialog(trip: trip),
                 ),
               )),
-            // Claim payout now lives pinned below this scroll view (see
-            // _DriverBalanceView) instead of at the end of this list.
           ],
         ),
       ),
@@ -244,7 +237,6 @@ void _onClaimPayout(BuildContext context, PayoutViewModel vm) {
     return;
   }
 
-  // reset all data so dialog appear clean each time
   vm.resetDetailsFields();
   showDialog(
     context: context,
@@ -255,7 +247,6 @@ void _onClaimPayout(BuildContext context, PayoutViewModel vm) {
   );
 }
 
-// all payout history for the specific driver, most recent first
 class _HistoryTab extends StatelessWidget {
   final PayoutViewModel vm;
   const _HistoryTab({required this.vm});
@@ -311,7 +302,6 @@ class _HistoryTab extends StatelessWidget {
       children: [
         if (vm.historyNotice != null) _InlineNoticeBanner(text: vm.historyNotice!),
         _YearFilterChips(vm: vm),
-        // month filter only appears after a year filter is applied
         AnimatedSize(
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOut,
@@ -339,7 +329,6 @@ class _HistoryTab extends StatelessWidget {
               : RefreshIndicator(
             onRefresh: vm.refreshHistory,
             child: NotificationListener<ScrollNotification>(
-              // loads next page before driver reaches the bottom so list feels continuous, instead of pausing
               onNotification: (notification) {
                 if (notification.metrics.pixels >= notification.metrics.maxScrollExtent - 200) {
                   vm.loadMoreHistory();
@@ -386,7 +375,6 @@ class _HistoryTab extends StatelessWidget {
   }
 }
 
-// row of all + one chip per year that appears in payout history
 class _YearFilterChips extends StatelessWidget {
   final PayoutViewModel vm;
   const _YearFilterChips({required this.vm});
@@ -434,8 +422,6 @@ class _YearFilterChips extends StatelessWidget {
 }
 
 
-// row of all and one chip per month within the currently selected year
-// only appears if a year is picked and there is more than one month in that year
 class _MonthFilterChips extends StatelessWidget {
   final PayoutViewModel vm;
   const _MonthFilterChips({required this.vm});
